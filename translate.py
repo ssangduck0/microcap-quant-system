@@ -67,7 +67,7 @@ def run(post=None, out=print, limit: int = BATCH) -> int:
         out("뉴스 번역: 이번 달 AI 예산이 부족해 건너뜀")
         return 0
     text, tin, tout = _call(prompt, post)
-    aipick._add_spend(aipick.cost_usd(MODEL, tin, tout))
+    aipick._add_spend(aipick.cost_usd(MODEL, tin, tout), "translate", tin, tout)
     s = text[text.find("{"):text.rfind("}") + 1] if "{" in text else "{}"
     try:
         got = json.loads(s).get("items") or []
@@ -93,4 +93,4 @@ def run(post=None, out=print, limit: int = BATCH) -> int:
 
 def _call(prompt: str, post=None) -> tuple[str, int, int]:
     import aipick
-    return aipick.call_claude(prompt, MODEL, 6000, post, system=SYSTEM, thinking={"type": "disabled"})  # 번역엔 생각이 필요 없음(비용만 늘어남)
+    return aipick.call_claude(prompt, MODEL, 6000, post, system=SYSTEM, thinking={"type": "disabled"}, kind="translate")  # 번역엔 생각이 필요 없음(비용만 늘어남)

@@ -244,9 +244,9 @@ def analyze(ticker: str, client=None, post=None, today: date | None = None, out=
     if est * aipick.FX > aipick.budget_left_krw():
         return {"ok": False, "msg": f"{t}: 이번 달 AI 예산이 부족해 건너뜀", "cost_usd": 0.0, "budget": True}
     # Sonnet 5.5 는 생각이 기본 — 희석 계산(완전희석·베이비 쉐프)엔 생각이 필요하니 끄지 않고 깊이(medium)만 낮추고, 보고서를 쓸 자리를 넉넉히
-    text, tin, tout = aipick.call_claude(prompt, MODEL, 32000, post, system=system_prompt(), effort="medium", timeout=900)
+    text, tin, tout = aipick.call_claude(prompt, MODEL, 32000, post, system=system_prompt(), effort="medium", timeout=900, kind="forensic")
     usd = aipick.cost_usd(MODEL, tin, tout)
-    aipick._add_spend(usd)
+    aipick._add_spend(usd, "forensic", tin, tout)
     md = text.strip()
     try:  # Claude 의 답은 항상 남겨 둠(문제가 생기면 원인 확인용)
         raw_dir = forensic.root_dir() / "ai_raw"

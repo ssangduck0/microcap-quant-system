@@ -243,8 +243,93 @@ def spent_usd(month: str | None = None) -> float:
         return 0.0
 
 
-def _add_spend(usd: float) -> None:
+KINDS = {"pick": "🤖 AI PICK(아침 판단)", "forensic": "🧾 공시분석(11섹션 + 📰 요약)", "review": "🔍 Claude 복기(주 1회)", "card": "📇 스크리너 카드",
+         "digest": "📨 공시 요약(Haiku)", "translate": "🌐 뉴스 번역(Haiku)", "summary": "🏢 종목 AI 요약", "other": "기타(빈 답 등)"}
+SAVE_HINT = {"forensic": "관리 모드 '서버 공시분석 하루 종목 수'(FORENSIC_PER_RUN)를 줄이거나 자동 대기열을 끄면 가장 크게 줄어요",
+             "card": "스크리너 카드는 버튼을 누를 때만 만들어지니 필요한 종목만", "pick": "AI PICK 모델을 Haiku 로 바꾸면 1/20 비용",
+             "review": "주 1회라 거의 안 듦", "digest": "공시 요약 대상 폼을 줄이기", "translate": "뉴스 번역 건수 제한", "summary": "종목 AI 요약은 손으로 누를 때만"}
+SPEND_DDL = ("CREATE TABLE IF NOT EXISTS ai_spend (date TEXT NOT NULL, kind TEXT NOT NULL, usd REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, "
+             "in_tok INTEGER NOT NULL DEFAULT 0, out_tok INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (date, kind))")
+
+
+def _add_spend(usd: float, kind: str = "other", tin: int = 0, tout: int = 0) -> None:
+    """월 지갑 합계(meta, 예산 판정용) + 기능별 하루 기록(ai_spend, 2026-10-28 부터 — 관리 모드 '🤖 AI 비용' 표)."""
     db.set_meta(f"ai_spend:{_month()}", f"{spent_usd() + usd:.6f}")
+    try:
+        with closing(db.connect()) as conn:
+            conn.execute(SPEND_DDL)
+            conn.execute("INSERT INTO ai_spend (date, kind, usd, n, in_tok, out_tok) VALUES (?,?,?,1,?,?) "
+                         "ON CONFLICT(date, kind) DO UPDATE SET usd=usd+excluded.usd, n=n+1, in_tok=in_tok+excluded.in_tok, out_tok=out_tok+excluded.out_tok",
+                         (date.today().isoformat(), kind if kind in KINDS else "other", float(usd), int(tin or 0), int(tout or 0)))
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _blank(kind: str) -> dict:
+    return {"kind": kind, "label": KINDS.get(kind, kind), "month_usd": 0.0, "month_n": 0, "today_usd": 0.0, "today_n": 0, "in_tok": 0, "out_tok": 0}
+
+
+def spend_rows(month: str | None = None) -> list[dict]:
+    """기능별 이번 달·오늘 지출(달러·건수), 많이 쓴 순. 🏢 종목 AI 요약은 ai_reports 표에서 더한다."""
+    m = month or _month()
+    today = date.today().isoformat()
+    rows = {k: _blank(k) for k in KINDS}
+    with closing(db.connect()) as conn:
+        conn.execute(SPEND_DDL)
+        for k, d0, usd, n, ti, to in conn.execute("SELECT kind, date, usd, n, in_tok, out_tok FROM ai_spend WHERE substr(date,1,7)=?", (m,)):
+            r = rows.get(k) or rows["other"]
+            r["month_usd"] += usd or 0
+            r["month_n"] += n or 0
+            r["in_tok"] += ti or 0
+            r["out_tok"] += to or 0
+            if d0 == today:
+                r["today_usd"] += usd or 0
+                r["today_n"] += n or 0
+        try:
+            for d0, usd in conn.execute("SELECT day, COALESCE(cost_usd,0) FROM ai_reports WHERE substr(day,1,7)=?", (m,)):   # day = 현지 날짜(created_at 은 UTC)
+                r = rows["summary"]
+                r["month_usd"] += usd
+                r["month_n"] += 1
+                if d0 == today:
+                    r["today_usd"] += usd
+                    r["today_n"] += 1
+        except Exception:  # noqa: BLE001
+            pass
+    return sorted([r for r in rows.values() if r["month_n"]], key=lambda r: -r["month_usd"])
+
+
+def spend_days(month: str | None = None) -> dict[str, float]:
+    """날짜별 지출(달러) — ai_spend + ai_reports."""
+    m = month or _month()
+    out: dict[str, float] = {}
+    with closing(db.connect()) as conn:
+        conn.execute(SPEND_DDL)
+        for d0, usd in conn.execute("SELECT date, SUM(usd) FROM ai_spend WHERE substr(date,1,7)=? GROUP BY date", (m,)):
+            out[d0] = out.get(d0, 0.0) + (usd or 0)
+        try:
+            for d0, usd in conn.execute("SELECT day, SUM(COALESCE(cost_usd,0)) FROM ai_reports WHERE substr(day,1,7)=? GROUP BY day", (m,)):
+                out[d0] = out.get(d0, 0.0) + (usd or 0)
+        except Exception:  # noqa: BLE001
+            pass
+    return dict(sorted(out.items()))
+
+
+def spend_summary(month: str | None = None) -> dict:
+    """관리 모드 카드용: 이번 달 지출·남은 예산·월말 예상(지금까지 하루 평균 × 그달 일수)·오늘·기능별 표. 금액은 원(FX)."""
+    import calendar
+    m = month or _month()
+    today = date.today()
+    y, mo = int(m[:4]), int(m[5:7])
+    days_in = calendar.monthrange(y, mo)[1]
+    elapsed = today.day if m == _month() else days_in
+    total_usd = spent_usd(m)
+    rows = spend_rows(m)
+    tracked = sum(r["month_usd"] for r in rows if r["kind"] != "summary")   # 종목 AI 요약은 지갑(meta)에 안 더해지는 별도 표라 '기록 전' 계산에서 제외
+    budget = float(getattr(config, "AI_MONTHLY_BUDGET_KRW", 50000))
+    return {"month": m, "budget_krw": budget, "spent_krw": total_usd * FX, "left_krw": budget - total_usd * FX, "today_krw": sum(r["today_usd"] for r in rows) * FX,
+            "forecast_krw": total_usd / max(elapsed, 1) * days_in * FX, "days_in": days_in, "elapsed": elapsed, "tracked_krw": tracked * FX,
+            "untracked_krw": max(total_usd - tracked, 0.0) * FX, "top": rows[0] if rows else None, "rows": rows}
 
 
 def cost_usd(model: str, in_tok: int, out_tok: int) -> float:
@@ -282,7 +367,7 @@ def parse(text: str) -> list[dict]:
 
 
 def call_claude(prompt: str, model: str, max_out: int = 4000, post=None, system: str | None = None, effort: str | None = None,
-                thinking: dict | None = None, timeout: int = 300) -> tuple[str, int, int]:
+                thinking: dict | None = None, timeout: int = 300, kind: str = "other") -> tuple[str, int, int]:
     """Claude API 호출 → (글, 입력 토큰, 출력 토큰). 출력 토큰엔 '생각(thinking)' 토큰도 들어가 요금이 붙음.
     Sonnet 5.5 는 생각이 기본으로 켜져 있어(effort 기본 high) 한도를 생각에 다 쓰면 글이 비어 옴 → effort 로 깊이를 줄이고 한도를 넉넉히.
     Haiku 5.5 는 thinking={"type": "disabled"} 가능(effort high 이하)."""
@@ -302,7 +387,7 @@ def call_claude(prompt: str, model: str, max_out: int = 4000, post=None, system:
     u = j.get("usage") or {}
     tin, tout = int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0))
     if not text.strip():  # 빈 답: 이유를 알려 줌(생각에 한도를 다 씀 · 거절 등) — 요금은 이미 나갔으니 기록
-        _add_spend(cost_usd(model, tin, tout))
+        _add_spend(cost_usd(model, tin, tout), kind, tin, tout)
         why = j.get("stop_reason")
         think = (u.get("output_tokens_details") or {}).get("thinking_tokens")
         raise RuntimeError(f"빈 답(멈춘 이유 {why}, 출력 {tout}토큰 중 생각 {think}) — " +
@@ -355,9 +440,9 @@ def run(today: date | None = None, scan: dict | None = None, out=print, post=Non
         msg = f"이번 달 AI 예산이 부족해 건너뜀(남은 {left:,.0f}원 · 예상 {est * FX:,.0f}원) — 관리 모드에서 예산을 올릴 수 있어요"
         out(msg)
         return {"ok": False, "msg": msg}
-    text, tin, tout = call_claude(prompt, model, 16000, post, effort="medium")
+    text, tin, tout = call_claude(prompt, model, 16000, post, effort="medium", kind="pick")
     usd = cost_usd(model, tin, tout)
-    _add_spend(usd)
+    _add_spend(usd, "pick", tin, tout)
     picks = parse(text)
     pmap = {b["t"]: (b.get("px") or {}).get("last") for b in briefs}
     known = set(pmap)

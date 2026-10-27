@@ -2,11 +2,38 @@
 from contextlib import closing
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
+import chartpop
 import config
 import db
 import ui_kit as ui
+
+
+def render_ai_cost() -> None:
+    """🤖 AI 비용(2026-10-28): 월 예산 지갑을 어느 기능이 얼마나 쓰는지 — 이번 달·오늘·건당, 남은 예산, 월말 예상, 날짜별 막대. 기능별 기록은 10/28 부터(그 전은 합계만)."""
+    import aipick
+    s = aipick.spend_summary()
+    st.markdown("**🤖 AI 비용** — 월 예산 지갑을 어느 기능이 쓰는지 (기능별 기록은 2026-10-28 부터)")
+    ui.cards([{"t": "이번 달 지출", "v": f"{s['spent_krw']:,.0f}원", "s": f"예산 {s['budget_krw']:,.0f}원"},
+              {"t": "남은 예산", "v": f"{s['left_krw']:,.0f}원", "s": "20% 아래면 강조", "accent": s["left_krw"] < s["budget_krw"] * 0.2},
+              {"t": "월말 예상", "v": f"{s['forecast_krw']:,.0f}원", "s": f"{s['elapsed']}일 평균 × {s['days_in']}일"},
+              {"t": "오늘 지출", "v": f"{s['today_krw']:,.0f}원"}])
+    rows = s["rows"]
+    if rows:
+        df = pd.DataFrame([{"기능": r["label"], "이번 달(원)": r["month_usd"] * aipick.FX, "건수": r["month_n"], "건당(원)": r["month_usd"] * aipick.FX / max(r["month_n"], 1),
+                            "오늘(원)": r["today_usd"] * aipick.FX, "오늘 건수": r["today_n"], "입력 토큰": r["in_tok"], "출력 토큰": r["out_tok"]} for r in rows])
+        st.dataframe(ui.tidy(df), hide_index=True, width="stretch")
+        top = rows[0]
+        st.caption(f"가장 많이 쓰는 기능: {top['label']} — 건당 약 {top['month_usd'] * aipick.FX / max(top['month_n'], 1):,.0f}원. 줄이려면: {aipick.SAVE_HINT.get(top['kind'], '-')}")
+        if s["untracked_krw"] > 1:
+            st.caption(f"기능별 기록 전(10/28 이전) 지출 {s['untracked_krw']:,.0f}원은 합계에만 들어 있어요")
+    else:
+        st.caption("아직 기능별 기록이 없어요 — 10/28 배포 뒤 첫 AI 호출부터 쌓입니다(그 전 지출은 위 '이번 달 지출' 합계에만)")
+    days = aipick.spend_days()
+    if days:
+        chartpop.bar(pd.Series({k[5:]: v * aipick.FX for k, v in days.items()}, name="원"), key="adm_ai_days", title="날짜별 AI 지출(원)", height=160, fmt=",.0f")
 
 
 def _count(conn, table: str, where: str = "") -> str:
@@ -50,6 +77,8 @@ def render() -> None:
             st.session_state.pop(f"adm_{k}", None)
         st.rerun()
     st.divider()
+    render_ai_cost()
+    st.divider()
     render_papertrade()
     st.divider()
     l, r = st.columns(2)
@@ -82,11 +111,6 @@ def render() -> None:
                   {"t": "SEC 공시 기록", "v": _count(conn, "sec_hist")}, {"t": "공시 알림", "v": _count(conn, "sec_feed")},
                   {"t": "내부자 매수", "v": _count(conn, "insider_tx", "WHERE code='P'")}, {"t": "Reg SHO 받은 날", "v": _count(conn, "regsho_files", "WHERE status='ok'")},
                   {"t": "종목 리포트", "v": _count(conn, "reports")}, {"t": "예측(성과 공표)", "v": _count(conn, "pred_outcomes")}])
-    try:
-        import aisummary as _ai
-        st.caption(f"🤖 이번 달 AI 사용 {_ai.month_spend_usd() * _ai.fx():,.0f}원 / 예산 {config.AI_MONTHLY_BUDGET_KRW:,}원 · 모델 {_ai.model()}")
-    except Exception:  # noqa: BLE001
-        pass
     st.caption(f"DB 파일: {config.DB_PATH}")
     logs = {"스캐너": "scanner.log", "대시보드": "dashboard.log", "휴대폰 터널": "tunnel.log", "수집기": "collector.log"}
     which = st.radio("로그 보기", list(logs), horizontal=True, key="adm_log")

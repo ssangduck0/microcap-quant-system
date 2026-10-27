@@ -194,13 +194,13 @@ def run(conn=None, days: int = 7, out=print, call=None, force: bool = False) -> 
         if call:
             text, tin, tout = call(prompt, SYSTEM)
         else:
-            text, tin, tout = aipick.call_claude(prompt, MODEL, MAX_OUT, system=SYSTEM, thinking={"type": "disabled"})
+            text, tin, tout = aipick.call_claude(prompt, MODEL, MAX_OUT, system=SYSTEM, thinking={"type": "disabled"}, kind="review")
         parsed = parse(text)
     except Exception as e:  # noqa: BLE001
         out(f"🤖 복기 실패: {e}")
         return {"status": "error", "error": str(e)}
     cost = aipick.cost_usd(MODEL, tin, tout)
-    aipick._add_spend(cost)
+    aipick._add_spend(cost, "review", tin, tout)
     run_id = save(conn, g, parsed, cost * aipick.FX, text)
     out(f"🤖 복기 #{run_id}: 놓친 펌핑 {len(g['miss'])}건 · 실패 신호 {len(g['fail'])}건 · 규칙 후보 {len(parsed['rules'])}개 · 약 {cost * aipick.FX:.0f}원 · {parsed['summary']}")
     for r in parsed["rules"]:

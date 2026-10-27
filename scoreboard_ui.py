@@ -42,7 +42,9 @@ def render() -> None:
         unit = c[0].radio("기간 단위", units, horizontal=True, key="sb_unit", label_visibility="collapsed")
     df["기간"] = sb.period_key(df["date"], unit)
     periods = ["전체"] + sorted(df["기간"].unique(), reverse=True)
-    per = c[1].selectbox("기간", periods, index=1 if len(periods) > 1 else 0, key="sb_per", label_visibility="collapsed")
+    judged_p = sorted(df.loc[df["status"].isin(["성공", "실패"]), "기간"].unique(), reverse=True)   # 2026-10-28: 기본 보기 = 가장 최근 '판정이 난' 기간(오늘은 대기뿐이라 성공률 '-' 만 보이던 것)
+    default_p = judged_p[0] if judged_p else (periods[1] if len(periods) > 1 else periods[0])
+    per = c[1].selectbox("기간", periods, index=periods.index(default_p), key="sb_per", label_visibility="collapsed")
     all_src = sorted(df["출처"].unique())
     with c[2].expander(f"출처 고르기 ({len(st.session_state.get('sb_src', all_src))}/{len(all_src)})"):  # 휴대폰에서 칩이 잘리지 않게 접어 둠
         srcs = st.multiselect("출처", all_src, default=all_src, key="sb_src", label_visibility="collapsed")

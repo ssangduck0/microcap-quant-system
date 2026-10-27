@@ -95,11 +95,11 @@ def run(client=None, post=None, out=print, limit: int = LIMIT) -> int:
             out("공시 요약: 이번 달 AI 예산이 부족해 건너뜀")
             break
         try:
-            text, tin, tout = aipick.call_claude(prompt, MODEL, 3000, post, system=SYSTEM, thinking={"type": "disabled"})
+            text, tin, tout = aipick.call_claude(prompt, MODEL, 3000, post, system=SYSTEM, thinking={"type": "disabled"}, kind="digest")
         except Exception as e:  # noqa: BLE001
             out(f"공시 요약 실패: {e}")
             break
-        aipick._add_spend(aipick.cost_usd(MODEL, tin, tout))
+        aipick._add_spend(aipick.cost_usd(MODEL, tin, tout), "digest", tin, tout)
         n += save(part, text)
     if n:
         out(f"공시 요약: {n}건")

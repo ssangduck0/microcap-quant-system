@@ -257,8 +257,8 @@ def judge(g: dict, post=None) -> dict:
     est = aipick.cost_usd(MODEL, len(prompt) // 2 + 500, 4000)
     if est * aipick.FX > aipick.budget_left_krw():
         return {"error": "이번 달 AI 예산이 부족해요"}
-    text, tin, tout = aipick.call_claude(prompt, MODEL, 4000, post, system=SYSTEM, effort="medium")
-    aipick._add_spend(aipick.cost_usd(MODEL, tin, tout))
+    text, tin, tout = aipick.call_claude(prompt, MODEL, 4000, post, system=SYSTEM, effort="medium", kind="card")
+    aipick._add_spend(aipick.cost_usd(MODEL, tin, tout), "card", tin, tout)
     s = re.sub(r"```(?:json)?", "", text).strip()
     try:
         j = json.loads(s[s.find("{"):s.rfind("}") + 1])

@@ -965,8 +965,9 @@ def _render_report() -> None:
                "돌파 가능성 같은 해석 항목은 챗봇의 SEC 포렌식 스캔 결과를 아래 '내 메모'에 붙여 넣어 보관하세요.")
     known = sorted(snaps["ticker"].unique())
     pc1, pc2, pc3 = st.columns([2, 2, 1])
-    pick = pc1.selectbox("종목", known, key="rep_pick")
-    extra = pc2.text_input("목록에 없는 티커 직접 입력", "", key="rep_extra").strip().upper()
+    _cur = str(st.session_state.get("lookup_ticker") or "").upper()   # 2026-10-28: 기본 종목 = 🏢 종목 화면에서 지금 보는 티커(예전엔 알파벳 첫 종목)
+    pick = pc1.selectbox("종목", known, index=known.index(_cur) if _cur in known else 0, key="rep_pick")
+    extra = pc2.text_input("목록에 없는 티커 직접 입력", "" if (_cur in known or not _cur) else _cur, key="rep_extra").strip().upper()
     ticker = extra or pick
     rep = db.get_report(ticker)
     with st.expander(f"📇 {ticker} 스크리너 카드 — 제외 사유 · 실적 일정 · 이벤트 로그 · 레벨 맵 · AI 시나리오", expanded=bool(extra)):
@@ -1185,11 +1186,16 @@ def _render_autopsy() -> None:   # 🔍 부검(1단계 2026-10-28): 놓친 펌�
     autopsy_ui.render()
 
 
+def _render_journal() -> None:   # 📒 실제 매매 일지(2026-10-28): 실전 손익 · 신호별 성적 · 가상매매 비교
+    import journal_ui
+    journal_ui.render()
+
+
 for _ in page("score"):
     import papertrade_ui
     tabs.select("score", [("score", "🏆 성과 공표", _render_scoreboard), ("scorecheck", "🧪 점수 검증", score_ui.render),
                           ("timemachine", "🕰 타임머신", _render_timemachine), ("papertrade", "🧪 가상매매", papertrade_ui.render),
-                          ("autopsy", "🔍 부검", _render_autopsy)])
+                          ("autopsy", "🔍 부검", _render_autopsy), ("journal", "📒 매매 일지", _render_journal)])
 
 for _ in page("events"):
     watch_ui.render_events()
@@ -1220,7 +1226,8 @@ for _ in page("movers"):
 
 for _ in page("alerts"):
     import alerts_ui
-    alerts_ui.render()
+    import alertlog_ui
+    tabs.select("alerts", [("alerts", "🔔 공시 알림", alerts_ui.render), ("sent", "📨 보낸 알림", alertlog_ui.render)])   # 📨 2026-10-28: 텔레그램으로 나간 알림 기록
 
 for _ in page("accum"):
     import accum_ui

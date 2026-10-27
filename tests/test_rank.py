@@ -32,6 +32,7 @@ os.environ["QUANT_TEST_PAGE"] = "rank"
 from streamlit.testing.v1 import AppTest
 at = AppTest.from_file(__import__("os").path.join(__import__("os").environ["QS_ROOT"], "dashboard.py"), default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]
 at.slider(key="rk_min").set_value(0).run()
+assert any("🧾 공시분석 있음(45일)" in m.value for m in at.markdown)   # 2026-10-28: 공시분석 범위 카드
 cards = [m.value for m in at.markdown if 'class="qk-rank"' in m.value]; assert "BNAI" in cards[0] and "⏱ 3일 이내" in cards[0] and "BRNX" in cards[1]
 at.radio(key="rk_when").set_value("⏱ 3일 이내").run(); assert len([m for m in at.markdown if 'class="qk-rank"' in m.value]) == 1
 os.environ["QUANT_TEST_PAGE"] = "accum"

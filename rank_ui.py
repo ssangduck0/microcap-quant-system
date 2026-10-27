@@ -79,8 +79,18 @@ def render() -> None:
     v = df[df["score"] >= min_s]
     if when != "전체":
         v = v[v["when"] == when]
+    try:  # 2026-10-28: 공시분석 범위 — 표시되는 상위 종목 중 45일 안 🧾 보고서가 있는 비율(없는 종목은 🏢 종목 📰 탭에서 요청)
+        import forensic
+        from datetime import date as _d, timedelta as _td
+        _ld = forensic.latest_dates()
+        _top = list(v.head(60)["ticker"])
+        _cut = (_d.today() - _td(days=45)).isoformat()
+        _cov = sum(1 for t in _top if _ld.get(t, "") >= _cut)
+        _cov_card = {"t": "🧾 공시분석 있음(45일)", "v": f"{_cov}/{len(_top)}", "s": f"{_cov / len(_top) * 100:.0f}% — 없는 종목은 📰 탭에서 요청" if _top else ""}
+    except Exception:  # noqa: BLE001
+        _cov_card = {"t": "🧾 공시분석 있음(45일)", "v": "-"}
     ui.cards([{"t": "순위 대상", "v": f"{len(df)}", "accent": True}, {"t": "⏱ 3일 이내", "v": f"{(df['urgency'] == 100).sum()}"},
-              {"t": "⏱ 1~2주", "v": f"{(df['urgency'] == 60).sum()}"}, {"t": "조건에 맞는 종목", "v": f"{len(v)}"}])
+              {"t": "⏱ 1~2주", "v": f"{(df['urgency'] == 60).sum()}"}, {"t": "조건에 맞는 종목", "v": f"{len(v)}"}, _cov_card])
     cmap = tosslink.codes()
     _s3 = s3_marks(tuple(v.head(60)["ticker"]))
     for r in v.head(60).to_dict("records"):
