@@ -38,7 +38,7 @@ type %USERPROFILE%\.ssh\id_ed25519.pub
 | 이미지 | **Ubuntu 24.04 LTS x64** |
 | 요금제 | **Regular Performance · 2 vCPU · 4 GB** (약 $20/월) |
 | SSH Keys | **quant-pc 체크** |
-| 자동 백업 | 선택(월 +20%). 서버가 매일 DB 를 따로 백업하므로 꼭 필요하진 않음 |
+| 자동 백업 | 선택(월 +20%). 서버가 매일 DB 를 따로 백업하고, 2026-10-28 부터 Cloudflare R2 에도 사본을 두므로 꼭 필요하진 않음 |
 | Hostname | `quant` |
 
 **Deploy Now** → 1~2분 뒤 **Running** → 서버의 **IP 주소**를 메모합니다.
@@ -108,6 +108,7 @@ systemctl status 'quant-*' --no-pager
 | 아침 갱신 지금 | `systemctl start quant-cases` |
 | 타임머신 | `sudo -u quant /home/quant/quant_system/venv/bin/python /home/quant/quant_system/timemachine.py 2` |
 | 백업 목록 | `ls -lh /home/quant/backup` |
+| R2 사본 목록 | `sudo -u quant bash -c 'set -a; . /home/quant/quant_system/.env; set +a; RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare RCLONE_CONFIG_R2_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY RCLONE_CONFIG_R2_ENDPOINT=https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com rclone lsl r2:$R2_BUCKET'` (매일 03:00 백업 뒤 `deploy/backup_db.sh` 가 올림 · R2_KEEP_DAYS 보관) |
 | 차단된 IP 보기 | `fail2ban-client status sshd` |
 
 ## 11. 새 버전 적용 (서버)
