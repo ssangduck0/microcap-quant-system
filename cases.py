@@ -281,6 +281,16 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             _ps = _pk.scan()
             with closing(db.connect()) as _c:  # 🏆 PICK 통과 종목을 목표 종류별로 기록
                 out(f"PICK 기록: 새 신호 {_pk.record(_c, _ps)}건 · 📊 PICK 변동 저장 {_pk.snapshot(_c, _ps, force=True)}종목")
+            try:  # ⏰ 보고 기한 캐시 + 📰 한 장 요약 자동 대기열(A·B단계 2026-10-28) — 급상승·보유·저금통 중 요약 없는 종목
+                import clock as _ck
+                import config as _cfgC
+                import forensic_ai as _fa0
+                import sec as _secC
+                with closing(db.connect()) as _c:
+                    _fa0.auto_enqueue(_c, out=out)
+                    _ck.refresh_due(_c, _secC.SecClient(_cfgC.SEC_USER_AGENT), _ck.due_targets(_c), out=out)
+            except Exception as _e:  # noqa: BLE001
+                out(f"보고 기한·요약 대기열 실패: {_e}")
             try:  # 🧾 서버 공시분석 — 대기열에서 몇 종목(PC Cowork 대신)
                 import forensic_ai as _fa
                 _fa.run(out=out)
@@ -372,6 +382,13 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         review.run(out=out)
     except Exception as e:  # noqa: BLE001
         log.warning("Claude 복기 실패: %s", e)
+    try:  # 🧠 신호 승률 모델(2단계 A안 2026-10-28): 월 1회(토요일) 재학습 · 최근 3일 새 신호에 p30·p10 붙이기 (market 은 모듈 맨 위에서 이미 import — 함수 안에서 다시 import 하면 지역 이름이 돼 앞줄이 깨짐)
+        import sigmodel
+        with closing(db.connect()) as _c:
+            sigmodel.maybe_refit(_c, out=out)
+            sigmodel.score_signals(_c, out=out, download=lambda t: market.download_daily([t], period="1y").get(t))
+    except Exception as e:  # noqa: BLE001
+        log.warning("신호 승률 모델 실패: %s", e)
     try:  # 🧨 공매도 잔고(Yahoo, FINRA 격주): 스퀴즈 후보 700종목(C단계: Reg SHO·고수수료·안 받은 종목 먼저 — 예전 '점수 상위 400'은 잔고 없는 종목을 영영 못 받았음)
         import shortint
         shortint.refresh(shortint.priority(700), max_n=700, out=out)

@@ -76,11 +76,15 @@ def render() -> None:
             tooltip=["기간", "출처", alt.Tooltip("성공률:Q", format=".0f"), "판정"]).properties(height=200 + 24 * ((tr["출처"].nunique() + 1) // 2)),
             key="sb_trend", title=f"{unit} 성공률 추이", data=tr)
     show = cur.sort_values(["date", "출처"], ascending=[False, True])
-    cols = {"ticker": "티커", "status": "결과", "max_up": "최고 상승(%)", "close_h": "기간 끝(%)", "date": "날짜", "출처": "출처",  # 휴대폰: 중요한 열을 왼쪽에
+    cols = {"ticker": "티커", "status": "결과", "p30": "AI 확률(%)", "max_up": "최고 상승(%)", "close_h": "기간 끝(%)", "date": "날짜", "출처": "출처",  # 휴대폰: 중요한 열을 왼쪽에
             "토스": "토스", "entry": "진입가($)", "target": "목표(%)", "horizon": "기간(일)", "max_down": "최대 하락(%)", "note": "메모"}
+    if "p30" not in show.columns:
+        show["p30"] = None
     show = show.assign(토스=tosslink_ui.links(show["ticker"]))[list(cols)].rename(columns=cols)
+    show["AI 확률(%)"] = (pd.to_numeric(show["AI 확률(%)"], errors="coerce") * 100).round(0)   # 🧠 신호 승률 모델(2단계): 10거래일 안 +30% 확률 — 참고용
     show["결과"] = show["결과"].map({"성공": "✅ 성공", "실패": "❌ 실패", "대기": "⏳ 대기"})
     cfg = {"티커": _pinned(), "토스": tosslink_ui.COLUMN, "진입가($)": st.column_config.NumberColumn(format="%.4f"),
+           "AI 확률(%)": st.column_config.NumberColumn(format="%.0f%%", help="🧠 신호 승률 모델: 신호일 기준 10거래일 안 +30% 갈 확률(2년치 사전학습, 참고용 · 판정엔 안 씀). 비어 있으면 그 신호는 아직 확률을 안 붙인 것"),
            **{k: st.column_config.NumberColumn(format="%+.1f") for k in ("최고 상승(%)", "최대 하락(%)", "기간 끝(%)")}}
     tabs = st.tabs(["✅ 성공", "❌ 실패", "⏳ 대기", "전체"])
     for tb, key in zip(tabs, ["✅ 성공", "❌ 실패", "⏳ 대기", None]):

@@ -222,8 +222,17 @@ def update(conn, today: date | None = None, out=print, download=None) -> dict:
     return {"rows": int(len(p)), "updated": n}
 
 
+def _with_probs(conn, m: pd.DataFrame) -> pd.DataFrame:
+    """🧠 신호 승률 모델 확률(sig_prob: p30 = 10일 +30% · p10 = 5일 +10%)을 붙인다. 없으면 빈 열."""
+    pr = pd.DataFrame(_q(conn, "SELECT source, date, ticker, p30, p10 FROM sig_prob"))
+    if m.empty or pr.empty:
+        m["p30"], m["p10"] = None, None
+        return m
+    return m.merge(pr, on=["source", "date", "ticker"], how="left")
+
+
 def table(conn) -> pd.DataFrame:
-    """예측 + 결과(없으면 대기)."""
+    """예측 + 결과(없으면 대기) + 🧠 AI 확률."""
     conn.execute(DDL)
     p = collect(conn)
     if p.empty:
@@ -233,11 +242,11 @@ def table(conn) -> pd.DataFrame:
         p["status"] = "대기"
         for c in ("max_up", "max_down", "close_h", "bars"):
             p[c] = None
-        return p
+        return _with_probs(conn, p)
     m = p.merge(o.drop(columns=["updated_at"]), on=["source", "date", "ticker", "ref"], how="left", suffixes=("", "_o"))
     m["entry"] = m["entry"].fillna(m.get("entry_o"))
     m["status"] = m["status"].fillna("대기")
-    return m.drop(columns=[c for c in m.columns if c.endswith("_o")])
+    return _with_probs(conn, m.drop(columns=[c for c in m.columns if c.endswith("_o")]))
 
 
 def period_key(d: pd.Series, unit: str) -> pd.Series:

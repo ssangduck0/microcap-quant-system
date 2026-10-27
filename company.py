@@ -148,9 +148,14 @@ def build(t: str, df=None) -> dict:
             ev = [dict(r) for r in conn.execute("SELECT date, kind, title FROM events WHERE ticker=? AND date >= ? ORDER BY date", (t, date.today().isoformat()))]
         except Exception:  # noqa: BLE001
             ev = []
+        try:  # ⏰ 시계·반응 규칙(A단계 2026-10-28): PR 소화력 · 하락 원인 · 보고 기한(캐시) · 사다리 보강(50일선 · PR 고점/직전 종가)
+            import clock
+            ck = clock.rule_block(conn, t, g["price"], df)
+        except Exception:  # noqa: BLE001
+            ck = {}
     for e in ev:
         e["dday"] = (date.fromisoformat(e["date"]) - date.today()).days
-    return {**g, "chain": split_chain(t), "ladder": ladder(t, g["price"], pr, oh, df), "overhang": oh, "runway": rwy,
+    return {**g, "chain": split_chain(t), "ladder": sorted(ladder(t, g["price"], pr, oh, df) + list(ck.get("levels") or []), key=lambda x: -x["price"]), "clock": ck, "overhang": oh, "runway": rwy,
             "purposes": purposes(t, g["price"], pr, oh, rwy, ln, ev), "events_ahead": ev, "holders": holders(t), "timeline": events_brief.build(t, days=365, ahead=0)}
 
 

@@ -1,4 +1,4 @@
-"""🏢 기업 분석 화면 — 1 회사 · 2 진입 판단 · 3 희석·런웨이 · 4 목적 · 5 일정·보유자 · 6 타임라인·메모."""
+"""🏢 기업 분석 화면 — 📰 한 장 요약(B단계 2026-10-28) · 1 회사 · 2 진입 판단 · 3 희석·런웨이 · 4 목적 · 5 일정·보유자 · 6 타임라인·메모."""
 import pandas as pd
 import streamlit as st
 
@@ -6,6 +6,7 @@ import chartpop
 
 import access
 import company
+import summary_ui
 import tosslink
 import ui_kit as ui
 
@@ -100,7 +101,10 @@ def render(t: str) -> None:
         import shortpanel_ui
         darkpool_ui.card(t, key="co")
         shortpanel_ui.render(t)
-    tabs = st.tabs(["1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"])
+    tabs_all = st.tabs(["📰 한 장 요약", "1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"])   # 📰 BRAI식 한 장 요약(B단계 2026-10-28)
+    tabs = tabs_all[1:]
+    with tabs_all[0]:
+        summary_ui.render(t, c, df)
     with tabs[0]:
         a, b = st.columns([2, 1])
         with a:
@@ -140,6 +144,7 @@ def render(t: str) -> None:
                         f'<span style="width:90px"><b>${x["price"]:.4f}</b></span><span style="width:70px" class="qk-sub">{"" if x["pct"] is None or now else f"{x["pct"]:+.0f}%"}</span>'
                         f'<span>{ui.esc(x["label"])}</span><span class="qk-sub">{ui.esc(x["note"])}</span></div>', unsafe_allow_html=True)
         st.markdown(ui.box("✅ 충족 신호", c["ok"] or ["뚜렷한 신호 없음"], "#30A46C"), unsafe_allow_html=True)
+        summary_ui.rule_cards(c.get("clock") or {}, key="co2")   # ⏰ A단계: 보고 기한 · 하락 원인 · PR 소화력
     with tabs[2]:
         st.markdown("**2-1. 희석 물량** (⭐ 워치리스트의 물량 장부 — 공시에서 자동 추출 + 직접 입력)")
         if c["overhang"]:

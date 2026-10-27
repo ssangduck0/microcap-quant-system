@@ -52,6 +52,6 @@ os.environ["QUANT_TEST_PAGE"] = "lookup"
 at = AppTest.from_file(APP, default_timeout=180); at.session_state["lookup_ticker"] = "NIVF"
 import watch_ui; watch_ui.prices = lambda tk: {"NIVF": df}
 at.run(); assert not at.exception, [e.value for e in at.exception]
-assert [x.label for x in at.tabs][:6] == ["1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"]
+assert [x.label for x in at.tabs][:7] == ["📰 한 장 요약", "1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"]   # 📰 B단계 2026-10-28
 html = "\n".join(m.value for m in at.markdown); assert "4회 · 누적 1:240" in html and "3년 안 4회 — 반복" in html and "★ 현재가" in html and "현금 조달 · 급함" in html
 os.environ.pop("QUANT_TEST_PAGE"); print("ALL OK")

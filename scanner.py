@@ -82,6 +82,34 @@ def fetch_shares(tc, symbols: list[str]) -> dict[str, float]:
     return {x["symbol"]: float(x["sharesOutstanding"]) for x in tc.stocks(symbols) if x.get("sharesOutstanding")}
 
 
+def mover_fill(conn, client, tc, n_up: int = 20, n_down: int = 10, budget: dict | None = None) -> int:
+    """급상승 상위 n_up·급하락 상위 n_down 중 기본자료(주식수·희석 상태)가 없거나 오래된 종목을 작은 한도 안에서 채운다. 반환 새로 채운 수."""
+    import mover
+    budget = budget or {"fund": 8, "sec": 4}
+    try:
+        syms = [r["ticker"] for r in mover.latest(conn, "up")[1][:n_up]] + [r["ticker"] for r in mover.latest(conn, "down")[1][:n_down]]
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for t in dict.fromkeys(s for s in syms if s):
+        try:
+            before = db.get_fundamentals(conn, t)
+            f = get_fundamentals(conn, t, budget)
+            if f and (not before or before.get("updated_at") != f.get("updated_at")):
+                n += 1
+            if client is not None:
+                d0 = db.get_dilution(conn, t)
+                d1 = dilution_for(conn, client, t, budget)
+                if d1 and (not d0 or d0.get("checked_at") != d1.get("checked_at")):
+                    n += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("급등락 기본자료(%s) 실패: %s", t, e)
+        if budget["fund"] <= 0 and budget["sec"] <= 0:
+            break
+    conn.commit()
+    return n
+
+
 def market_down_frac(bars: list[tuple[str, float | None]], min_tickers: int = 500) -> float | None:
     """bars: (마지막 봉 날짜, 전일 대비 등락률%). 가장 많은 종목이 공유하는 날짜 기준으로 -10% 이하 비율을 계산. 표본이 작으면 None."""
     from collections import Counter
@@ -304,6 +332,12 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
         log.info("최근 3일 일봉 저장: %d행", n_bars)
     except Exception as e:  # noqa: BLE001
         log.warning("최근 일봉 저장 실패: %s", e)
+    try:  # C단계 2026-10-28: 어제·오늘 급상승 상위 20도 1분봉 후보에 넣어 세션별 고점(ext_hilo)·실시간 자료가 남게(BRAI 처럼 낙폭 조건 밖 종목)
+        import mover
+        _mv_up = [r["ticker"] for r in mover.latest(conn, "up")[1][:20] if r.get("ticker")]
+        cands = list(dict.fromkeys(list(cands) + [t for t in _mv_up if t in daily]))
+    except Exception:  # noqa: BLE001
+        pass
     intra, vols, toss_frames = get_intraday(cands, tc)
     try:  # 🌙 세션별(데이마켓·프리·정규·애프터) 고점 기록 — 일봉 고가는 정규장만이라 시간외 급등이 빠지던 문제
         import exthilo
@@ -449,6 +483,9 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
             import mover
             _mv = mover.capture(conn, tc)
             log.info("급상승/급하락 순위 저장: 상승 %d · 하락 %d", _mv.get("up", 0), _mv.get("down", 0))
+            _nf = mover_fill(conn, client, tc)   # 급등락 종목 기본자료(발행주식·희석 상태) — 감시 대상 밖 외국 발행사도 종목 화면이 비지 않게
+            if _nf:
+                log.info("급등락 종목 기본자료 채움: %d건", _nf)
         except Exception as e:  # noqa: BLE001
             log.warning("급상승/급하락 순위 저장 실패: %s", e)
     dchg = {t: (m.get("day_change_pct") if m.get("day_change_pct") is not None else 0.0) for t, m in passing}

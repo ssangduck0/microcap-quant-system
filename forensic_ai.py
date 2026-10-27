@@ -6,6 +6,8 @@
   큰 서류는 핵심 단어 주변만 잘라 보냄(비용) — 원문에 없으면 '공시에 명시되지 않음'/'추가 확인 필요'
 · 보고서는 스킬 명세(forensic_spec.md) 그대로 11개 섹션 마크다운 → forensic.add 로 저장(리포트 화면에 그대로) · 성공하면 대기열에서 빠짐
 · 비용: Sonnet 5.5 종목당 약 100~200원 · 🤖 AI 월 예산(aipick)과 같은 지갑
+· v2(B단계 2026-10-28, BRAI식): 보고서 끝에 <!-- SUMMARY_JSON --> 한 장 요약(시계·구조·갚아야 할 돈·조달·물량 달력·가격대·시나리오) → forensic_summary 표 → 🏢 종목 화면 📰 탭
+  프롬프트엔 우리 규칙 계산(clock: PR 반응·하락 원인·보고 기한·가격대)을 함께 넣고, 6-K/8-K 는 첨부(보도자료)까지 읽는다(C단계)
 """
 from __future__ import annotations
 
@@ -39,7 +41,22 @@ def system_prompt() -> str:
             "자료가 부족해도 11개 섹션을 모두 출력하고 못 채운 칸은 '추가 확인 필요' 또는 '공시에 명시되지 않음'으로 채울 것(거절·요약만 하지 말 것).\n"
             "맨 마지막 줄에 기계가 읽는 요약을 HTML 주석 한 줄로(화면엔 안 보임, 모르는 값은 null):\n"
             '<!-- DILUTION_JSON {"basic": 기본 발행주식수, "fd": 완전희석 주식수(§4 합계), "fd_ratio": fd÷basic, "baby_shelf": "적용"|"미적용"|null, '
-            '"runway_months": 숫자|null, "toxic": true|false|null, "atm_eloc": true|false|null} -->\n\n' + spec)
+            '"runway_months": 숫자|null, "toxic": true|false|null, "atm_eloc": true|false|null} -->\n' + SUMMARY_LINE + spec)
+
+
+SUMMARY_LINE = (
+    "그 다음 줄(맨 마지막)에 BRAI식 '한 장 요약'도 HTML 주석 한 줄로(모르는 값은 null · 날짜 YYYY-MM-DD · 금액은 USD 숫자 · 목록은 중요한 순 최대 8개):\n"
+    '<!-- SUMMARY_JSON {"one_liner": "한 줄 결론(돈이 언제 떨어지고 누가 주식을 들고 있으며 어떤 가격대가 중요한지)", '
+    '"clock": {"status": "급함"|"보통"|"여유", "cash_usd": n, "monthly_burn_usd": n, "runway_months": n, "cash_need_by": "YYYY-MM-DD"|null, "why": "근거(공시일)"}, '
+    '"structure": {"who_holds": "유통주식을 누가 들고 있나(사모 투자자·내부자·기관·개인)", "insider_pct": n, "note": "락업·등록 상태"}, '
+    '"payments": [{"date": "YYYY-MM-DD", "amount_usd": n, "what": "원금·이자·마일스톤·라이선스료 등", "source": "form 공시일"}], "total_committed_usd": n, '
+    '"funding": {"likely": "ATM"|"사모(PIPE)"|"전환사채"|"워런트 행사"|"공모"|"불명", "atm_ok_from": "YYYY-MM-DD"|null, "atm_capacity_usd": n, "warrants_cash_usd": n, "convertibles_usd": n, "why": "근거"}, '
+    '"overhang_calendar": [{"date": "YYYY-MM-DD", "what": "락업 해제·등록 효력·전환 가능·워런트 행사 가능", "shares_m": n, "note": ""}], '
+    '"levels": [{"price": n, "label": "워런트 행사가·전환가·사모 발행가·$1 기준·베이비 쉐프 기준·PR 고점 등", "why": ""}], '
+    '"scenarios": {"attack": {"trigger": "이렇게 되면", "target": n, "note": ""}, "base": {"trigger": "", "target": n, "note": ""}, "fail": {"trigger": "", "target": n, "note": ""}}, '
+    '"pattern": "과거 호재 뒤 주가 패턴 한 줄(고점 → 며칠 뒤 어디)", "sell_vs_short": "현물 매도"|"공매"|"혼합"|"불명", '
+    '"next_deadline": {"date": "YYYY-MM-DD", "what": "다음 보고·상환·상장 기한"}} -->\n'
+    "시나리오 target 은 주가(USD) · payments 는 앞으로 12개월 안 갚거나 내야 할 돈만 · '우리 규칙 계산' 부분(PR 반응·하락 원인·보고 기한·가격대)은 참고하되 공시 원문과 다르면 원문 우선.\n\n")
 
 
 def _windows(text: str, keys, width: int = 900, cap: int = 14000) -> str:
@@ -126,7 +143,7 @@ def gather(client, ticker: str, today: date | None = None) -> dict:
         if total >= MAX_CHARS:
             return
         try:
-            text = client.fetch_text(f["url"], limit=2_000_000)
+            text = full_text(client, f, cik)
         except Exception as e:  # noqa: BLE001
             parts.append((f"{f['form']} {f['filed']} {f['accession']}", f"(본문 받기 실패: {e})"))
             return
@@ -139,7 +156,8 @@ def gather(client, ticker: str, today: date | None = None) -> dict:
     if not core:
         forms = sorted({f["form"] for f in filings[:30]})
         return {"error": f"최근 18개월 핵심 공시(10-K·10-Q·8-K·S-1/S-3·424B)가 없어요 — 장외(OTC)·해외 기업이거나 공시가 멈춘 회사일 수 있어요(최근 서류 종류: {', '.join(forms[:8]) or '없음'})"}
-    big = [f for f in recent if f["form"] in ("10-K", "20-F", "10-K/A")][:1] + [f for f in recent if f["form"] in ("10-Q", "6-K")][:1]
+    fpi = any(f["form"] in ("20-F", "20-F/A", "6-K", "F-1", "F-3") for f in recent)   # 외국 발행사(호주·이스라엘·중국 ADR …): 분기 보고 대신 6-K 여러 건
+    big = [f for f in recent if f["form"] in ("10-K", "20-F", "10-K/A", "20-F/A")][:1] + [f for f in recent if f["form"] in ("10-Q", "6-K")][:3 if fpi else 1]
     for f in big:                                                     # ① 재무
         add(f, KEYS_FIN + ("warrant", "convertible", "at-the-market"), head=3000, cap=16000)
     for f in [f for f in recent if f["form"] in FUND_FORMS][:2]:     # ② 자금조달: 등록신고서
@@ -162,6 +180,18 @@ def gather(client, ticker: str, today: date | None = None) -> dict:
         if px:
             hi = max(px, key=lambda r: r[1] or 0)
             parts.append(("시장 데이터(SEC 원문 아님 · 우리 일봉)", f"현재가(최근 종가) ${px[0][1]} ({px[0][0]}) · 60일 최고 종가 ${hi[1]} ({hi[0]}) · 60거래일 수 {len(px)}"))
+        try:  # ⏰ 우리 규칙 계산(A단계 2026-10-28): PR 반응·하락 원인·보고 기한·가격대 — Claude 가 '한 장 요약'에 참고
+            import clock
+            rows = conn.execute("SELECT date, high, low, close FROM daily_prices WHERE ticker=? ORDER BY date DESC LIMIT 120", (t,)).fetchall()
+            dfc = None
+            if rows:
+                import pandas as pd
+                dfc = pd.DataFrame([tuple(r) for r in rows[::-1]], columns=["date", "High", "Low", "Close"]).set_index("date")
+            rt = clock.rule_text(clock.rule_block(conn, t, (px[0][1] if px else None), dfc, client=client, as_of=today.isoformat()))
+            if rt:
+                parts.append(("우리 규칙 계산(SEC 원문 아님 · ⏰ PR 반응·하락 원인·보고 기한·가격대)", rt))
+        except Exception:  # noqa: BLE001
+            pass
     listing = "\n".join(f"{f['filed']} {f['form']} items={f['items']} {f['accession']}" for f in recent[:40])
     parts.insert(0, ("최근 공시 목록(최신순 40건)", listing))
     try:  # ① 재무 숫자 — XBRL(companyfacts): 발행주식수·non-affiliate float·분기별 현금·OCF(TTM 계산용)
@@ -171,6 +201,22 @@ def gather(client, ticker: str, today: date | None = None) -> dict:
     except Exception as e:  # noqa: BLE001
         parts.insert(1, ("SEC XBRL 재무 숫자", f"(받기 실패: {e})"))
     return {"company": (sub.get("name") or t), "cik": cik, "parts": parts, "docs": len(parts)}
+
+
+def full_text(client, f: dict, cik: int) -> str:
+    """주 문서 본문. 6-K·8-K 는 표지만 있고 내용이 첨부(EX-99 보도자료·EX-10 계약서)에 있는 경우가 많아 짧으면 첨부를 이어 붙인다(C단계 2026-10-28)."""
+    text = client.fetch_text(f["url"], limit=2_000_000)
+    if f["form"] in ("6-K", "6-K/A", "8-K", "8-K/A") and len(text) < 6000:
+        try:
+            import rsplit
+            acc = f["accession"]
+            idx = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{acc}-index.htm"
+            more = rsplit.filing_text(client, idx)
+            if more and len(more) > len(text):
+                return more
+        except Exception:  # noqa: BLE001
+            pass
+    return text
 
 
 def build_prompt(ticker: str, g: dict, today: date | None = None) -> str:
@@ -216,13 +262,16 @@ def analyze(ticker: str, client=None, post=None, today: date | None = None, out=
         return {"ok": False, "msg": f"{t}: {why}", "cost_usd": usd}
     as_of = forensic.guess_as_of(md) or today.isoformat()
     met = parse_metrics(md)
-    md = re.sub(r"<!--\s*DILUTION_JSON.*?-->", "", md, flags=re.S).strip()  # 기계용 줄은 보고서 화면에서 빼고 수치만 따로 저장
+    summ = parse_summary(md)   # 📰 한 장 요약(B단계 2026-10-28)
+    md = re.sub(r"<!--\s*(?:DILUTION_JSON|SUMMARY_JSON).*?-->", "", md, flags=re.S).strip()  # 기계용 줄은 보고서 화면에서 빼고 수치만 따로 저장
     forensic.add(t, md, source=f"서버 자동(Claude {MODEL})", as_of=as_of)
     if met:  # ✅ 3대 조건 ③·AI PICK 이 쓰는 완전희석 배수 등
         save_metrics(t, as_of, met)
+    if summ:
+        save_summary(t, as_of, summ)
     forensic.queue_remove(t)
     forensic._set_error(t, None)
-    msg = f"{t}: 공시 {g['docs']}건 발췌 → 보고서 저장 · ${usd:.3f}(약 {usd * aipick.FX:,.0f}원)"
+    msg = f"{t}: 공시 {g['docs']}건 발췌 → 보고서 저장{' · 📰 한 장 요약' if summ else ''} · ${usd:.3f}(약 {usd * aipick.FX:,.0f}원)"
     out(msg)
     return {"ok": True, "msg": msg, "cost_usd": usd}
 
@@ -339,3 +388,178 @@ if __name__ == "__main__":
     config.apply_overrides()
     args = [a.upper() for a in sys.argv[1:] if not a.startswith("-")]
     res = run(tickers=args or None, out=print)  # 종목별 결과·합계는 run 이 출력
+
+
+# ---------------------------------------------------------------- 📰 한 장 요약(B단계 2026-10-28)
+SUM_DDL = "CREATE TABLE IF NOT EXISTS forensic_summary (ticker TEXT NOT NULL, as_of TEXT NOT NULL, data TEXT, saved TEXT, PRIMARY KEY (ticker, as_of))"
+SUM_LISTS = ("payments", "overhang_calendar", "levels")
+SUM_DICTS = ("clock", "structure", "funding", "scenarios", "next_deadline")
+
+
+def _num(x):
+    try:
+        return None if x is None or x == "" else float(str(x).replace(",", "").replace("$", ""))
+    except ValueError:
+        return None
+
+
+def parse_summary(md: str) -> dict | None:
+    """보고서 끝 <!-- SUMMARY_JSON {...} --> → 정리한 dict(목록·숫자 안전). 없거나 깨지면 None."""
+    import json as _j
+    m = re.search(r"<!--\s*SUMMARY_JSON\s*(\{.*?\})\s*-->", md or "", re.S)
+    if not m:
+        return None
+    try:
+        d = _j.loads(m.group(1))
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    out = {"one_liner": str(d.get("one_liner") or ""), "pattern": str(d.get("pattern") or ""), "sell_vs_short": d.get("sell_vs_short") or "불명",
+           "total_committed_usd": _num(d.get("total_committed_usd"))}
+    for k in SUM_DICTS:
+        v = d.get(k)
+        out[k] = dict(v) if isinstance(v, dict) else {}
+    for k in SUM_LISTS:
+        v = d.get(k)
+        out[k] = [dict(x) for x in v if isinstance(x, dict)][:12] if isinstance(v, list) else []
+    for k in ("cash_usd", "monthly_burn_usd", "runway_months"):
+        out["clock"][k] = _num(out["clock"].get(k))
+    for k in ("atm_capacity_usd", "warrants_cash_usd", "convertibles_usd"):
+        out["funding"][k] = _num(out["funding"].get(k))
+    for x in out["payments"]:
+        x["amount_usd"] = _num(x.get("amount_usd"))
+    for x in out["levels"]:
+        x["price"] = _num(x.get("price"))
+    out["levels"] = [x for x in out["levels"] if x["price"]]
+    for x in out["overhang_calendar"]:
+        x["shares_m"] = _num(x.get("shares_m"))
+    for k in ("attack", "base", "fail"):
+        sc = out["scenarios"].get(k)
+        out["scenarios"][k] = dict(sc) if isinstance(sc, dict) else {}
+        out["scenarios"][k]["target"] = _num(out["scenarios"][k].get("target"))
+    if out["total_committed_usd"] is None and out["payments"]:
+        out["total_committed_usd"] = sum(x["amount_usd"] or 0 for x in out["payments"]) or None
+    return out
+
+
+def save_summary(ticker: str, as_of: str, d: dict) -> None:
+    import json as _j
+    from datetime import datetime, timezone
+    with closing(db.connect()) as conn:
+        conn.execute(SUM_DDL)
+        conn.execute("INSERT OR REPLACE INTO forensic_summary VALUES (?,?,?,?)",
+                     (ticker.upper(), as_of, _j.dumps(d, ensure_ascii=False), datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        conn.commit()
+
+
+def summary_latest(conn, ticker: str, as_of: str | None = None, max_age: int = 120) -> dict | None:
+    """그날(as_of) 이전 가장 최근 한 장 요약(컨닝 없음) — max_age 일보다 오래되면 안 씀."""
+    import json as _j
+    end = as_of or (date.today() + timedelta(days=1)).isoformat()
+    start = (date.fromisoformat(end[:10]) - timedelta(days=max_age)).isoformat()
+    try:
+        r = conn.execute("SELECT as_of, data, saved FROM forensic_summary WHERE ticker=? AND as_of < ? AND as_of >= ? ORDER BY as_of DESC LIMIT 1",
+                         (ticker.upper(), end, start)).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    if not r:
+        return None
+    try:
+        d = _j.loads(r[1] or "{}")
+    except ValueError:
+        return None
+    d["as_of"], d["saved"] = r[0], r[2]
+    return d
+
+
+def summary_tickers(conn, max_age: int = 30) -> set[str]:
+    try:
+        return {r[0] for r in conn.execute("SELECT DISTINCT ticker FROM forensic_summary WHERE as_of >= ?", ((date.today() - timedelta(days=max_age)).isoformat(),))}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def auto_enqueue(conn, out=print, limit: int = 4, max_age: int = 30, up_n: int = 10) -> list[str]:
+    """아침: 급상승 상위 up_n · 가상매매 보유 · 저금통 중 최근 max_age 일 안 보고서/요약이 없는 종목을 대기열에(하루 limit 종목).
+    실제 분석은 FORENSIC_PER_RUN(기본 3)·AI 월 예산 안에서만 돌아 비용은 하루 약 600원 이하."""
+    import forensic
+    cands: list[str] = []
+    try:
+        import mover
+        cands += [r["ticker"] for r in mover.latest(conn, "up")[1][:up_n] if r.get("ticker")]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import papertrade
+        cands += list(papertrade.open_tickers())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import piggy
+        cands += list(piggy.tickers())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import tradable
+        ok = tradable.active(conn)
+        if ok:
+            cands = [t for t in cands if str(t).upper() in ok]
+    except Exception:  # noqa: BLE001
+        pass
+    cutoff = (date.today() - timedelta(days=max_age)).isoformat()
+    have = summary_tickers(conn, max_age)
+    try:
+        have |= {t for t, d0 in forensic.latest_dates().items() if str(d0) >= cutoff}
+    except Exception:  # noqa: BLE001
+        pass
+    q = set(forensic.queue_list())
+    fail_after = (date.today() - timedelta(days=RETRY_DAYS)).isoformat()
+    new: list[str] = []
+    for t in dict.fromkeys(str(x).upper() for x in cands if x):
+        if t in have or t in q:
+            continue
+        if (db.get_meta(f"forensic_ai_fail:{t}") or {}).get("value", "") >= fail_after:
+            continue
+        new.append(t)
+        if len(new) >= limit:
+            break
+    if new:
+        forensic.queue_add(new)
+        out(f"📰 한 장 요약 대기열 추가: {', '.join(new)}")
+    return new
+
+
+def scenario_check(conn, days: int = 90):
+    """D-light(2026-10-28): 한 장 요약의 공격/실패 목표가가 그 뒤 실제로 닿았는지 — 요약 뒤 최고가·최저가·현재가로 판정."""
+    import json as _j
+    import pandas as pd
+    since = (date.today() - timedelta(days=days)).isoformat()
+    try:
+        rows = conn.execute("SELECT ticker, MAX(as_of) AS as_of, data FROM forensic_summary WHERE as_of >= ? GROUP BY ticker", (since,)).fetchall()
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame()
+    out = []
+    for tk, as_of, data in rows:
+        try:
+            d = _j.loads(data or "{}")
+        except ValueError:
+            continue
+        sc = d.get("scenarios") or {}
+        base = conn.execute("SELECT close FROM daily_prices WHERE ticker=? AND date <= ? AND close IS NOT NULL ORDER BY date DESC LIMIT 1", (tk, as_of)).fetchone()
+        after = conn.execute("SELECT MAX(high), MIN(low), COUNT(*) FROM daily_prices WHERE ticker=? AND date > ?", (tk, as_of)).fetchone()
+        last = conn.execute("SELECT close, date FROM daily_prices WHERE ticker=? AND close IS NOT NULL ORDER BY date DESC LIMIT 1", (tk,)).fetchone()
+        if not base or not base[0] or not last or not last[0]:
+            continue
+        p0, hi, lo, n = float(base[0]), after[0], after[1], after[2] or 0
+        a, f = _num((sc.get("attack") or {}).get("target")), _num((sc.get("fail") or {}).get("target"))
+        state = "진행 중"
+        if a and hi and hi >= a:
+            state = "🚀 공격 목표 도달"
+        elif f and lo and lo <= f:
+            state = "💀 실패 시나리오"
+        elif n >= 5:
+            state = "➖ 기본"
+        out.append({"종목": tk, "요약일": as_of, "기준가($)": p0, "현재가($)": float(last[0]), "변동 %": (float(last[0]) / p0 - 1) * 100, "그 뒤 고가($)": hi, "그 뒤 저가($)": lo,
+                    "공격 목표($)": a, "실패 목표($)": f, "지난 거래일": n, "판정": state, "한 줄": str(d.get("one_liner") or "")[:60]})
+    return pd.DataFrame(out)

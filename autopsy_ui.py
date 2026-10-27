@@ -70,6 +70,60 @@ def review_section() -> None:
         k2.dataframe(pd.DataFrame(cc["fail"], columns=["실패 원인(AI 분류, 90일)", "건수"]), hide_index=True, width="stretch")
 
 
+def model_section() -> None:
+    """🧠 신호 승률 모델(2단계 A안): 검증 성적·확률 분위표·가중치 · 학습 버튼."""
+    import sigmodel
+    m = sigmodel.load()
+    st.markdown("#### 🧠 신호 승률 모델 — 신호마다 '10일 +30% 확률' (사전학습 · 참고용, 판정 기준은 그대로)")
+    if not access.is_guest():
+        c1, c2 = st.columns([1, 3])
+        if c1.button("🧠 지금 학습(2년치, 수 분)", key="ap_model_fit"):
+            logs: list[str] = []
+            with st.spinner("2년치 일봉으로 학습 중…"):
+                try:
+                    res = sigmodel.fit_all(out=logs.append)
+                    logs.append(f"결과: {res.get('status')}")
+                except Exception as e:  # noqa: BLE001
+                    logs.append(f"실패: {e}")
+            st.code("\n".join(logs[-6:]) or "-")
+            st.rerun()
+        c2.caption("월 1회(토요일 아침 작업) 자동 재학습 · 아침마다 새 신호에 확률을 붙여 🏆 성과 공표 표 'AI 확률' 열에 보여요. 가상매매 문턱은 꺼져 있어요(검증 뒤 B안).")
+    if not m:
+        st.caption("아직 학습된 모델이 없어요. 과거 일봉(타임머신 자료)이 있으면 위 버튼으로 학습할 수 있어요.")
+        return
+    t30, t10 = m["targets"]["p30"], m["targets"]["p10"]
+    fmt = lambda x: "-" if x is None else f"{x:.3f}"
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("p30 AUC(검증)", fmt(t30["auc_test"]), help="0.5 = 동전 던지기 · 0.6↑ 쓸 만함 · 0.7↑ 좋음. 검증 = 학습에 안 쓴 마지막 6개월")
+    k2.metric("기준 적중(검증)", f"{t30['base_rate_test']:.1f}%", help="검증 기간 모든 표본의 10일 +30% 비율")
+    k3.metric("상위 10% 적중", "-" if not t30["deciles"] else f"{t30['deciles'][-1]['실제 적중(%)']:.1f}%", help="모델이 가장 높게 본 10% 의 실제 적중률")
+    k4.metric("p10 AUC(검증)", fmt(t10["auc_test"]))
+    k5.metric("표본", f"{m['n_train']:,} / {m['n_test']:,}", help="학습 / 검증 행 수")
+    st.caption(f"학습 {str(m['fitted_at'])[:16].replace('T', ' ')} UTC · 자료 {m.get('from')} ~ {m.get('to')} · 검증 시작 {m['cutoff']} · 종목 {m.get('n_tickers') or '-'} · 모델: 로지스틱 회귀(표준화 + 제곱항)")
+    d1, d2 = st.columns([1, 1])
+    with d1:
+        st.caption("p30 확률 10분위(검증) — 분위가 오를수록 실제 적중이 올라가면 모델이 가려내는 것")
+        if t30["deciles"]:
+            st.dataframe(pd.DataFrame(t30["deciles"]).round(1), hide_index=True, width="stretch")
+    with d2:
+        st.caption("특징 가중치(표준화, 선형 부분) — +면 확률을 올리고 −면 내림(제곱항 영향은 제외한 대략의 방향)")
+        st.dataframe(pd.DataFrame(t30["weights"])[["특징", "가중치"]].head(12).round(3), hide_index=True, width="stretch")
+
+
+def scenario_section() -> None:
+    """📰 한 장 요약 시나리오 추적(D-light 2026-10-28): 요약 때 적은 공격/실패 목표가에 그 뒤 주가가 닿았는지."""
+    import forensic_ai
+    with closing(db.connect()) as conn:
+        df = forensic_ai.scenario_check(conn)
+    st.markdown("#### 📰 한 장 요약 시나리오 추적 — 요약 뒤 주가가 공격 목표·실패 목표 중 어디에 닿았나")
+    if df is None or df.empty:
+        st.caption("아직 한 장 요약이 없어요. 🏢 종목 화면 📰 탭에서 분석을 요청하거나, 아침마다 급상승·보유 종목이 자동으로 쌓입니다.")
+        return
+    n, hit, bad = len(df), int(df["판정"].str.contains("공격").sum()), int(df["판정"].str.contains("실패").sum())
+    st.caption(f"요약 {n}종목 · 🚀 공격 목표 도달 {hit} · 💀 실패 시나리오 {bad} · 기본/진행 중 {n - hit - bad}")
+    st.dataframe(ui.tidy(df), hide_index=True, width="stretch")
+
+
 def render() -> None:
     ui.title("🔍 부검", "놓친 펌핑과 실패한 신호를 '그날 이전 정보'로 다시 봅니다. 왜 못 잡았고 왜 틀렸는지가 쌓여야 2단계(신호 승률 모델)·3단계(Claude 복기)가 가능해요.")
     days = st.radio("기간", [7, 30, 90], index=1, horizontal=True, key="ap_days", format_func=lambda d: f"최근 {d}일")
@@ -97,8 +151,11 @@ def render() -> None:
     c4.metric("실패 신호 부검", f"{len(fails)}건")
     if pumps.empty and fails.empty:
         st.info("아직 부검 기록이 없어요. 매일 아침 작업(07:30)이 어제 펌핑과 새로 '실패'가 된 신호를 넣어요. 위 버튼으로 지금 한 번 돌릴 수도 있어요.")
+        model_section()
         return
     review_section()
+    model_section()
+    scenario_section()
     if not pumps.empty:
         st.markdown("#### ❌ 놓친 펌핑 — 전날 무엇이 있었나")
         miss = pumps[pumps["caught"] == 0]

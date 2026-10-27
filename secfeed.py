@@ -250,6 +250,7 @@ def universe_map(client, ttl: float = 3600) -> dict[int, str]:
         tickers |= set(watch.scanner_priority()) | set(piggy.tickers())
     except Exception:  # noqa: BLE001
         pass
+    tickers |= coverage_extra()   # C단계 2026-10-28: 토스 거래 가능 전 종목(외국 발행사 6-K·20-F·F-1 포함)·급등락 7일·가상매매 보유
     m = {}
     for t in tickers:
         cik = (client._map or {}).get(str(t).upper())
@@ -257,6 +258,26 @@ def universe_map(client, ttl: float = 3600) -> dict[int, str]:
             m[cik] = str(t).upper()
     _MAP_CACHE.update(at=_t.time(), map=m)
     return m
+
+
+def coverage_extra() -> set[str]:
+    """피드가 놓치던 종목: 토스 거래 가능 보통주 전체 · 최근 7일 급상승/급하락 순위 · 가상매매 보유 (BRAI 처럼 감시 대상 밖 외국 발행사도 공시가 쌓이게)."""
+    out: set[str] = set()
+    try:
+        import tradable
+        out |= set(tradable.active())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        out |= set(db.read_df("SELECT DISTINCT ticker FROM toss_rank WHERE date >= date('now', '-7 day')")["ticker"])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import papertrade
+        out |= set(papertrade.open_tickers())
+    except Exception:  # noqa: BLE001
+        pass
+    return {str(t).upper() for t in out if t}
 
 
 def new_rows_since(ts: str, tickers: set[str]) -> list[dict]:
