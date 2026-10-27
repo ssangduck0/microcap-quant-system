@@ -1,0 +1,11 @@
+# 대시보드 테마 — 눈부심이 적은 어두운 화면(빨강은 강조에만). 밝은 화면은 ⋮ → Settings → Theme 에서
+[theme]
+base = "dark"
+primaryColor = "#E5484D"
+backgroundColor = "#101318"
+secondaryBackgroundColor = "#191D24"
+textColor = "#E6E8EB"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
