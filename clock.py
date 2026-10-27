@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
@@ -18,7 +19,6 @@ import db
 
 BIG_MOVE_PCT = 20.0        # 공시·뉴스가 없어도 고가 +20%↑ 인 날은 'PR/급등일'로 본다
 FEE_HIGH, SI_LOW, SV_HIGH = 50.0, 5.0, 60.0
-DUE_DAYS = {"annual": {"Large accelerated filer": 60, "Accelerated filer": 75}, "quarter": {"Large accelerated filer": 40, "Accelerated filer": 40}}
 DDL = """CREATE TABLE IF NOT EXISTS report_due (ticker TEXT PRIMARY KEY, fye TEXT, category TEXT, fpi INTEGER, next_form TEXT, period_end TEXT, due TEXT, nt_due TEXT,
          last_annual TEXT, updated_at TEXT)"""
 
@@ -168,6 +168,16 @@ def _bday(d: date) -> date:
     return d
 
 
+def _filer_days(cat: str) -> tuple[int, int]:
+    """신고자 구분 → (연차 보고 기한 일수, 분기 보고 기한 일수). SEC category 는 'Non-accelerated filer<br>Smaller reporting company' 처럼 여러 개가 붙어 오므로 부분 일치."""
+    c = (cat or "").lower()
+    if "large accelerated" in c:
+        return 60, 40
+    if "accelerated filer" in c and "non-accelerated" not in c:
+        return 75, 40
+    return 90, 45
+
+
 def report_due(sub: dict, today: date | None = None) -> dict | None:
     """SEC submissions JSON → 다음 정기 보고 기한. {fye, category, fpi, next_form, period_end, due, nt_due, dday, last_annual}.
     규칙: 20-F = 회계연도 말 + 4개월(NT +15일) · 10-K = 60/75/90일(대형 가속/가속/비가속, NT +15) · 10-Q = 분기 말 + 40/45일(NT +5)."""
@@ -175,7 +185,7 @@ def report_due(sub: dict, today: date | None = None) -> dict | None:
     fye = str(sub.get("fiscalYearEnd") or "").strip()
     if len(fye) != 4 or not fye.isdigit():
         return None
-    cat = str(sub.get("category") or "")
+    cat = re.sub(r"<br\s*/?>", " · ", str(sub.get("category") or "")).strip(" ·")   # SEC 는 구분을 <br> 로 이어 줌
     forms = sub.get("filings", {}).get("recent", {}).get("form", []) or []
     dates = sub.get("filings", {}).get("recent", {}).get("filingDate", []) or []
     fpi = any(f in ("20-F", "20-F/A", "6-K") for f in forms[:200])
@@ -195,8 +205,7 @@ def report_due(sub: dict, today: date | None = None) -> dict | None:
             nxt = _add_months(fy_end, 12)
             cands.append(("20-F", nxt, _bday(_add_months(nxt, 4)), _bday(_add_months(nxt, 4) + timedelta(days=15))))
     else:
-        a_days = DUE_DAYS["annual"].get(cat, 90)
-        q_days = DUE_DAYS["quarter"].get(cat, 45)
+        a_days, q_days = _filer_days(cat)
         if not (last_annual and last_annual > fy_end.isoformat()):
             due = _bday(fy_end + timedelta(days=a_days))
             cands.append(("10-K", fy_end, due, _bday(due + timedelta(days=15))))

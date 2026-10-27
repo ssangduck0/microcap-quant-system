@@ -78,6 +78,8 @@ with closing(db.connect()) as conn:
     r = clock.report_due({"fiscalYearEnd": "0630", "category": "Accelerated filer", "filings": {"recent": {"form": ["10-Q"], "filingDate": ["2026-05-10"]}}}, today=date(2026, 7, 15))
     assert r["next_form"] == "10-K" and r["period_end"] == "2026-06-30" and r["due"] == clock._bday(date(2026, 9, 13)).isoformat()     # 6/30 + 75일
     assert clock.report_due({"fiscalYearEnd": "", "filings": {}}) is None and clock.report_due({}) is None
+    r = clock.report_due({"fiscalYearEnd": "1231", "category": "Accelerated filer<br>Smaller reporting company", "filings": {"recent": {"form": ["10-Q"], "filingDate": ["2026-05-10"]}}}, today=date(2027, 1, 15))
+    assert r["next_form"] == "10-K" and r["due"] == clock._bday(date(2027, 3, 16)).isoformat() and r["category"] == "Accelerated filer · Smaller reporting company"   # <br> 붙은 구분도 75일
 
     class FakeSec:
         def __init__(self): self.n = 0
