@@ -1,0 +1,23 @@
+# 비밀값·개인 설정 — 절대 올리지 않음
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+# DB·캐시·로그·묶음 파일
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+__pycache__/
+*.pyc
+*.log
+*.zip
+*.tar.gz
+*.bak
+.claude/
+.pytest_cache/
+# 운영체제·편집기
+desktop.ini
+Thumbs.db
+.DS_Store
+*.lnk
