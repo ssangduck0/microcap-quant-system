@@ -308,6 +308,7 @@ with closing(db.connect()) as conn:
     TD = datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc)                                             # 월요일 10:00 EST 정규장
     for t, tp, sl, hold in [("TP1", 0.7, 0.45, None), ("SL1", 0.7, 0.45, None), ("BO1", 0.7, 0.45, None), ("HD1", 9.0, 0.1, 2), ("OP1", 9.0, 0.1, None), ("NB1", 0.7, 0.45, None)]:
         assert broker.mirror_buy(conn, tc, "piggy", t, 0.5, tp_px=tp, sl_px=sl, now=TD, hold_days=hold)["mode"] == "dry"                      # 지정가 0.505 에 산 셈
+    assert broker.mirror_buy(conn, tc, "probe", "PB1", 1.0, now=TD)["mode"] == "dry"                                                                   # probe(1-share round trip test) is not a signal -> excluded
     assert broker.mirror_buy(conn, tc, "piggy", "BL1", 0.5, tp_px=0.7, sl_px=0.45, dilution="ATM", now=TD)["ok"] is False                        # 막힌 기록은 결과 대상 아님
     d0 = ("2026-11-02", 0.5, 0.6, 0.48, 0.55)                                                                                                      # 매수 당일 봉(고가 0.6 — 쓰지 않음)
     bars = {"TP1": mk([d0, ("2026-11-03", 0.55, 0.75, 0.50, 0.70)]),                                                                             # 다음 봉 고가 0.75 ≥ 0.7 → 익절
@@ -324,7 +325,7 @@ with closing(db.connect()) as conn:
     x = g("HD1"); assert x["status"] == "closed" and x["hold_until"] == "2026-11-04" and x["exit_day"] == "2026-11-04" and x["reason"].startswith("보유일 만료") and abs(x["exit_px"] - 0.65) < 1e-9 and x["bars_after"] == 2, x
     x = g("OP1"); assert x["status"] == "open" and x["exit_px"] is None and x["last_day"] == "2026-11-04" and abs(x["last_px"] - 0.52) < 1e-9 and x["bars_after"] == 2 and abs(x["pnl_usd"] - (0.52 - 0.505)) < 1e-9, x
     x = g("NB1"); assert x["status"] == "open" and x["bars_after"] == 0 and x["pnl_pct"] is None and x["pnl_usd"] is None, x
-    assert conn.execute("SELECT COUNT(*) FROM live_dry_results WHERE ticker='BL1'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM live_dry_results WHERE ticker IN ('BL1','PB1')").fetchone()[0] == 0
     s = broker.dry_summary(conn); assert s["n"] == 6 and s["closed"] == 4 and s["open"] == 2 and s["wins"] == 2 and abs(s["win_rate"] - 50.0) < 1e-9 and abs(s["pnl_closed"] - (0.195 - 0.055 - 0.055 + 0.145)) < 1e-9 and abs(s["pnl_open"] - 0.015) < 1e-9 and len(s["rows"]) == 6, s
     # 두 번째 실행: 끝난 건 그대로, 진행 중만 다시 — OP1 에 31봉을 주면 30거래일째 종가로 평가 마감 · NB1 은 여전히 봉 없음
     days = pd.bdate_range("2026-11-03", periods=31)

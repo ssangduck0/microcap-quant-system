@@ -806,7 +806,7 @@ def simulate_dry(conn, bars: dict | None = None, *, now: datetime | None = None,
     ensure(conn)
     cutoff = (_now(now).date() - timedelta(days=lookback_days)).isoformat()
     rows = [dict(r) for r in conn.execute("""SELECT o.*, r.status AS sim_status FROM live_orders o LEFT JOIN live_dry_results r ON r.client_order_id = o.client_order_id
-                                              WHERE o.mode='dry' AND o.side='BUY' AND o.status='DRY' AND o.code IS NULL AND o.limit_px IS NOT NULL AND o.day >= ?
+                                              WHERE o.mode='dry' AND o.side='BUY' AND o.status='DRY' AND o.code IS NULL AND o.limit_px IS NOT NULL AND o.strategy != 'probe' AND o.day >= ?
                                                 AND (r.client_order_id IS NULL OR r.status='open') ORDER BY o.day, o.ticker""", (cutoff,))]
     res = {"rows": len(rows), "updated": 0, "closed": 0, "open": 0}
     if not rows:
