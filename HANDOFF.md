@@ -81,7 +81,7 @@
 - 10/28 밤 폴더 정리: 옛 코드 복사본(`클로드\files` · `files\quant_system` 바로 아래)·설치 파일·PC 로그는 휴지통으로, 옛 코드 98개는 `클로드\옛코드_보관_2026-10.zip`, 옛 인수인계서는 `docs/archive/`
 - 텔레그램 토큰 재발급 여부(예전 채팅 노출) → 재발급 시 서버 `.env` 의 TELEGRAM_TOKEN 수정 후 `systemctl restart 'quant-*'`
 - 방문객 링크 새로 만들기(예전 trycloudflare 링크는 끊김)
-- 🔥 화면 캐시 타이머: 배포 뒤 서버에서 한 번 `bash /home/quant/quant_system/deploy/install_warm_timer.sh`(root, Claude 가 ssh 로 해 줄 수 있음). 설치 전엔 느린 화면이 예전처럼 느릴 뿐 오류는 없음. 상태는 관리 모드 '🔥 화면 캐시' 또는 `pagecache.py status`
+- 🔥 화면 캐시 타이머: PC 에서 `ssh root@158.247.250.15 "bash /home/quant/quant_system/deploy/install_warm_timer.sh"` 한 번(Claude 앱은 서버에 상시 실행 단위를 등록하는 일을 막아 사용자가 실행). 10/28 15:54 배포 뒤 Claude 가 `pagecache.py warm` 을 한 번 돌림(순위 17초 · 일봉 295종목 52초 · 3대 조건 0.8초 · 플래그 5.4초) → 화면 처음 열기 장마감 2.9초 · EFFECT 0.8초 · 과거 사례 1.4초 · 순위 0.4초. 타이머 없으면 순위 25분·일봉 45분 뒤 첫 방문자가 한 번 직접 계산(예전 속도)하고 다시 채움 + 아침 갱신 끝에 매일 한 번. 상태는 관리 모드 '🔥 화면 캐시' 또는 `pagecache.py status`
 - 주말 날짜 기록 정리: 서버에서 `fix_weekend_dates.py` 확인 결과(10/28) — daily_snapshots 174줄(2026-10-18 토요일) 중 금요일로 옮김 31 · 중복이라 지움 143, signals 273줄 중 옮김 34 · 지움 239. **DB 기록을 지우는 일이라 사용자 OK 뒤** `--apply`
 - 11/15~22 공시 점수 두 방식 합치기 실험(텔레그램 예약 알림 옴) · 2~4주 뒤 AI PICK·검증 순위·스크리너 카드 적중률 확인
 
