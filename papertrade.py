@@ -467,6 +467,12 @@ def open_trade(conn, strategy: str, day: str, ticker: str, price: float, *, rank
                     VALUES (?,?,?,?,?,?,?,?,'open',?,?,?,?,?,?,?,?)""",
                  (b, day, ticker, rank, score, json.dumps(parts or {}, ensure_ascii=False), float(price), float(c["usd"]) / float(price),
                   strategy, float(c["tp"]), float(c["sl"]), int(c["hold"]), _iso(sig_at), tp_px, sl_px, note))
+    try:  # 💵 실매매 배관(2026-10-29 ③): 전략이 LIVE_STRATEGIES 에 있으면 1주 매수 요청(저금통은 scan_piggy 가 따로 봄). 기본 전부 꺼짐
+        import broker
+        broker.request_buy(conn, strategy, ticker, float(price), tp_px=tp_px or (float(price) * (1 + float(c["tp"]) / 100) if c["tp"] else None),
+                           sl_px=sl_px or (float(price) * (1 - float(c["sl"]) / 100) if c["sl"] else None), hold_days=int(c["hold"]) or None, note=note or "")
+    except Exception as e:  # noqa: BLE001
+        log.warning("실매매 매수 요청 실패 %s: %s", ticker, e)
     return True
 
 

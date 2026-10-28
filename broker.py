@@ -31,7 +31,10 @@ DDL = [
     """CREATE TABLE IF NOT EXISTS live_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, ticker TEXT, note TEXT, created_at TEXT, done_at TEXT, result TEXT)""",
 ]
 LIVE_KEYS = ("LIVE_TRADING", "LIVE_ONE_SHARE", "LIVE_STRATEGIES", "LIVE_USD_PER_TRADE", "LIVE_MAX_ORDERS_PER_DAY", "LIVE_MAX_OPEN", "LIVE_MAX_EXPOSURE_USD",
-             "LIVE_MAX_PRICE", "LIVE_MIN_DOLLAR_VOL", "LIVE_LIMIT_SLIP_PCT", "LIVE_ORDER_TTL_MIN", "LIVE_DAILY_LOSS_USD", "LIVE_ACCOUNT_SEQ", "LIVE_SYNC_SEC")
+             "LIVE_MAX_PRICE", "LIVE_MIN_DOLLAR_VOL", "LIVE_LIMIT_SLIP_PCT", "LIVE_ORDER_TTL_MIN", "LIVE_DAILY_LOSS_USD", "LIVE_ACCOUNT_SEQ", "LIVE_SYNC_SEC", "LIVE_EXT_SESSIONS")
+BUY_DRIFT_MAX_PCT = 5.0            # 요청(신호) 가격보다 현재가가 이보다 더 올랐으면 안 삼(아침 신호를 밤 정규장에 집행할 때 — 2026-10-29 ③)
+BUY_TTL_MIN = {"after": 20, "close": 30}   # 요청이 이 시간(분) 안에 집행되지 않으면 만료. 나머지 전략(순위·PICK·눌림목)은 24시간
+EXT_STRATEGIES = ("after", "close")        # 시간외에 신호가 나는 전략 — LIVE_EXT_SESSIONS 가 켜져야 시간외 집행
 _sync_lock = threading.Lock()   # sync/process_requests 가 스캐너 주기와 배경 스레드에서 동시에 돌지 않게(겹치면 체결을 두 번 반영할 수 있음)
 _bg_runs = 0
 OPEN_STATES = {"PENDING", "PARTIAL_FILLED", "PENDING_CANCEL", "PENDING_REPLACE"}     # 토스 OrderStatus 중 아직 끝나지 않은 것
@@ -47,6 +50,10 @@ _account: int | None = None
 def ensure(conn) -> None:
     for d in DDL:
         conn.execute(d)
+    try:   # 2026-10-29 ③: 보유일 만료일(가상매매 hold 일 뒤 자동 매도) — ALTER ADD COLUMN(기존 행 보존)
+        conn.execute("ALTER TABLE live_positions ADD COLUMN hold_until TEXT")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def limits() -> dict:
@@ -218,7 +225,8 @@ def _set(conn, coid_: str, **kv) -> None:
 
 # ---------------------------------------------------------------- 매수·매도
 def mirror_buy(conn, tc, strategy: str, ticker: str, ref_px: float, *, tp_px: float | None = None, sl_px: float | None = None, pt_id: int | None = None,
-               dilution: str | None = None, share_cls: str | None = None, dollar_vol: float | None = None, day: str | None = None, now: datetime | None = None) -> dict:
+               dilution: str | None = None, share_cls: str | None = None, dollar_vol: float | None = None, day: str | None = None, now: datetime | None = None,
+               hold_days: int | None = None) -> dict:
     """가상매매가 산 순간 호출. 1주(또는 금액) 지정가 매수를 내거나(라이브) 기록만 한다(dry-run). 반환 {"ok","mode","why","coid"}."""
     global _fails
     ensure(conn)
@@ -239,7 +247,7 @@ def mirror_buy(conn, tc, strategy: str, ticker: str, ref_px: float, *, tp_px: fl
     n = conn.execute("SELECT COUNT(*) FROM live_orders WHERE ticker=? AND day=? AND side='BUY'", (t, day)).fetchone()[0] + 1
     cid = coid(strategy, t, "BUY", day, n)
     base = {"client_order_id": cid, "day": day, "strategy": strategy, "ticker": t, "side": "BUY", "qty": qty, "limit_px": lp, "ref_px": ref_px, "pt_id": pt_id,
-            "note": json.dumps({"tp": tp_px, "sl": sl_px}, ensure_ascii=False), "created_at": _iso(_now(now))}   # created_at 은 호출자의 시각(TTL 계산 기준)
+            "note": json.dumps({"tp": tp_px, "sl": sl_px, "hold": hold_days}, ensure_ascii=False), "created_at": _iso(_now(now))}   # created_at 은 호출자의 시각(TTL 계산 기준)
     if not live:
         _record(conn, **{**base, "note": base["note"] if ok else why}, status="DRY", mode="dry", code=None if ok else "blocked")
         conn.commit()
@@ -370,8 +378,10 @@ def _open_position(conn, row: dict, o: dict, now: datetime) -> None:
         meta = json.loads(row.get("note") or "{}")
     except ValueError:
         meta = {}
-    conn.execute("INSERT OR REPLACE INTO live_positions (ticker, strategy, qty, avg_px, tp_px, sl_px, cond_id, opened_at, buy_coid) VALUES (?,?,?,?,?,?,NULL,?,?)",
-                 (row["ticker"], row["strategy"], qty, px, meta.get("tp"), meta.get("sl"), _iso(now), row["client_order_id"]))
+    hold = meta.get("hold")
+    hold_until = (now.date() + timedelta(days=int(hold))).isoformat() if hold else None
+    conn.execute("INSERT OR REPLACE INTO live_positions (ticker, strategy, qty, avg_px, tp_px, sl_px, cond_id, opened_at, buy_coid, hold_until) VALUES (?,?,?,?,?,?,NULL,?,?,?)",
+                 (row["ticker"], row["strategy"], qty, px, meta.get("tp"), meta.get("sl"), _iso(now), row["client_order_id"], hold_until))
     _journal(conn, row["ticker"], "매수", _day(now), px, qty, row["strategy"], f"자동 체결 · 지정가 ${row['limit_px']:g}")
     _notify(f"✅ 매수 체결 {row['ticker']} {qty:g}주 @${px:g}")
 
@@ -486,6 +496,13 @@ def _sync(conn, tc, now: datetime, out: dict) -> dict:
                 out["oco_fills"] += 1
                 break
     conn.commit()
+    if _regular(now):   # 보유일 만료(가상매매 hold 일) → 현재가 −여유% 지정가로 정리(2026-10-29 ③)
+        for p in positions(conn):
+            hu = p.get("hold_until")
+            if hu and _day(now) >= str(hu) and not conn.execute("SELECT 1 FROM live_orders WHERE ticker=? AND side='SELL' AND mode='live' AND status IN ('PENDING','PARTIAL_FILLED')", (p["ticker"],)).fetchone():
+                px = _px_now(tc, p["ticker"], None)
+                if px:
+                    sell(conn, tc, p["ticker"], float(px), f"보유일 만료({hu})", now=now, force=True)
     st = day_stats(conn, _day(now))
     if st["realized"] <= -abs(float(config.LIVE_DAILY_LOSS_USD)):
         out["kill"] = kill(conn, tc, f"오늘 실현손실 ${st['realized']:+.2f}", now=now)
@@ -559,7 +576,11 @@ def _process_requests(conn, tc, prices: dict | None, now: datetime | None) -> in
     n = 0
     for r in conn.execute("SELECT * FROM live_requests WHERE done_at IS NULL ORDER BY id").fetchall():
         r = dict(r)
-        if r["kind"] == "kill":
+        if r["kind"] == "buy":
+            res = _buy_request(conn, tc, r, prices, _now(now))
+            if res is None:
+                continue   # 아직 때가 아님 — 다음 동기화에 다시
+        elif r["kind"] == "kill":
             res = kill(conn, tc, r.get("note") or "화면 요청", now=now)
         elif r["kind"] == "sell":
             px = _px_now(tc, r["ticker"], prices)
@@ -587,26 +608,70 @@ def _process_requests(conn, tc, prices: dict | None, now: datetime | None) -> in
     return n
 
 
+def ticker_facts(conn, t: str) -> dict:
+    """금지 목록 재료: 희석 상태 · 20일 거래대금(daily_snapshots 최신) · ⑥ 주식수 변동 구분."""
+    snap = conn.execute("SELECT dilution_status, avg_dollar_vol FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
+    cls6 = None
+    try:
+        import shares
+        sc = shares.change(t, conn)
+        if sc:
+            p6 = round(sc["pct"], 6)
+            cls6 = "bad" if p6 > 20 else "warn" if p6 > 10 else "ok"
+    except Exception:  # noqa: BLE001
+        cls6 = None
+    return {"dilution": snap["dilution_status"] if snap else None, "dollar_vol": snap["avg_dollar_vol"] if snap else None, "share_cls": cls6}
+
+
+def request_buy(conn, strategy: str, ticker: str, ref_px: float, *, tp_px: float | None = None, sl_px: float | None = None, hold_days: int | None = None,
+                note: str = "", now: datetime | None = None) -> int | None:
+    """가상매매가 산 순간(papertrade.open_trade) 부르는 배관(2026-10-29 ③): 전략이 LIVE_STRATEGIES 에 있을 때만 'buy' 요청을 넣는다(저금통은 scan_piggy 가 따로).
+    요청은 스캐너가 허용 세션에 현재가로 집행(아침 신호 → 밤 정규장). 실매매가 꺼져 있어도 요청은 남겨 dry-run 기록이 되게 한다."""
+    if strategy == "piggy" or strategy not in strategies():
+        return None
+    ensure(conn)
+    body = {"strategy": strategy, "ref_px": float(ref_px), "tp": tp_px, "sl": sl_px, "hold": hold_days, "note": note}
+    cur = conn.execute("INSERT INTO live_requests (kind, ticker, note, created_at) VALUES (?,?,?,?)", ("buy", ticker.upper(), json.dumps(body, ensure_ascii=False), _iso(_now(now))))
+    return int(cur.lastrowid)
+
+
+def _buy_request(conn, tc, r: dict, prices: dict | None, now: datetime) -> str | None:
+    """'buy' 요청 하나 집행. None 을 돌려주면 아직 때가 아님(대기 유지)."""
+    try:
+        body = json.loads(r.get("note") or "{}")
+    except ValueError:
+        return "요청 형식 오류"
+    strategy, t = str(body.get("strategy") or ""), r["ticker"]
+    created = _parse_iso(r.get("created_at")) or now
+    ttl = timedelta(minutes=BUY_TTL_MIN.get(strategy, 24 * 60))
+    if now - created > ttl:
+        return f"만료({int(ttl.total_seconds() // 60)}분 안에 집행 못 함)"
+    in_regular = _regular(now)
+    if not in_regular and not (strategy in EXT_STRATEGIES and bool(getattr(config, "LIVE_EXT_SESSIONS", False))):
+        return None   # 정규장 열릴 때까지 대기(시간외 전략은 LIVE_EXT_SESSIONS 가 켜져야)
+    px = _px_now(tc, t, prices)
+    if not px:
+        return None
+    ref = float(body.get("ref_px") or 0)
+    if ref and px > ref * (1 + BUY_DRIFT_MAX_PCT / 100):
+        return f"가격 이탈(신호 ${ref:g} → 지금 ${px:g}, +{(px / ref - 1) * 100:.1f}%)"
+    f = ticker_facts(conn, t)
+    tp, sl = body.get("tp"), body.get("sl")
+    res = mirror_buy(conn, tc, strategy, t, float(px), tp_px=tp, sl_px=sl, dilution=f["dilution"], share_cls=f["share_cls"], dollar_vol=f["dollar_vol"],
+                     now=now, hold_days=body.get("hold"))
+    return json.dumps(res, ensure_ascii=False)
+
+
 def piggy_targets(conn) -> list[dict]:
     """🐷 저금통 종목 + 박스(가상매매 open_piggy 와 같은 계산) + 금지 목록 재료(희석 상태 · ⑥ 주식수 변동 · 20일 거래대금)."""
     import piggy
-    import shares
     mm = piggy.metrics_map()
     out = []
     for r in piggy.items().to_dict("records"):
         t = r["ticker"]
         lo, hi, _src = piggy.box_of(r, mm.get(t))
-        snap = conn.execute("SELECT dilution_status, avg_dollar_vol FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
-        cls6 = None
-        try:
-            sc = shares.change(t, conn)
-            if sc:
-                p6 = round(sc["pct"], 6)
-                cls6 = "bad" if p6 > 20 else "warn" if p6 > 10 else "ok"
-        except Exception:  # noqa: BLE001
-            cls6 = None
-        out.append({"ticker": t, "lo": lo, "hi": hi, "category": r.get("category"), "dilution": snap["dilution_status"] if snap else None,
-                    "dollar_vol": snap["avg_dollar_vol"] if snap else None, "share_cls": cls6})
+        f = ticker_facts(conn, t)
+        out.append({"ticker": t, "lo": lo, "hi": hi, "category": r.get("category"), **f})
     return out
 
 

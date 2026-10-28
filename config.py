@@ -216,6 +216,7 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "LIVE_DAILY_LOSS_USD": (float, 5.0, 1000.0, "실매매", "오늘 실현손실이 이 금액($)을 넘으면 킬 스위치"),
     "LIVE_ACCOUNT_SEQ": (str, None, None, "실매매", "주문 계좌 accountSeq(비우면 첫 종합매매 계좌)"),
     "LIVE_SYNC_SEC": (int, 20, 600, "실매매", "체결·요청 동기화 주기(초) — 스캐너 주기(정규장 ≈13분)와 별도의 배경 스레드"),
+    "LIVE_EXT_SESSIONS": (bool, None, None, "실매매", "시간외(프리·애프터·데이마켓)에도 주문 — 시간외 1주 테스트로 확인한 뒤에만 켤 것(장마감·애프터 전략용)"),
     "RANK_NEWS_EVIDENCE": (bool, None, None, "순위 가중치", "🧮 공시 점수를 과거 성과(이벤트 연구) 기준으로 — 검증 통과 때만, 끄면 예전 호재/악재 규칙"),
     "AI_AUTO_CHECK": (bool, None, None, "기능", "🔀 새 덕구 보고서가 들어오면 자동 교차검증"),
     "AI_MODEL": (str, None, None, "AI", "🤖 AI 모델(Opus 는 더 정확하지만 비용 약 2배)"),
@@ -227,7 +228,7 @@ RANK_NEWS_EVIDENCE = True   # 🧮 공시 점수 = 과거 성과 기반(evscore,
 # 💵 실매매 기본값(전부 안전한 쪽): 꺼짐 · 1주 모드 · 저금통만 · 하루 3건 · 3종목/$500 · $5 이하 · 거래대금 $50k · 여유 1% · 30분 TTL · 일손실 $50
 LIVE_TRADING, LIVE_ONE_SHARE, LIVE_STRATEGIES, LIVE_USD_PER_TRADE = False, True, "piggy", 100.0
 LIVE_MAX_ORDERS_PER_DAY, LIVE_MAX_OPEN, LIVE_MAX_EXPOSURE_USD, LIVE_MAX_PRICE, LIVE_MIN_DOLLAR_VOL = 3, 3, 500.0, 5.0, 50000.0
-LIVE_LIMIT_SLIP_PCT, LIVE_ORDER_TTL_MIN, LIVE_DAILY_LOSS_USD, LIVE_ACCOUNT_SEQ, LIVE_SYNC_SEC = 1.0, 30, 50.0, "", 60
+LIVE_LIMIT_SLIP_PCT, LIVE_ORDER_TTL_MIN, LIVE_DAILY_LOSS_USD, LIVE_ACCOUNT_SEQ, LIVE_SYNC_SEC, LIVE_EXT_SESSIONS = 1.0, 30, 50.0, "", 60, False
 GUEST_ALERTS = os.environ.get("GUEST_ALERTS", "1") != "0"                      # 👥 방문객 접속 알림
 AI_MONTHLY_BUDGET_KRW = int(os.environ.get("AI_MONTHLY_BUDGET_KRW", "10000"))   # 🤖 AI 월 예산(원)
 AI_AUTO_CHECK = os.environ.get("AI_AUTO_CHECK", "1") != "0"                     # 🔀 새 덕구 보고서 자동 교차검증

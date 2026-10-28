@@ -209,7 +209,7 @@ with closing(db.connect()) as conn:
     r = broker.scan_piggy(conn, tc, prices=PX, now=T2); assert r["bought"] == ["PGA"] and r["skipped"] == {"PGB": "희석 ATM"}, r
     assert broker.scan_piggy(conn, tc, prices=PX, now=T2 + timedelta(minutes=1))["bought"] == []                                  # 실주문 기록은 같은 날 다시 안 냄
     assert tc.calls[n_calls][0] == "create" and tc.calls[n_calls][1:4] == ("PGA", "BUY", 1) and abs(tc.calls[n_calls][4] - 1.03) < 1e-9   # 1.02 × 1.01 = 1.0302 → $1 이상은 소수 2자리 절삭
-    oid = tc.calls[n_calls][5]; row = dict(conn.execute("SELECT * FROM live_orders WHERE client_order_id=?", (oid,)).fetchone()); assert json.loads(row["note"]) == {"tp": 1.3, "sl": 0.95}
+    oid = tc.calls[n_calls][5]; row = dict(conn.execute("SELECT * FROM live_orders WHERE client_order_id=?", (oid,)).fetchone()); assert {k: json.loads(row["note"])[k] for k in ("tp", "sl")} == {"tp": 1.3, "sl": 0.95}   # hold 는 저금통엔 없음(None)
     tc.fill(row["order_id"], 1.02); broker.sync(conn, tc, now=T2 + timedelta(minutes=1))
     pos = broker.positions(conn); assert [p["ticker"] for p in pos] == ["PGA"] and pos[0]["tp_px"] == 1.3 and abs(pos[0]["sl_px"] - 0.95) < 1e-9 and pos[0]["cond_id"], pos
     config.LIVE_STRATEGIES = ""; assert broker.scan_piggy(conn, tc, prices=PX, now=T2)["checked"] == 0; config.LIVE_STRATEGIES = "piggy"
@@ -263,4 +263,40 @@ with closing(db.connect()) as conn:
         time.sleep(0.05)
     stop.set(); th.join(2)
     assert broker._bg_runs >= before + 2 and not th.is_alive() and broker.positions(conn) == [], (broker._bg_runs, before)   # 스레드가 체결(매도)을 반영해 보유를 정리
+# 13) ③ 다른 전략 배관: 꺼진 전략은 요청 없음 · 켜면 'buy' 요청 → 장 밖 대기 · 가격 이탈 거절 · 정규장 집행(1주) · 애프터는 LIVE_EXT_SESSIONS 뒤에만, 20분 만료 · 보유일 만료 자동 매도
+import papertrade as _pt
+with closing(db.connect()) as conn:
+    _pt.ensure(conn); broker.ensure(conn)
+    assert broker.request_buy(conn, "rank", "RK1", 1.0, tp_px=1.2, sl_px=0.9, hold_days=3) is None and broker.request_buy(conn, "piggy", "PG9", 1.0) is None   # 꺼진 전략·저금통은 요청 없음
+    config.LIVE_STRATEGIES = "piggy,rank,after"
+    T4 = datetime(2026, 11, 3, 15, 0, tzinfo=timezone.utc)                                             # 화요일 10:00 EST 정규장
+    rid = broker.request_buy(conn, "rank", "rk1", 1.0, tp_px=1.2, sl_px=0.9, hold_days=3, now=T4 - timedelta(hours=8)); assert rid
+    tc.prices = lambda syms: {t: {"price": 1.02} for t in syms}
+    assert broker.process_requests(conn, tc, now=T4 - timedelta(hours=7)) == 0 and dict(conn.execute("SELECT done_at FROM live_requests WHERE id=?", (rid,)).fetchone())["done_at"] is None   # 장 밖(02:00 EST) → 대기
+    tc.prices = lambda syms: {t: {"price": 1.10} for t in syms}
+    assert broker.process_requests(conn, tc, now=T4) == 1 and "가격 이탈" in dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid,)).fetchone())["result"]   # +10% 는 안 삼
+    rid2 = broker.request_buy(conn, "rank", "RK1", 1.0, tp_px=1.2, sl_px=0.9, hold_days=3, now=T4); tc.prices = lambda syms: {t: {"price": 1.02} for t in syms}
+    n0 = len(tc.calls); assert broker.process_requests(conn, tc, now=T4 + timedelta(minutes=1)) == 1
+    res = json.loads(dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid2,)).fetchone())["result"]); assert res["ok"] and res["mode"] == "live" and tc.calls[n0][1:4] == ("RK1", "BUY", 1), res
+    tc.fill(res["order_id"], 1.02); broker.sync(conn, tc, now=T4 + timedelta(minutes=2))
+    p = [x for x in broker.positions(conn) if x["ticker"] == "RK1"][0]; assert p["hold_until"] == "2026-11-06" and p["cond_id"], p
+    # papertrade.open_trade 가 요청을 넣는지(전략 rank, tp/sl % → 절대가)
+    _pt.save_settings({}); c = _pt.cfg("rank")
+    assert _pt.open_trade(conn, "rank", "2026-11-03", "RK2", 2.0, rank=1, score=50.0, c=c)
+    rq = dict(conn.execute("SELECT kind, ticker, note FROM live_requests ORDER BY id DESC LIMIT 1").fetchone()); b = json.loads(rq["note"])
+    assert rq["kind"] == "buy" and rq["ticker"] == "RK2" and b["strategy"] == "rank" and abs(b["tp"] - 2.0 * (1 + c["tp"] / 100)) < 1e-9 and abs(b["sl"] - 2.0 * (1 - c["sl"] / 100)) < 1e-9 and b["hold"] == c["hold"], b
+    conn.execute("UPDATE live_requests SET done_at='x' WHERE kind='buy' AND done_at IS NULL"); conn.commit()
+    # 애프터: 시간외 허용이 꺼져 있으면 대기하다 20분 뒤 만료 · 켜면 집행
+    T5 = datetime(2026, 11, 3, 22, 0, tzinfo=timezone.utc)                                             # 17:00 EST 애프터
+    ra = broker.request_buy(conn, "after", "AF1", 0.5, tp_px=0.55, sl_px=0.47, now=T5)
+    assert broker.process_requests(conn, tc, now=T5 + timedelta(minutes=5)) == 0
+    assert broker.process_requests(conn, tc, now=T5 + timedelta(minutes=25)) == 1 and "만료" in dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (ra,)).fetchone())["result"]
+    config.LIVE_EXT_SESSIONS = True; tc.prices = lambda syms: {t: {"price": 0.5} for t in syms}
+    ra2 = broker.request_buy(conn, "after", "AF1", 0.5, tp_px=0.55, sl_px=0.47, now=T5 + timedelta(minutes=30)); n0 = len(tc.calls)
+    assert broker.process_requests(conn, tc, now=T5 + timedelta(minutes=31)) == 1 and tc.calls[n0][1:4] == ("AF1", "BUY", 1); config.LIVE_EXT_SESSIONS = False
+    # 보유일 만료: RK1(hold_until 11/6) → 11/6 정규장 동기화에서 자동 매도
+    tc.prices = lambda syms: {t: {"price": 1.05} for t in syms}; n0 = len(tc.calls)
+    broker.sync(conn, tc, now=datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc))
+    sells = [c_ for c_ in tc.calls[n0:] if c_[0] == "create" and c_[1] == "RK1" and c_[2] == "SELL"]; assert len(sells) == 1 and abs(sells[0][4] - 1.03) < 1e-9, tc.calls[n0:]   # 1.05 × 0.99 = 1.0395 → $1 이상 2자리 절삭
+    config.LIVE_STRATEGIES = "piggy"
 print("ALL OK")
