@@ -47,7 +47,10 @@ with closing(db.connect()) as conn:
     assert shares.change("ONE", conn) is None and shares.change("FPI", conn) is None and shares.change("OLD", conn) is None and shares.change("NONE", conn) is None
     # 보류 이유 문구(🐷 ⑥ 화면 값): 1개 · 연 1회(20-F) · 오래됨 · 없음 · 직전 분기 표지 없음(간격 < 75일)
     rs = {t: shares.hold_reason(t, conn) for t in ("ONE", "FPI", "OLD", "NONE", "HUBC")}; print(rs)
-    assert rs["ONE"].startswith("SEC 표지 1개뿐") and A1 in rs["ONE"] and rs["FPI"].startswith("연 1회 보고(20-F") and "365일" in rs["FPI"]
+    assert rs["ONE"].startswith("SEC 표지 1개뿐") and A1 in rs["ONE"] and rs["FPI"] == f"연 1회 보고(20-F · 최신 표지 {d(35)}) — 분기 변동 판정 불가"
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("FPI1", d(301), "f", "20-F", 1e6), ("FPIX", d(666), "f", "20-F", 1e6), ("TENK", d(500), "f", "10-K", 1e6), ("TENK", d(135), "f", "10-K", 1e6)]); conn.commit()
+    assert shares.hold_reason("FPI1", conn).startswith("연 1회 보고(20-F · 최신 표지") and shares.hold_reason("FPIX", conn).startswith("연 1회 보고(20-F) 인데 최신 표지가 666일 전")   # 20-F 는 표지 1개·300일이어도 '연 1회', 1년 반 넘으면 지연
+    assert shares.hold_reason("TENK", conn) == "연 1회 보고(10-K · 표지 간격 365일) — 분기 변동 판정 불가" and shares.change("TENK", conn) is None
     assert rs["OLD"].startswith("SEC 최신 표지가 300일 전") and rs["NONE"].startswith("SEC 표지 없음") and "ChartExchange" in rs["NONE"]
     conn.execute("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", ("HUBC", d(60), "f", "10-Q", 6e7)); conn.commit()   # 최신 표지 뒤 17일 만에 또 표지(S-1 등) → 직전 분기 표지는 그 전 것
     assert shares.change("HUBC", conn)["d0"] == A0 and shares.hold_reason("CLOSE", conn).startswith("SEC 표지 없음")

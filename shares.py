@@ -225,18 +225,22 @@ def hold_reason(t: str, conn=None, min_gap: int = 75, max_gap: int = 200, max_ag
         return "SEC 표지 없음(XBRL 미제출·CIK 없음) · ChartExchange 없음"
     p1 = pts[-1]
     form = str(p1.get("form") or "")
-    if len(pts) == 1:
-        return f"SEC 표지 1개뿐({p1['asof']} {form}) — 다음 분기 보고 뒤 판정"
     try:
         d1 = date.fromisoformat(p1["asof"])
         age = (date.today() - d1).days
-        gap = (d1 - date.fromisoformat(pts[-2]["asof"])).days
+        gap = (d1 - date.fromisoformat(pts[-2]["asof"])).days if len(pts) >= 2 else None
     except ValueError:
         return "SEC 표지 날짜 이상"
+    if form.upper().startswith(("20-F", "40-F")):   # 연 1회 보고는 표지가 300일 됐어도 정상(10/28 서버: 42종목이 '중단' 으로 잘못 나옴) — 1년 반 넘으면 지연
+        if age > 540:
+            return f"연 1회 보고({form}) 인데 최신 표지가 {age}일 전({p1['asof']}) — 보고 지연·중단"
+        return f"연 1회 보고({form} · 최신 표지 {p1['asof']}) — 분기 변동 판정 불가"
+    if len(pts) == 1:
+        return f"SEC 표지 1개뿐({p1['asof']} {form}) — 다음 분기 보고 뒤 판정"
     if age > max_age:
         return f"SEC 최신 표지가 {age}일 전({p1['asof']} {form}) — 보고 중단·지연"
-    if form.upper().startswith(("20-F", "40-F")) or gap > max_gap:
-        return f"연 1회 보고({form or '20-F'} · 표지 간격 {gap}일) — 분기 변동 판정 불가"
+    if gap > max_gap:
+        return f"연 1회 보고({form} · 표지 간격 {gap}일) — 분기 변동 판정 불가"
     if gap < min_gap:
         return f"직전 분기 표지 없음(최근 두 표지 간격 {gap}일)"
     return "표지 값 이상(0 또는 음수)"
