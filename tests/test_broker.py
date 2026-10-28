@@ -213,4 +213,10 @@ with closing(db.connect()) as conn:
     s = broker.sync(conn, tc, now=T3 + timedelta(minutes=2)); assert s["filled"] == 1 and all(p["ticker"] != "AAPL" for p in broker.positions(conn))
     cl = db.read_df("SELECT * FROM live_closed WHERE ticker='AAPL'"); assert len(cl) == 1 and abs(cl.iloc[0]["pnl_usd"] + 1.0) < 1e-9 and cl.iloc[0]["reason"] == "1주 왕복 테스트 매도"
     assert any("1주 왕복" in x or "AAPL" in x for x in sent)
+# 11) 계좌 확인 요청(읽기만): 계좌번호는 끝 4자리만 · 달러 매수가능금액
+with closing(db.connect()) as conn:
+    rid = broker.request(conn, "check"); assert broker.process_requests(conn, tc, {}, now=T3) == 1
+    res = json.loads(dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid,)).fetchone())["result"])
+    assert res["ok"] and res["accounts"] == [{"accountSeq": 77, "accountNo": "**3-45", "type": "BROKERAGE"}] and res["usd_buying_power"] == 1000.0, res
+    assert broker._mask("12345678") == "****5678" and broker._mask(None) == ""
 print("ALL OK")

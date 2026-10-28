@@ -29,6 +29,9 @@ at.text_input(key="live_probe_t").set_value("aapl").run(); btn("live_probe").cli
 with closing(db.connect()) as conn:
     req = [dict(r) for r in conn.execute("SELECT kind, ticker, done_at FROM live_requests ORDER BY id")]
 assert req == [{"kind": "probe", "ticker": "AAPL", "done_at": None}], req
+btn("live_check").click().run(); assert not at.exception
+with closing(db.connect()) as conn:
+    assert [r[0] for r in conn.execute("SELECT kind FROM live_requests ORDER BY id")] == ["probe", "check"]
 # 한도 저장: 기본값과 다른 것만 overrides 에
 at.number_input(key="live_LIVE_MAX_OPEN").set_value(2)                      # 폼 안 위젯은 run() 없이 값만 두고 제출 버튼으로
 [b for b in at.button if b.label == "한도 저장"][0].click().run(); assert not at.exception
@@ -37,7 +40,7 @@ ov = config.overrides(); assert ov.get("LIVE_MAX_OPEN") == 2 and "LIVE_MAX_PRICE
 btn("live_kill").click().run(); assert not at.exception
 with closing(db.connect()) as conn:
     kinds = [r[0] for r in conn.execute("SELECT kind FROM live_requests ORDER BY id")]
-assert kinds == ["probe", "kill"] and config.LIVE_TRADING is False and config.overrides().get("LIVE_TRADING") is None, (kinds, config.overrides())   # 기본값(꺼짐)과 같으면 저장 안 함
+assert kinds == ["probe", "check", "kill"] and config.LIVE_TRADING is False and config.overrides().get("LIVE_TRADING") is None, (kinds, config.overrides())   # 기본값(꺼짐)과 같으면 저장 안 함
 # 킬 메모가 있으면 해제 버튼
 db.set_meta("live:kill", "2026-10-29 테스트"); at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception
 assert any(b.key == "live_unkill" for b in at.button) and not any(b.key == "live_kill" for b in at.button)

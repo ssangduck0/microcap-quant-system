@@ -75,6 +75,10 @@ def render() -> None:
             if s["pending"]:
                 st.markdown("**미체결(실주문)**")
                 st.dataframe(pd.DataFrame(s["pending"])[["ticker", "side", "qty", "limit_px", "status", "created_at", "note"]], hide_index=True, width="stretch")
+            # ---- 계좌 확인(읽기만)
+            if st.button("계좌·달러 매수가능금액 확인(읽기만 · 실주문 꺼져 있어도 됨)", key="live_check"):
+                broker.request(conn, "check", "", "관리 화면")
+                st.info("스캐너가 1분 안에 확인해 아래 요청 표와 텔레그램에 결과를 적습니다. 키가 계좌 API 를 못 쓰면 여기서 오류 코드가 나와요.")
             # ---- 1주 왕복 테스트
             st.markdown("**1주 왕복 테스트** — 1주를 사서 체결되면 바로 되팝니다(정규장 · 실주문 켜져 있어야 함). 첫 실주문 전에 한 번.")
             p1, p2 = st.columns([2, 1])

@@ -513,6 +513,17 @@ def process_requests(conn, tc, prices: dict | None = None, *, now: datetime | No
                 except Exception as e:  # noqa: BLE001
                     log.warning("probe 가격 조회 실패: %s", e)
             res = json.dumps(mirror_buy(conn, tc, "probe", r["ticker"], float(px), now=now), ensure_ascii=False) if px else "가격 없음"
+        elif r["kind"] == "check":   # 읽기만: 계좌·달러 매수가능금액 — 키가 계좌 API 를 쓸 수 있는지(= 주문 권한의 간접 확인). 실주문이 꺼져 있어도 됨
+            try:
+                accs = tc.accounts() if tc is not None else []
+                acc = account(tc)
+                bp = tc.buying_power(acc, "USD") if (tc is not None and acc is not None) else {}
+                res = json.dumps({"ok": True, "accounts": [{"accountSeq": a.get("accountSeq"), "accountNo": _mask(a.get("accountNo")), "type": a.get("accountType")} for a in accs],
+                                  "usd_buying_power": bp.get("cashBuyingPower")}, ensure_ascii=False)
+                _notify(f"계좌 확인 OK — 계좌 {len(accs)}개 · 달러 매수가능 ${float(bp.get('cashBuyingPower') or 0):,.2f}")
+            except Exception as e:  # noqa: BLE001
+                res = f"실패 {getattr(e, 'code', type(e).__name__)}: {str(e)[:150]}"
+                _notify(f"계좌 확인 실패: {res[:120]}")
         else:
             res = "모르는 요청"
         conn.execute("UPDATE live_requests SET done_at=?, result=? WHERE id=?", (_iso(_now(now)), str(res)[:300], r["id"]))
@@ -577,6 +588,11 @@ def scan_piggy(conn, tc, *, prices: dict | None = None, now: datetime | None = N
         else:
             out["skipped"][t] = r.get("why")
     return out
+
+
+def _mask(no) -> str:
+    s = str(no or "")
+    return ("*" * max(0, len(s) - 4) + s[-4:]) if s else ""
 
 
 def status(conn, *, now: datetime | None = None) -> dict:
