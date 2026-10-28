@@ -100,9 +100,10 @@ def is_fresh(iso: str | None, hours: float) -> bool:
 
 
 def connect() -> sqlite3.Connection:
+    # 2026-10-28: 예전엔 연결마다 PRAGMA journal_mode=WAL 을 실행했는데, 서버에서 재 보니 그 한 줄이 연결 비용의 96%(0.04ms → 0.98ms)였다.
+    # WAL 은 DB 파일에 한 번 설정하면 계속 유지되므로 init_db() 에서 한 번만 켠다(🏁 순위 계산처럼 연결을 1만 번 여는 곳이 두 배 빨라짐).
     conn = sqlite3.connect(config.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -114,6 +115,7 @@ MIGRATIONS = {"daily_snapshots": [("day_change_pct", "REAL"), ("pre_dd_pct", "RE
 
 def init_db() -> None:
     with closing(connect()) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")   # 파일에 한 번 켜 두면 모든 연결이 WAL(읽기·쓰기 동시) — connect() 는 더 이상 매번 안 함(2026-10-28)
         conn.executescript(SCHEMA)
         for table, cols in MIGRATIONS.items():
             have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
@@ -260,9 +262,12 @@ def insert_signal(conn, s: dict) -> None:
 
 
 # ---------- reports / notes ----------
-def get_report(ticker: str):
-    with closing(connect()) as conn:
-        row = conn.execute("SELECT payload FROM reports WHERE ticker=?", (ticker,)).fetchone()
+def get_report(ticker: str, conn=None):
+    """conn 을 주면 그 연결로(순위 계산이 종목마다 부름 — 연결을 새로 안 열기, 2026-10-28)."""
+    if conn is None:
+        with closing(connect()) as c:
+            return get_report(ticker, c)
+    row = conn.execute("SELECT payload FROM reports WHERE ticker=?", (ticker,)).fetchone()
     return json.loads(row["payload"]) if row else None
 
 

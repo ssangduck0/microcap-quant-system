@@ -315,6 +315,13 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             with closing(db.connect()) as _c:
                 _cands = pressure.candidates(_c)
             _shS.build_missing(_cl, _cands, limit=80, out=out)
+            try:  # 🐷 저금통 ⑥ 주식수 변동(SEC 표지 이력, 2026-10-28): 저금통 후보도 표지 추정·이력을 받아 둔다(압박 후보 80개에 밀리지 않게 별도 상한)
+                import piggy as _pg
+                with closing(db.connect()) as _c:
+                    _ptk = _pg.share_targets(_c)
+                _shS.build_missing(_cl, _ptk, limit=60, out=lambda m: out(f"🐷 {m}"))
+            except Exception as e:  # noqa: BLE001
+                log.warning("저금통 주식수 이력 갱신 실패: %s", e)
             listing.backfill(_cl, limit=30, out=out)
     except Exception as e:  # noqa: BLE001
         log.warning("주식 수·상장유지 갱신 실패: %s", e)

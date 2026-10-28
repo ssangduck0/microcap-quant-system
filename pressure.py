@@ -54,11 +54,11 @@ def candidates(conn) -> list[str]:
 
 def evaluate(t: str, conn, price: float | None, df: pd.DataFrame | None = None, today: date | None = None) -> dict:
     today = today or date.today()
-    rep = db.get_report(t) or {}
+    rep = db.get_report(t, conn) or {}   # 2026-10-28: 아래 넷은 순위 계산이 종목마다 부르므로 같은 연결을 넘긴다(결과 같음, 연결 비용 절약)
     rw = rep.get("runway") or {}
     snap = conn.execute("SELECT float_shares, dilution_status, price FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
     import shares as _sh
-    fs, fs_tag = _sh.best(t, snap["float_shares"] if snap else None)  # 📐 SEC 표지 주식 수(분할 반영) 우선, 없으면 야후
+    fs, fs_tag = _sh.best(t, snap["float_shares"] if snap else None, conn=conn)  # 📐 SEC 표지 주식 수(분할 반영) 우선, 없으면 야후
     dil = snap["dilution_status"] if snap else None
     price = price or (snap["price"] if snap else None)
     press, notes, warn, parts = [], [], [], {}
@@ -87,7 +87,7 @@ def evaluate(t: str, conn, price: float | None, df: pd.DataFrame | None = None, 
     ln = None
     try:  # 🏛 $1 말고 다른 상장유지 기준(시가총액·자기자본·정기보고서 지연 등) 미달 통지
         import listing
-        ln = listing.latest(t)
+        ln = listing.latest(t, conn=conn)
     except Exception:  # noqa: BLE001
         pass
     if ln and ln["kinds"][0] != "주가 $1 기준":
@@ -128,7 +128,7 @@ def evaluate(t: str, conn, price: float | None, df: pd.DataFrame | None = None, 
         warn.append(f"{dil} 열림 — 주가를 안 올려도 시장에 팔 수 있음")
     try:
         import watch
-        oh = watch.overhang_summary(watch.overhang_rows(t).to_dict("records"), price)
+        oh = watch.overhang_summary(watch.overhang_rows(t, conn=conn).to_dict("records"), price)
         if oh.get("below_m") and fs:
             warn.append(f"출회 가능 물량 유통의 {oh['below_m'] * 1e6 / fs * 100:.0f}%")
     except Exception:  # noqa: BLE001

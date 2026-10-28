@@ -14,20 +14,34 @@ import db
 
 ISSUE_FORMS = ("424B", "S-1", "F-1", "S-3", "F-3", "EFFECT")
 DDL = "CREATE TABLE IF NOT EXISTS shares_info (ticker TEXT PRIMARY KEY, data TEXT, updated TEXT)"
+HIST_DDL = "CREATE TABLE IF NOT EXISTS shares_hist (ticker TEXT NOT NULL, asof TEXT NOT NULL, filed TEXT, form TEXT, shares REAL NOT NULL, PRIMARY KEY (ticker, asof))"  # 🐷 ⑥ 표지 발행주식 이력(2026-10-28)
 
 
-def cover_shares(cf: dict) -> dict | None:
+def _points(cf: dict) -> tuple[str, list[dict]]:
+    """표지 발행주식수 이력 — 기준일(end)마다 한 점: 같은 기준일은 가장 늦게 낸 서류의 값, 여러 종류 주식(Class A/B)은 합산.
+    dei:EntityCommonStockSharesOutstanding 이 있으면 그것만, 없으면 us-gaap CommonStockSharesOutstanding. 반환 (출처 문자열, [{asof, filed, form, shares}] 기준일 순)."""
     for tax, name in (("dei", "EntityCommonStockSharesOutstanding"), ("us-gaap", "CommonStockSharesOutstanding")):
         rows = (((cf.get("facts") or {}).get(tax) or {}).get(name) or {}).get("units", {}).get("shares") or []
         if not rows:
             continue
-        last_end = max(r["end"] for r in rows)
-        same = [r for r in rows if r["end"] == last_end]
-        last_filed = max(r.get("filed", "") for r in same)
-        same = [r for r in same if r.get("filed", "") == last_filed]
-        total = sum(float(r["val"]) for r in {(r.get("accn"), r.get("frame"), r["val"]): r for r in same}.values())
-        return {"shares": total, "asof": last_end, "filed": last_filed, "form": same[0].get("form"), "src": f"SEC {tax}:{name}"}
-    return None
+        out = []
+        for end in sorted({r["end"] for r in rows}):
+            same = [r for r in rows if r["end"] == end]
+            last_filed = max(r.get("filed", "") for r in same)
+            same = [r for r in same if r.get("filed", "") == last_filed]
+            total = sum(float(r["val"]) for r in {(r.get("accn"), r.get("frame"), r["val"]): r for r in same}.values())
+            out.append({"asof": end, "filed": last_filed, "form": same[0].get("form"), "shares": total})
+        return f"SEC {tax}:{name}", out
+    return "", []
+
+
+def cover_shares(cf: dict) -> dict | None:
+    """가장 최근 표지의 발행주식 수(기준일 포함) — _points 의 마지막 점."""
+    src, pts = _points(cf)
+    if not pts:
+        return None
+    p = pts[-1]
+    return {"shares": p["shares"], "asof": p["asof"], "filed": p["filed"], "form": p["form"], "src": src}
 
 
 def splits_after(t: str, asof: str, conn) -> list[dict]:
@@ -62,11 +76,13 @@ def estimate(t: str, client) -> dict | None:
     cik = client.cik_for(t)
     if not cik:
         return None
-    c = cover_shares(client.companyfacts(cik))
+    cf = client.companyfacts(cik)
+    c = cover_shares(cf)
     if not c:
         return None
     with closing(db.connect()) as conn:
         conn.execute(DDL)
+        save_history(conn, t, _points(cf)[1])   # 🐷 ⑥ 주식수 변동용 표지 이력(2026-10-28) — 같은 자료라 추가 요청 없음
         sp = splits_after(t, c["asof"], conn)
         mult = 1.0
         for s in sp:
@@ -78,16 +94,19 @@ def estimate(t: str, client) -> dict | None:
     return d
 
 
-def get(t: str) -> dict | None:
-    with closing(db.connect()) as conn:
-        conn.execute(DDL)
-        r = conn.execute("SELECT data, updated FROM shares_info WHERE ticker=?", (t.upper(),)).fetchone()
+def get(t: str, conn=None) -> dict | None:
+    """conn 을 주면 그 연결을 쓴다(순위 계산처럼 수천 번 부를 때 연결을 새로 열지 않게 — 2026-10-28)."""
+    if conn is None:
+        with closing(db.connect()) as c:
+            return get(t, c)
+    conn.execute(DDL)
+    r = conn.execute("SELECT data, updated FROM shares_info WHERE ticker=?", (t.upper(),)).fetchone()
     return None if not r else {**json.loads(r[0]), "_updated": r[1]}
 
 
-def best(t: str, yahoo_float: float | None = None) -> tuple[float | None, str]:
-    """(주식 수, 출처 설명) — SEC 추정이 있으면 그것, 없으면 야후 유통주식(정확도 낮음)."""
-    s = get(t)
+def best(t: str, yahoo_float: float | None = None, conn=None) -> tuple[float | None, str]:
+    """(주식 수, 출처 설명) — SEC 추정이 있으면 그것, 없으면 야후 유통주식(정확도 낮음). conn 을 주면 그 연결로."""
+    s = get(t, conn)
     if s and s.get("adjusted"):
         tag = f"SEC 표지 {s['asof']} 기준" + (" · 이후 분할 반영" if s.get("splits_after") else "") + (" · ⚠️ 이후 발행 미반영 가능" if s.get("warn") else "")
         return float(s["adjusted"]), tag
@@ -96,15 +115,15 @@ def best(t: str, yahoo_float: float | None = None) -> tuple[float | None, str]:
     return None, "주식 수 정보 없음"
 
 
-def build_missing(client, tickers: list[str], limit: int = 60, out=print) -> int:
-    """추정이 없거나 7일 지난 종목만(아침 작업·상한)."""
+def build_missing(client, tickers: list[str], limit: int = 60, out=print, force: bool = False) -> int:
+    """추정이 없거나 7일 지난 종목만(아침 작업·상한). force 면 전부 다시(서버 소급 — 🐷 ⑥ 표지 이력 채우기)."""
     n = 0
     cut = (date.today() - timedelta(days=7)).isoformat()
     for t in tickers:
         if n >= limit:
             break
         s = get(t)
-        if s and str(s.get("_updated", ""))[:10] >= cut:
+        if not force and s and str(s.get("_updated", ""))[:10] >= cut:
             continue
         try:
             if estimate(t, client):
@@ -115,19 +134,81 @@ def build_missing(client, tickers: list[str], limit: int = 60, out=print) -> int
     return n
 
 
-def turnover(t: str, volume: float | None = None, yahoo_float: float | None = None) -> dict | None:
-    """회전율(%) = 거래량 ÷ 주식 수 × 100. 100% 넘으면 하루에 주식 전체가 한 번 넘게 손바뀜. 거래량이 없으면 가장 최근 저장분."""
+def turnover(t: str, volume: float | None = None, yahoo_float: float | None = None, conn=None) -> dict | None:
+    """회전율(%) = 거래량 ÷ 주식 수 × 100. 100% 넘으면 하루에 주식 전체가 한 번 넘게 손바뀜. 거래량이 없으면 가장 최근 저장분. conn 을 주면 그 연결로(순위 계산용)."""
     if volume is None:
         try:
-            r = db.read_df("SELECT vol, date FROM daily_move WHERE ticker=? AND vol IS NOT NULL ORDER BY date DESC LIMIT 1", (t.upper(),))
-            if r.empty:
+            sql = "SELECT vol, date FROM daily_move WHERE ticker=? AND vol IS NOT NULL ORDER BY date DESC LIMIT 1"
+            if conn is not None:
+                row = conn.execute(sql, (t.upper(),)).fetchone()
+            else:
+                with closing(db.connect()) as c:
+                    row = c.execute(sql, (t.upper(),)).fetchone()
+            if not row:
                 return None
-            volume, day = float(r.iloc[0]["vol"]), r.iloc[0]["date"]
+            volume, day = float(row[0]), row[1]
         except Exception:  # noqa: BLE001
             return None
     else:
         day = None
-    sh, tag = best(t, yahoo_float)
+    sh, tag = best(t, yahoo_float, conn)
     if not sh or not volume:
         return None
     return {"pct": volume / sh * 100, "volume": volume, "shares": sh, "tag": tag, "date": day}
+
+
+# ---------------------------------------------------------------- 🐷 ⑥ 주식수 변동(2026-10-28): 표지 이력 → 직전 두 분기 사이 변동률
+def save_history(conn, t: str, points: list[dict]) -> int:
+    """표지 발행주식 이력 저장(기준일마다 한 줄, 같은 기준일은 덮어씀)."""
+    conn.execute(HIST_DDL)
+    rows = [(t.upper(), p["asof"], p.get("filed"), p.get("form"), float(p["shares"])) for p in points if p.get("asof") and p.get("shares")]
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", rows)
+    return len(rows)
+
+
+def history(t: str, conn=None) -> list[dict]:
+    """저장된 표지 이력(기준일 순). 없으면 []."""
+    if conn is None:
+        with closing(db.connect()) as c:
+            return history(t, c)
+    conn.execute(HIST_DDL)
+    return [dict(r) for r in conn.execute("SELECT asof, filed, form, shares FROM shares_hist WHERE ticker=? ORDER BY asof", (t.upper(),))]
+
+
+def change(t: str, conn=None, min_gap: int = 75, max_gap: int = 200, max_age: int = 200) -> dict | None:
+    """🐷 ⑥ 용: 가장 최근 표지(s1·d1)와 그 전 분기 표지(d1 보다 min_gap~max_gap 일 전 중 가장 최근, s0·d0)의 발행주식 변동률. 두 표지 사이 분할(역분할)은 s0 에 반영.
+    분기 보고(10-Q/10-K)는 약 90일 간격이라 '직전 두 분기 사이' 변동이다(최신 표지는 최대 석 달 전일 수 있음 — ChartExchange 일별 이력(유료)보다 느리지만 공식 숫자).
+    None(판정 보류): 표지 2개 미만 · 연 1회 보고(20-F, 간격 365일 > max_gap) · 최신 표지가 max_age 일 넘게 오래됨(보고 중단)."""
+    if conn is None:
+        with closing(db.connect()) as c:
+            return change(t, c, min_gap, max_gap, max_age)
+    pts = history(t, conn)
+    if len(pts) < 2:
+        return None
+    p1 = pts[-1]
+    try:
+        d1 = date.fromisoformat(p1["asof"])
+    except ValueError:
+        return None
+    if (date.today() - d1).days > max_age:
+        return None
+    prev = []
+    for p in pts[:-1]:
+        try:
+            gap = (d1 - date.fromisoformat(p["asof"])).days
+        except ValueError:
+            continue
+        if min_gap <= gap <= max_gap:
+            prev.append(p)
+    if not prev:
+        return None
+    p0 = prev[-1]
+    mult, n_sp = 1.0, 0
+    for s in splits_after(t.upper(), p0["asof"], conn):
+        if s["date"] <= p1["asof"]:
+            mult *= s["ratio"]
+            n_sp += 1
+    s0 = float(p0["shares"]) * mult
+    if s0 <= 0 or not p1["shares"]:
+        return None
+    return {"pct": (float(p1["shares"]) / s0 - 1) * 100, "d0": p0["asof"], "d1": p1["asof"], "from": s0, "to": float(p1["shares"]), "src": "SEC 표지", "splits": n_sp}

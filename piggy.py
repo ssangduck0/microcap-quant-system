@@ -508,7 +508,7 @@ def quality(ticker: str, conn, df_long: pd.DataFrame | None, dilution_status: st
     # 2026-10-27 스승님 '반복 흐름 주의사항': ⑥ 주식수 변동이 크지 않을 것 · ⑦ 희석 구조가 변하지 않았을 것(③ 펀더멘털은 ② 런웨이가 맡음)
     sc = shares_change(conn, t)
     out.append({"기준": "⑥ 주식수 변동 작음(90일 +20% 이내)", "결과": None if sc is None else sc["pct"] <= SHARES_MAX_PCT,
-                "값": "주식수 이력 없음(ChartExchange)" if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']})"})
+                "값": "주식수 이력 없음(SEC 표지 2개 미만 · ChartExchange 없음)" if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']} · {sc.get('src', 'ChartExchange')})"})
     dc = dilution_changed(conn, t, dilution_status)
     out.append({"기준": "⑦ 희석 구조 변화 없음(45일)", "결과": None if dc is None else not dc["changed"],
                 "값": "이력 부족" if dc is None else ("변화 없음 · " + (dilution_status or "미확인") if not dc["changed"] else f"{dc['from']} → {dc['to']} ({dc['date']})")})
@@ -520,18 +520,38 @@ DIL_WINDOW_DAYS = 45    # ⑦ 희석 상태 변화를 보는 기간
 
 
 def shares_change(conn, ticker: str, days: int = 90) -> dict | None:
-    """ChartExchange 발행주식 일별 이력으로 90일 변동률. 이력이 짧으면(30일 미만) None."""
+    """⑥ 주식수 변동률. ① ChartExchange 일별 이력(cx_shares — 우리 요금제(Tier 1)는 주식수 엔드포인트가 403 이라 비어 있음)
+    → ② SEC 분기 표지 이력(shares_hist, 2026-10-28 추가: 직전 두 분기 표지 비교·사이 분할 반영 = shares.change). 둘 다 없으면 None(판정 보류 ➖)."""
     try:
         rows = conn.execute("SELECT date, shares_out FROM cx_shares WHERE ticker=? AND shares_out > 0 AND date >= date('now', ?) ORDER BY date",
                             (ticker.upper(), f"-{days} day")).fetchall()
     except Exception:  # noqa: BLE001
+        rows = []
+    if len(rows) >= 2:
+        (d0, s0), (d1, s1) = rows[0], rows[-1]
+        if (date.fromisoformat(d1) - date.fromisoformat(d0)).days >= 30:
+            return {"pct": (s1 / s0 - 1) * 100, "d0": d0, "d1": d1, "from": s0, "to": s1, "src": "ChartExchange"}
+    try:
+        import shares
+        return shares.change(ticker, conn)
+    except Exception:  # noqa: BLE001
         return None
-    if len(rows) < 2:
-        return None
-    (d0, s0), (d1, s1) = rows[0], rows[-1]
-    if (date.fromisoformat(d1) - date.fromisoformat(d0)).days < 30:
-        return None
-    return {"pct": (s1 / s0 - 1) * 100, "d0": d0, "d1": d1, "from": s0, "to": s1}
+
+
+def share_targets(conn, days: int = 30) -> list[str]:
+    """🐷 ⑥ 용 SEC 표지 이력을 받아 둘 종목: 담은 종목(piggy_list) 먼저, 그다음 최근 days 일 스캔 후보(piggy_scan). 아침 작업(cases.update)이 shares.build_missing 에 넘긴다."""
+    out: list[str] = []
+    try:
+        out += [r[0] for r in conn.execute("SELECT ticker FROM piggy_list ORDER BY ticker")]
+        out += [r[0] for r in conn.execute("SELECT DISTINCT ticker FROM piggy_scan WHERE date >= date('now', ?) ORDER BY ticker", (f"-{days} day",))]
+    except Exception:  # noqa: BLE001
+        pass
+    seen, res = set(), []
+    for t in out:
+        if t and t not in seen:
+            seen.add(t)
+            res.append(t)
+    return res
 
 
 def dilution_changed(conn, ticker: str, cur_status: str | None, days: int = DIL_WINDOW_DAYS) -> dict | None:

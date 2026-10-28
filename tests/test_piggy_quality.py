@@ -31,6 +31,16 @@ with closing(db.connect()) as conn:
     import chartex; chartex.ensure(conn)
     qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
     assert qq["⑥"]["결과"] is None and qq["⑦"]["결과"] is None and len(qq) == 7
+    # ⑥ SEC 분기 표지 이력(2026-10-28): ChartExchange 가 없을 때 직전 두 분기 표지 비교(1.0M → 1.3M = +30%)
+    import shares
+    conn.execute(shares.HIST_DDL)
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("RMSG", (date.today() - timedelta(days=170)).isoformat(), "f1", "10-Q", 1_000_000),
+                                                                             ("RMSG", (date.today() - timedelta(days=80)).isoformat(), "f2", "10-Q", 1_300_000)])
+    conn.commit()
+    qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
+    assert qq["⑥"]["결과"] is False and "+30.0%" in qq["⑥"]["값"] and "SEC 표지" in qq["⑥"]["값"], qq["⑥"]
+    conn.execute("INSERT INTO piggy_scan VALUES (?, 'RMSG', 0.6, '{}')", (date.today().isoformat(),)); conn.execute("INSERT INTO piggy_list (ticker) VALUES ('COCH')"); conn.commit()
+    assert piggy.share_targets(conn) == ["COCH", "RMSG"]
     for d, so in (((date.today() - timedelta(days=80)).isoformat(), 1_000_000), (date.today().isoformat(), 1_300_000)):
         conn.execute("INSERT OR REPLACE INTO cx_shares VALUES (?,?,?,?,?)", ("RMSG", d, so, so * 0.8, 80.0))
     conn.execute("CREATE TABLE IF NOT EXISTS dilution_hist (ticker TEXT NOT NULL, date TEXT NOT NULL, status TEXT, PRIMARY KEY (ticker, date))")
@@ -38,7 +48,7 @@ with closing(db.connect()) as conn:
     conn.execute("INSERT OR REPLACE INTO dilution_hist VALUES ('RMSG', ?, 'ATM')", ((date.today() - timedelta(days=10)).isoformat(),))
     conn.commit()
     qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "ATM")}
-    assert qq["⑥"]["결과"] is False and "+30.0%" in qq["⑥"]["값"] and qq["⑦"]["결과"] is False and "CLEAN → ATM" in qq["⑦"]["값"], (qq["⑥"], qq["⑦"])
+    assert qq["⑥"]["결과"] is False and "+30.0%" in qq["⑥"]["값"] and "ChartExchange" in qq["⑥"]["값"] and qq["⑦"]["결과"] is False and "CLEAN → ATM" in qq["⑦"]["값"], (qq["⑥"], qq["⑦"])   # ChartExchange 이력이 있으면 그게 우선
     conn.execute("UPDATE cx_shares SET shares_out=1_100_000 WHERE ticker='RMSG' AND date=?", (date.today().isoformat(),)); conn.execute("DELETE FROM dilution_hist WHERE status='ATM'"); conn.commit()
     qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
     assert qq["⑥"]["결과"] is True and qq["⑦"]["결과"] is True            # 기간 밖 CLEAN 1건만 남음 → 변화 없음

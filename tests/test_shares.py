@@ -1,25 +1,48 @@
+"""📐 발행주식 수 추정(SEC 표지·분할·발행 경고) + 🐷 ⑥ 용 표지 이력·직전 두 분기 변동률(2026-10-28) — 인터넷 없이."""
 import os as _os_qs; _os_qs.environ.setdefault("QS_ROOT", _os_qs.path.dirname(_os_qs.path.dirname(_os_qs.path.abspath(__file__))))  # 프로젝트 폴더(어느 PC 에서나)
 import os, sys, tempfile
-tmp = tempfile.mkdtemp(); os.environ["QUANT_DB"]=os.path.join(tmp,"q.db"); os.environ["SEC_USER_AGENT"]="T t@e.com"
-sys.path.insert(0,__import__("os").environ["QS_ROOT"])
 from contextlib import closing
+from datetime import date, timedelta
+tmp = tempfile.mkdtemp(); os.environ["QUANT_DB"] = os.path.join(tmp, "q.db"); os.environ["SEC_USER_AGENT"] = "T t@e.com"
+sys.path.insert(0, os.environ["QS_ROOT"])
 import db, shares, secbackfill, rsplit
 db.init_db()
+T = date.today(); d = lambda n: (T - timedelta(days=n)).isoformat()
+A0, A1 = d(171), d(77)                      # 직전 분기 표지 · 최신 표지(94일 간격)
 CF = {"facts": {"dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
-    {"end": "2026-05-10", "val": 30_000_000, "filed": "2026-05-14", "form": "10-Q", "accn": "a1"},
-    {"end": "2026-08-12", "val": 50_000_000, "filed": "2026-08-14", "form": "10-Q", "accn": "a2"},          # 최신(기준일 8/12)
-    {"end": "2026-08-12", "val": 2_500_000, "filed": "2026-08-14", "form": "10-Q", "accn": "a2", "frame": "ClassB"}]}}}}}
-c = shares.cover_shares(CF); assert c["shares"] == 52_500_000 and c["asof"] == "2026-08-12" and c["form"] == "10-Q"       # 같은 기준일 여러 종류 합산
-assert shares.cover_shares({"facts": {}}) is None
+    {"end": A0, "val": 30_000_000, "filed": d(167), "form": "10-Q", "accn": "a1"},
+    {"end": A1, "val": 50_000_000, "filed": d(75), "form": "10-Q", "accn": "a2"},
+    {"end": A1, "val": 2_500_000, "filed": d(75), "form": "10-Q", "accn": "a2", "frame": "ClassB"},     # 같은 기준일 다른 종류 → 합산
+    {"end": A1, "val": 49_000_000, "filed": d(76), "form": "10-Q", "accn": "a2x"}]}}}}}                 # 같은 기준일에 먼저 낸 값 → 가장 늦게 낸 것만 씀
+c = shares.cover_shares(CF); assert c["shares"] == 52_500_000 and c["asof"] == A1 and c["form"] == "10-Q" and c["src"] == "SEC dei:EntityCommonStockSharesOutstanding"
+assert shares.cover_shares({"facts": {}}) is None and shares._points({"facts": {}}) == ("", [])
+src, pts = shares._points(CF); assert [p["shares"] for p in pts] == [30_000_000, 52_500_000] and pts[1]["filed"] == d(75)
 with closing(db.connect()) as conn:
-    rsplit.ensure_tables(conn); conn.execute("INSERT INTO rs_events VALUES ('HUBC','2026-09-15',0.04,1.0)")            # 기준일 뒤 1:25 병합
-    secbackfill.ensure_tables(conn); conn.execute("INSERT INTO sec_hist VALUES ('x1','HUBC','8-K','2026-09-20','3.02,9.01')"); conn.commit()
+    rsplit.ensure_tables(conn); conn.execute("INSERT INTO rs_events VALUES ('HUBC',?,0.04,1.0)", (d(43),))            # 최신 기준일 뒤 1:25 병합
+    secbackfill.ensure_tables(conn); conn.execute("INSERT INTO sec_hist VALUES ('x1','HUBC','8-K',?,'3.02,9.01')", (d(38),)); conn.commit()
 class FC:
+    calls = []
     def cik_for(s, t): return 1 if t == "HUBC" else None
-    def companyfacts(s, cik): return CF
-d = shares.estimate("HUBC", FC()); print(d)
-assert d["adjusted"] == 52_500_000 * 0.04 and d["splits_after"] == [{"date": "2026-09-15", "ratio": 0.04}] and d["warn"] and "3.02" in d["issuance_after"][0]
+    def companyfacts(s, cik): FC.calls.append(cik); return CF
+dd = shares.estimate("HUBC", FC()); print(dd)
+assert dd["adjusted"] == 52_500_000 * 0.04 and dd["splits_after"] == [{"date": d(43), "ratio": 0.04}] and dd["warn"] and "3.02" in dd["issuance_after"][0]
 v, tag = shares.best("HUBC", 9e9); assert v == 2_100_000 and "이후 분할 반영" in tag and "발행 미반영" in tag
 v, tag = shares.best("NOPE", 5e6); assert v == 5e6 and tag.startswith("야후")
 assert shares.estimate("NOPE", FC()) is None and shares.build_missing(FC(), ["HUBC", "NOPE"], out=lambda *_: None) == 0   # 7일 안 = 건너뜀
+assert shares.build_missing(FC(), ["HUBC"], out=lambda *_: None, force=True) == 1 and len(FC.calls) == 2                 # force 는 다시 받음(서버 소급용)
+# 🐷 ⑥: 표지 이력 · 직전 두 분기 변동률(사이 분할 반영) · 같은 연결 재사용
+with closing(db.connect()) as conn:
+    h = shares.history("HUBC", conn); assert [(p["asof"], p["shares"]) for p in h] == [(A0, 30_000_000), (A1, 52_500_000)]
+    ch = shares.change("HUBC", conn); print(ch)
+    assert ch and abs(ch["pct"] - 75.0) < 1e-9 and ch["d0"] == A0 and ch["d1"] == A1 and ch["src"] == "SEC 표지" and ch["splits"] == 0   # 1:25 병합은 d1 뒤라 미반영
+    conn.execute("INSERT INTO rs_events VALUES ('HUBC',?,0.5,1.0)", (d(120),)); conn.commit()                               # 두 표지 사이 1:2 병합 → 옛 표지 30M 은 15M 기준
+    ch = shares.change("HUBC", conn); assert abs(ch["pct"] - 250.0) < 1e-9 and ch["splits"] == 1
+    assert shares.change("HUBC") and shares.get("HUBC", conn)["adjusted"] == 2_100_000 and shares.best("HUBC", None, conn)[0] == 2_100_000
+    assert abs(shares.turnover("HUBC", 1_050_000, None, conn)["pct"] - 50.0) < 1e-9 and shares.turnover("NOPE", None, None, conn) is None
+    # 판정 보류(None): 점 1개 · 연 1회 보고(20-F, 365일 간격 > 200일) · 최신 표지가 200일 넘게 오래됨 · 이력 없음
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("ONE", A1, "f", "10-Q", 1e6),
+        ("FPI", d(400), "f", "20-F", 1e6), ("FPI", d(35), "f", "20-F", 2e6),
+        ("OLD", d(400), "f", "10-Q", 1e6), ("OLD", d(300), "f", "10-Q", 2e6)])
+    conn.commit()
+    assert shares.change("ONE", conn) is None and shares.change("FPI", conn) is None and shares.change("OLD", conn) is None and shares.change("NONE", conn) is None
 print("ALL OK")

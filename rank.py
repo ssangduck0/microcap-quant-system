@@ -130,7 +130,7 @@ def compute(today: date | None = None) -> pd.DataFrame:
                 why.append(f"내부자 매수 ${v:,.0f}(30일)")
             try:
                 import shares as _sh
-                _to = _sh.turnover(t)
+                _to = _sh.turnover(t, conn=conn)   # 2026-10-28: 같은 연결 재사용(연결마다 열면 2,200종목에 수 초)
                 if _to and _to["pct"] >= 100:
                     why.append(f"회전율 {_to['pct']:.0f}% — 하루에 주식 전체가 한 번 넘게 손바뀜")
             except Exception:  # noqa: BLE001

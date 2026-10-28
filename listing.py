@@ -130,11 +130,14 @@ def save(ticker: str, accession: str, filed: str, url: str, p: dict) -> None:
             pass
 
 
-def latest(ticker: str, days: int = 365) -> dict | None:
-    with closing(db.connect()) as conn:
-        ensure(conn)
-        r = conn.execute("SELECT * FROM listing_notices WHERE ticker=? AND filed >= ? AND COALESCE(void,0)=0 ORDER BY filed DESC LIMIT 1",
-                         (ticker.upper(), (date.today() - timedelta(days=days)).isoformat())).fetchone()
+def latest(ticker: str, days: int = 365, conn=None) -> dict | None:
+    """conn 을 주면 그 연결로(순위 계산이 종목마다 부름 — 연결을 새로 안 열기, 2026-10-28)."""
+    if conn is None:
+        with closing(db.connect()) as c:
+            return latest(ticker, days, c)
+    ensure(conn)
+    r = conn.execute("SELECT * FROM listing_notices WHERE ticker=? AND filed >= ? AND COALESCE(void,0)=0 ORDER BY filed DESC LIMIT 1",
+                     (ticker.upper(), (date.today() - timedelta(days=days)).isoformat())).fetchone()
     return None if not r else {**dict(r), "kinds": json.loads(r["kinds"])}
 
 

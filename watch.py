@@ -121,11 +121,16 @@ def add_overhang(ticker, kind, qty_m=None, price=None, expiry=None, status="활�
         return cur.rowcount > 0
 
 
-def overhang_rows(ticker: str) -> pd.DataFrame:
+def overhang_rows(ticker: str, conn=None) -> pd.DataFrame:
+    """conn 을 주면 그 연결로(순위 계산이 종목마다 부름 — 연결을 새로 안 열기, 2026-10-28)."""
+    sql = ("SELECT id, kind, qty_m, price, expiry, status, note, origin, filed, source FROM overhang WHERE ticker=? ORDER BY "
+           "CASE status WHEN '활성' THEN 0 WHEN '확인 필요' THEN 1 WHEN '잠김' THEN 2 ELSE 3 END, price")
+    if conn is not None:
+        ensure_tables(conn)
+        return pd.read_sql_query(sql, conn, params=(ticker.upper(),))
     with closing(_conn()):
         pass
-    return db.read_df("SELECT id, kind, qty_m, price, expiry, status, note, origin, filed, source FROM overhang WHERE ticker=? ORDER BY "
-                      "CASE status WHEN '활성' THEN 0 WHEN '확인 필요' THEN 1 WHEN '잠김' THEN 2 ELSE 3 END, price", (ticker.upper(),))
+    return db.read_df(sql, (ticker.upper(),))
 
 
 def save_overhang_edits(ticker: str, df: pd.DataFrame) -> None:
