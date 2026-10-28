@@ -191,10 +191,12 @@ with closing(db.connect()) as conn:
     r = broker.scan_piggy(conn, tc, prices=PX, now=T1); assert r["checked"] == 3 and r["dry"] == ["PGA"] and r["skipped"] == {"PGB": "희석 ATM"} and r["bought"] == [], (r, broker.strategies(), broker.piggy_targets(conn), piggy.items().to_dict("records"))
     assert broker.scan_piggy(conn, tc, prices=PX, now=T1 + timedelta(minutes=1)) == {"checked": 3, "bought": [], "dry": [], "skipped": {}}   # 같은 날 두 번 안 함
     rows = db.read_df("SELECT ticker, status, mode, note FROM live_orders WHERE day='2026-10-30'"); assert sorted(rows["ticker"]) == ["PGA", "PGB"] and set(rows["mode"]) == {"dry"}
-    config.LIVE_TRADING = True
-    T2 = T1 + timedelta(days=3, hours=1)                                                    # 월요일 11/2 15:00 UTC = 10:00 EST(11/1 에 서머타임 끝 → 14:00 UTC 는 09:00 이라 장 밖!)
+    config.LIVE_TRADING = True                                                              # 같은 날 스위치를 켜면 dry 기록은 무시하고 실주문(10/29 첫 운영에서 고침)
+    assert not broker._regular(datetime(2026, 11, 2, 14, 0, tzinfo=timezone.utc)) and broker._regular(datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc))   # 11/1 서머타임 끝: 14:00 UTC = 09:00 EST 장 밖
+    T2 = T1 + timedelta(minutes=2)
     n_calls = len(tc.calls)
     r = broker.scan_piggy(conn, tc, prices=PX, now=T2); assert r["bought"] == ["PGA"] and r["skipped"] == {"PGB": "희석 ATM"}, r
+    assert broker.scan_piggy(conn, tc, prices=PX, now=T2 + timedelta(minutes=1))["bought"] == []                                  # 실주문 기록은 같은 날 다시 안 냄
     assert tc.calls[n_calls][0] == "create" and tc.calls[n_calls][1:4] == ("PGA", "BUY", 1) and abs(tc.calls[n_calls][4] - 1.03) < 1e-9   # 1.02 × 1.01 = 1.0302 → $1 이상은 소수 2자리 절삭
     oid = tc.calls[n_calls][5]; row = dict(conn.execute("SELECT * FROM live_orders WHERE client_order_id=?", (oid,)).fetchone()); assert json.loads(row["note"]) == {"tp": 1.3, "sl": 0.95}
     tc.fill(row["order_id"], 1.02); broker.sync(conn, tc, now=T2 + timedelta(minutes=1))

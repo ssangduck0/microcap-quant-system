@@ -568,7 +568,7 @@ def scan_piggy(conn, tc, *, prices: dict | None = None, now: datetime | None = N
         return out
     if prices is None:
         prices = tc.prices([x["ticker"] for x in tg]) if tc is not None else {}
-    day = _day(now)
+    day, live = _day(now), is_live()
     for x in tg:
         t = x["ticker"]
         p = prices.get(t)
@@ -578,8 +578,8 @@ def scan_piggy(conn, tc, *, prices: dict | None = None, now: datetime | None = N
         out["checked"] += 1
         if piggy.zone(float(px), x["lo"], x["hi"]) != "🟢 저점 구간":
             continue
-        if conn.execute("SELECT 1 FROM live_orders WHERE ticker=? AND day=? AND side='BUY'", (t, day)).fetchone():
-            continue   # 오늘 이미 시도(기록·주문·거부) — 하루 한 번
+        if conn.execute("SELECT 1 FROM live_orders WHERE ticker=? AND day=? AND side='BUY' AND (mode='live' OR ?)", (t, day, 0 if live else 1)).fetchone():
+            continue   # 하루 한 번: 실주문 기록은 항상 막고, dry 기록은 dry 일 때만 막는다(스위치를 켠 날 dry 기록 때문에 실주문을 못 내지 않게 — 10/29 첫 운영에서 발견)
         r = mirror_buy(conn, tc, "piggy", t, float(px), tp_px=x["hi"], sl_px=x["lo"] * 0.95, dilution=x["dilution"], share_cls=x["share_cls"], dollar_vol=x["dollar_vol"], day=day, now=now)
         if r.get("ok") and r.get("mode") == "live":
             out["bought"].append(t)
