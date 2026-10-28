@@ -37,6 +37,7 @@ THRESHOLD = -10.0
 EVENT_COLS = ["ticker", "date", "prev_close", "close", "drop_pct", "gap_pct", "intraday_rebound_pct",
               "avg_dollar_vol", "vol_mult", "pre_dd_pct", "next_open_pct", "next_high_pct", "next_low_pct",
               "next_close_pct", "fwd_3d", "fwd_5d", "fwd_10d", "max_up_5d", "max_down_5d", "bars_after", "last_bar_date",
+              "max_up_3d", "max_down_3d",   # 2026-10-29: 3일 안 최고가·최저가(사용자 요청 — 하루 먹는 것과 3~5일 기다리는 것을 따로 검증)
               "range_pct", "close_loc", "prior_range_pct"]
 
 
@@ -86,7 +87,7 @@ def find_events(ticker: str, df: pd.DataFrame, threshold: float = THRESHOLD, sin
             "vol_mult": float(v[i] / avg_v) if avg_v > 0 else None,
             "pre_dd_pct": _pct(c[i - 1], float(ph.max())) if ctx and ph.max() > 0 else None,
             "next_open_pct": None, "next_high_pct": None, "next_low_pct": None, "next_close_pct": None,
-            "fwd_3d": None, "fwd_5d": None, "fwd_10d": None, "max_up_5d": None, "max_down_5d": None,
+            "fwd_3d": None, "fwd_5d": None, "fwd_10d": None, "max_up_5d": None, "max_down_5d": None, "max_up_3d": None, "max_down_3d": None,
             "bars_after": int(n - 1 - i), "last_bar_date": dates[-1],
             "range_pct": _pct(h[i], l[i]),                                     # 그날 변동폭(고가/저가)
             "close_loc": float((c[i] - l[i]) / (h[i] - l[i])) if h[i] > l[i] else None,   # 종가 위치: 0=저가, 1=고가
@@ -101,6 +102,9 @@ def find_events(ticker: str, df: pd.DataFrame, threshold: float = THRESHOLD, sin
         if i + 5 < n:
             row["max_up_5d"] = _pct(float(h[i + 1:i + 6].max()), c[i])
             row["max_down_5d"] = _pct(float(l[i + 1:i + 6].min()), c[i])
+        if i + 3 < n:
+            row["max_up_3d"] = _pct(float(h[i + 1:i + 4].max()), c[i])
+            row["max_down_3d"] = _pct(float(l[i + 1:i + 4].min()), c[i])
         rows.append(row)
     return rows
 

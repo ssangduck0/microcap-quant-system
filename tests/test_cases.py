@@ -29,7 +29,7 @@ e = ev[0]
 exp = {"drop_pct":-15.0, "gap_pct":-10.0, "intraday_rebound_pct":(8.5/8.2-1)*100, "vol_mult":5.0, "avg_dollar_vol":1e7,
        "pre_dd_pct":(10/10.2-1)*100, "next_open_pct":(9.35/8.5-1)*100, "next_high_pct":(9.8/8.5-1)*100,
        "next_low_pct":(9.0/8.5-1)*100, "next_close_pct":(9.5/8.5-1)*100, "fwd_3d":(9.2/8.5-1)*100, "fwd_5d":(9.6/8.5-1)*100,
-       "max_up_5d":(9.9/8.5-1)*100, "max_down_5d":(8.8/8.5-1)*100}
+       "max_up_5d":(9.9/8.5-1)*100, "max_down_5d":(8.8/8.5-1)*100, "max_up_3d":(9.8/8.5-1)*100, "max_down_3d":(8.8/8.5-1)*100}   # 3일 안 최고·최저(2026-10-29)
 for k, v in exp.items(): assert approx(e[k], v, 1e-6), (k, e[k], v)
 assert e["fwd_10d"] is None and e["bars_after"]==9 and e["date"]==df.index[30].strftime("%Y-%m-%d") and e["last_bar_date"]=="2026-10-09"
 # 경계/예외

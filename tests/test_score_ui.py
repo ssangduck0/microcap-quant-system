@@ -13,7 +13,7 @@ drop = np.clip(-10 - rng.exponential(12, N), -95, -10); vol = np.exp(rng.normal(
 succ = rng.random(N) < 1/(1+np.exp(-(-1.6 + 0.04*(-drop-20) + 0.55*np.log2(vol))))
 nh = np.where(succ, rng.uniform(10, 40, N), rng.uniform(-5, 9.9, N))
 ev = pd.DataFrame({"ticker":[f"T{i}" for i in range(N)], "date":dates, "close":1.0, "drop_pct":drop, "vol_mult":vol, "pre_dd_pct":pre, "avg_dollar_vol":dv,
-                   "next_high_pct":nh, "next_close_pct":nh-5})
+                   "next_high_pct":nh, "next_close_pct":nh-5, "max_up_3d":nh*1.1, "max_up_5d":nh*1.2, "fwd_3d":nh-5, "fwd_5d":nh-4})   # 3·5일 목표 열(2026-10-29)
 with closing(db.connect()) as conn:
     cases.save_events(conn, [{**{k: None for k in cases.EVENT_COLS}, **r} for r in ev.to_dict("records")]); conn.commit()
 res = winmodel.fit_all(24, out=lambda *_: None); md = db.get_model("high_10")
@@ -66,6 +66,8 @@ mm = {m.label: m.value for m in at.metric}
 print("검증 탭 지표:", {k: v for k, v in mm.items() if k.startswith(("OOS","기준 성공","상위 20","학습 구간","결과가 확인","전체 성공"))})
 assert "OOS AUC" in mm and float(mm["OOS AUC"]) > 0.6
 _sb = at.selectbox[[s.label for s in at.selectbox].index("검증할 모델")]; assert not any("sigmodel" in o for o in _sb.options) and any(o.startswith("high_10") for o in _sb.options) and any(o.startswith("close_0") for o in _sb.options), _sb.options   # options 는 표시 글
+assert any(o.startswith("high3_20") and "3일 안 최고가 ≥ +20%" in o for o in _sb.options) and any(o.startswith("high5_30") and "5일 안 최고가 ≥ +30%" in o for o in _sb.options), _sb.options   # 3일·5일 고가 모델(2026-10-29)
+_sb.set_value("high5_30").run(); assert not at.exception, [e.value for e in at.exception]
 assert any("🧠 신호 승률 모델" in m.value for m in at.markdown) and any(m.label == "검증 AUC" and m.value == "0.640" for m in at.metric) and any(m.label == "상위 10% 배수" and m.value == "×2.10" for m in at.metric)
 assert int(mm["결과가 확인된 점수 기록"].replace(",","")) == 80
 print("warnings:", [w.value[:50] for w in at.warning if "표본" in w.value])

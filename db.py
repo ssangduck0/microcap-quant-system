@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS case_events (
     prev_close REAL, close REAL, drop_pct REAL, gap_pct REAL, intraday_rebound_pct REAL,
     avg_dollar_vol REAL, vol_mult REAL, pre_dd_pct REAL,
     next_open_pct REAL, next_high_pct REAL, next_low_pct REAL, next_close_pct REAL,
-    fwd_3d REAL, fwd_5d REAL, fwd_10d REAL, max_up_5d REAL, max_down_5d REAL,
+    fwd_3d REAL, fwd_5d REAL, fwd_10d REAL, max_up_5d REAL, max_down_5d REAL, max_up_3d REAL, max_down_3d REAL,
     bars_after INTEGER, last_bar_date TEXT,
     range_pct REAL, close_loc REAL, prior_range_pct REAL,
     PRIMARY KEY (ticker, date)
@@ -110,7 +110,7 @@ def connect() -> sqlite3.Connection:
 MIGRATIONS = {"daily_snapshots": [("day_change_pct", "REAL"), ("pre_dd_pct", "REAL"), ("avg_dollar_vol", "REAL"),
                                   ("gap_pct", "REAL"), ("close_loc", "REAL"), ("range_pct", "REAL"), ("prior_range_pct", "REAL"),
                                   ("mkt_down_frac", "REAL"), ("win_p", "REAL"), ("win_score", "REAL"), ("win_model", "TEXT")],
-              "case_events": [("range_pct", "REAL"), ("close_loc", "REAL"), ("prior_range_pct", "REAL")]}  # 기존 DB 에 뒤늦게 추가된 컬럼
+              "case_events": [("range_pct", "REAL"), ("close_loc", "REAL"), ("prior_range_pct", "REAL"), ("max_up_3d", "REAL"), ("max_down_3d", "REAL")]}  # 기존 DB 에 뒤늦게 추가된 컬럼
 
 
 def init_db() -> None:

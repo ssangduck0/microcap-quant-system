@@ -40,12 +40,14 @@ FEATURES = FEATURES_V1  # (이전 버전 호환)
 FEATURE_KO = {"drop": "오늘 등락률(%)", "vol": "거래량 배수(log2)", "pre": "전일까지 20일 낙폭(%)", "dv": "20일 평균 거래대금(log10 $)",
               "gap": "시가 갭(%)", "loc": "종가 위치(0=저가,1=고가)", "rng": "그날 변동폭(log)", "prng": "직전 20일 평균 변동폭(log)",
               "mkt": "시장 급락 종목 비율(log)"}
-LABELS = {"high": ("next_high_pct", "다음날 고가"), "close": ("next_close_pct", "다음날 종가")}
-DEFAULT_MODELS = [("high", 5.0), ("high", 10.0), ("high", 20.0), ("close", 0.0), ("close", 5.0)]
+LABELS = {"high": ("next_high_pct", "다음날 고가"), "close": ("next_close_pct", "다음날 종가"),
+          # 2026-10-29(사용자 요청): 하루 먹는 것과 3~5일 기다려 먹는 것을 따로 — 사건 뒤 3·5거래일 안 최고가 / 3·5거래일 뒤 종가
+          "high3": ("max_up_3d", "3일 안 최고가"), "high5": ("max_up_5d", "5일 안 최고가"), "close3": ("fwd_3d", "3일 뒤 종가"), "close5": ("fwd_5d", "5일 뒤 종가")}
+DEFAULT_MODELS = [("high", 5.0), ("high", 10.0), ("high", 20.0), ("close", 0.0), ("close", 5.0), ("high3", 20.0), ("high5", 30.0)]
 SCORE_CUTS = [50, 60, 70, 80, 90, 95]
 L2 = {False: 1.0, True: 30.0}  # 선형 / 2차(입력이 54개로 늘어 규제를 세게)
 EV_SQL = ("SELECT ticker, date, drop_pct, vol_mult, pre_dd_pct, avg_dollar_vol, gap_pct, close_loc, range_pct, prior_range_pct, "
-          "next_open_pct, next_high_pct, next_close_pct FROM case_events")
+          "next_open_pct, next_high_pct, next_close_pct, max_up_3d, max_up_5d, fwd_3d, fwd_5d FROM case_events")
 
 
 def model_name(label: str, target: float) -> str:

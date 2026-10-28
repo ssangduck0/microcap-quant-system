@@ -27,7 +27,7 @@ def load_models() -> list[dict]:
 
 @st.cache_data(ttl=60)
 def load_live() -> pd.DataFrame:
-    return db.read_df("SELECT s.date, s.ticker, s.win_p, s.win_score, s.win_model, s.dilution_status, e.next_high_pct, e.next_close_pct "
+    return db.read_df("SELECT s.date, s.ticker, s.win_p, s.win_score, s.win_model, s.dilution_status, e.next_high_pct, e.next_close_pct, e.max_up_3d, e.max_up_5d, e.fwd_3d, e.fwd_5d "
                       "FROM daily_snapshots s JOIN case_events e ON e.ticker=s.ticker AND e.date=s.date")
 
 

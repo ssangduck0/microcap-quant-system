@@ -118,7 +118,8 @@ print("score OK")
 # ---------- DB 저장 + fit_all + 스캐너 통합 ----------
 with closing(db.connect()) as conn:
     rows = [{**{k: None for k in cases.EVENT_COLS}, "ticker": f"T{i%500}", "date": r.date, "drop_pct": r.drop_pct, "vol_mult": r.vol_mult,
-             "pre_dd_pct": r.pre_dd_pct, "avg_dollar_vol": r.avg_dollar_vol, "next_high_pct": r.next_high_pct, "next_close_pct": r.next_close_pct, "close": 1.0}
+             "pre_dd_pct": r.pre_dd_pct, "avg_dollar_vol": r.avg_dollar_vol, "next_high_pct": r.next_high_pct, "next_close_pct": r.next_close_pct, "close": 1.0,
+             "max_up_3d": r.next_high_pct * 1.1, "max_up_5d": r.next_high_pct * 1.2, "fwd_3d": r.next_close_pct, "fwd_5d": r.next_close_pct}   # 3·5일 목표(2026-10-29)
             for i, r in enumerate(ev.itertuples())]
     # (ticker,date) 중복 방지
     seen=set(); uniq=[]
@@ -127,7 +128,8 @@ with closing(db.connect()) as conn:
         if k not in seen: seen.add(k); uniq.append(r)
     cases.save_events(conn, uniq); conn.commit()
 lines=[]; res = winmodel.fit_all(24, out=lines.append); print("\n".join(lines))
-assert len(res)==5 and len(db.list_models())==5 and db.get_model("high_10")["target"]==10 and winmodel.load_model("high_10")
+assert len(res)==7 and len(db.list_models())==7 and db.get_model("high_10")["target"]==10 and winmodel.load_model("high_10")
+assert db.get_model("high3_20")["label"]=="high3" and db.get_model("high5_30")["target"]==30 and winmodel.LABELS["high5"]==("max_up_5d", "5일 안 최고가")   # 3일·5일 고가 모델
 assert winmodel.load_model("nope") is None
 
 _TB = pd.offsets.BDay().rollback(pd.Timestamp.today().normalize())  # 테스트 '오늘' = 가장 최근 평일(주말에 돌려도 장중 봉이 주말에 생기지 않게)
