@@ -7,7 +7,7 @@
 | 서버 | Vultr 서울 2vCPU/4GB(vhf-2c-4gb, 월 $24 + 자동 백업 $4.8 — 실제 켜져 있는지 Vultr 콘솔 확인 필요). 6개 서비스 + 타이머 4개(🔥 quant-warm 은 10분마다 화면 캐시 — 배포 뒤 `deploy/install_warm_timer.sh` 한 번) 정상. 매일 03:00 DB 백업(`/home/quant/backup`, 14일) + **Cloudflare R2 사본**(버킷 `quant-backup`, 21일 보관, 10GB 무료 — 2026-10-28 부터 `deploy/backup_db.sh` 가 rclone 으로 올림, 열쇠는 서버 `.env` 의 `R2_*` · PC `클로드\토큰\r2.txt`) |
 | 보안 | SSH 키 전용(비밀번호 로그인 끔) · ufw(SSH 만) · fail2ban · 자동 보안 업데이트 · Cloudflare Access(dash 만, Cloudflare 계정 로그인) · 서버 DNS 1.1.1.1 우선 |
 | 주소 | dash.sduckquant.com / guest.sduckquant.com — Cloudflare 이름 있는 터널(quant-dash, quant-guest) |
-| AI 비용 | 월 예산 5만 원 지갑 공유: AI PICK(하루 1회 약 70~100원) · 뉴스 번역(Haiku) · 공시 요약(Haiku) · 서버 공시분석 v2(하루 3종목, 종목당 약 200~300원 — 📰 한 장 요약 포함, 급상승·보유 종목 자동 대기열) · 스크리너 카드(약 100원/장) · 🤖 복기(주 1회 수 원) |
+| AI 비용 | 월 예산 **3만 원**(서버 관리 모드 값 — 10/28 사용자 결정으로 1만 → 3만 원, 코드 기본값은 1만 원) 지갑 공유: AI PICK(하루 1회 약 70~100원) · 뉴스 번역(Haiku) · 공시 요약(Haiku) · 서버 공시분석 v2(하루 3종목, 종목당 약 200~300원 — 📰 한 장 요약 포함, 급상승·보유 종목 자동 대기열) · 스크리너 카드(약 100원/장) · 🤖 복기(주 1회 수 원) |
 
 ## 2. 이번까지 만든 핵심 기능(검증 결과 포함)
 - 🕰 **타임머신**(timemachine.py): 3,000종목·2년, 컨닝 없음. 단타(5일 탈출)·반등형(보유 기간)·연도별·정리일·시간외 고점 비교
