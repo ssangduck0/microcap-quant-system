@@ -125,9 +125,15 @@ def _latest(per: str):
     return accum.latest(per)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _px(tickers: tuple) -> dict:
+    """⚡ EFFECT 종목 일봉 — 🔥 화면 캐시(pagecache 'px': EFFECT 60일 종목을 quant-warm.timer 가 미리 받아 둠)에서 꺼내고 없는 종목만 야후(2026-10-28: 22초 → 즉시)."""
+    import pagecache
+    return pagecache.prices(tickers)
+
+
 def render_effect() -> None:
     """⚡ EFFECT 감지 — 등록 효력(EFFECT) = 곧 발행·재판매 가능(희석 임박). 앞선 등록서류와 그 뒤 424B(가격 확정)를 함께."""
-    import watch_ui
     ui.title("EFFECT 감지", "SEC 가 등록서류(S-1·F-1·S-3·F-3)에 효력을 준 종목 — 곧 공모·워런트 행사·재판매 물량이 나올 수 있습니다(희석 임박).")
     days = st.select_slider("기간", [7, 14, 30, 60], value=30, key="ef_days", format_func=lambda d: f"최근 {d}일")
     since = (date.today() - timedelta(days=days)).isoformat()
@@ -145,7 +151,7 @@ def render_effect() -> None:
         st.info("기간 안에 EFFECT 공시가 없습니다(과거 공시 백필·실시간 공시 피드 기준).")
         return
     rows.sort(key=lambda x: x["date"], reverse=True)
-    px = watch_ui.prices(tuple(sorted({r["ticker"] for r in rows})))
+    px = _px(tuple(sorted({r["ticker"] for r in rows})))
     cmap, fx = tosslink.codes(), _fx()
     st.caption(f"{len(rows)}건 · 최신순")
     for r in rows:

@@ -56,7 +56,8 @@ def main() -> int:
     if run(["scp", str(tmp), f"{SERVER}:/root/qs.zip"]) != 0:
         print("❌ 올리기 실패 — SSH 키·서버 주소를 확인하세요")
         return 1
-    remote = REMOTE + (" && systemctl restart 'quant-*' && sleep 5 && systemctl list-units 'quant-*' --no-pager --plain | head -12" if restart else "")
+    remote = REMOTE + (" && systemctl restart 'quant-*' && (systemctl start --no-block quant-warm.service 2>/dev/null || true)"
+                       " && sleep 5 && systemctl list-units 'quant-*' --no-pager --plain | head -16" if restart else "")   # 🔥 재시작 직후 화면 캐시 한 번 데움
     if run(["ssh", SERVER, remote]) != 0:
         print("❌ 서버 적용 실패")
         return 1

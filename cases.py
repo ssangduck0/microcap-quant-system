@@ -404,6 +404,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
     if new_listed:
         out(f"신규 종목 {len(new_listed):,}개 전체 이력 수집")
         build(conn, new_listed, [], years, threshold, 25, pause=pause, out=out)
+    try:  # 🔥 화면 캐시(2026-10-28): 새 사건·공시·순위를 반영해 전부 다시 데움(quant-warm.timer 는 10분마다 오래된 것만)
+        import pagecache
+        pagecache.warm(force=True, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("화면 캐시 데우기 실패: %s", e)
     return {"updated_events": n_new, "new_tickers": len(new_listed)}
 
 

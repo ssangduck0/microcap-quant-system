@@ -97,33 +97,45 @@ def status() -> dict:
 
 
 def event_flags(ev: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
-    """사건(ticker, date)마다 FLAGS 판정. 백필이 안 된 종목은 NaN(판정 불가)."""
+    """사건(ticker, date)마다 FLAGS 판정. 백필이 안 된 종목은 NaN(판정 불가).
+    2026-10-28: 결과는 그대로 두고 빠르게 — 서류 종류 판정을 공시 전체에 한 번만(벡터) 하고, 종목별로는 정렬된 날짜 배열 조각만 자른다.
+    (예전엔 종목마다 groupby 조각에 str.startswith/contains 를 다시 돌리고 out.loc 에 한 칸씩 써서 서버에서 21초 걸림 → 과거 사례 화면이 매번 25초)"""
     out = pd.DataFrame(index=ev.index, columns=list(FLAGS), dtype=object)
     if ev.empty or hist.empty:
         return out
-    h = hist.copy()
-    h["d"] = pd.to_datetime(h["filed"]).values.astype("datetime64[D]")
-    h["items"] = h["items"].fillna("")
-    groups = {t: g for t, g in h.groupby("ticker")}
-    sel = {
-        "offering": lambda g: g["form"].str.startswith(OFFER),
-        "notice": lambda g: g["form"].str.startswith("8-K") & g["items"].str.contains(r"\b3\.01\b"),
-        "charter": lambda g: g["form"].str.startswith("8-K") & g["items"].str.contains(r"\b5\.03\b"),
-        "news": lambda g: g["form"].str.startswith(("8-K", "6-K")),
-        "quiet": lambda g: pd.Series(True, index=g.index),
-    }
-    covered = set(groups)
+    form = hist["form"].astype(str)
+    items = hist["items"].fillna("").astype(str)
+    is8k = form.str.startswith("8-K").values
+    masks = {"offering": form.str.startswith(OFFER).values,
+             "notice": is8k & items.str.contains(r"\b3\.01\b").values,
+             "charter": is8k & items.str.contains(r"\b5\.03\b").values,
+             "news": form.str.startswith(("8-K", "6-K")).values,
+             "quiet": np.ones(len(hist), dtype=bool)}
+    tk = hist["ticker"].astype(str).values
+    d = pd.to_datetime(hist["filed"]).values.astype("datetime64[D]")
+    order = np.lexsort((d, tk))                       # 종목 → 날짜 순(종목 안에서 날짜 정렬 = 예전의 np.sort 와 같음)
+    tk, d = tk[order], d[order]
+    masks = {k: v[order] for k, v in masks.items()}
+    uniq, starts = np.unique(tk, return_index=True)
+    ends = np.append(starts[1:], len(tk))
+    span = {t: (s, e) for t, s, e in zip(uniq, starts, ends)}
+    res = {k: np.full(len(ev), np.nan, dtype=object) for k in FLAGS}
+    ev_days = pd.to_datetime(ev["date"]).values.astype("datetime64[D]")
+    pos = pd.Series(np.arange(len(ev)), index=ev.index)
     for t, idx in ev.groupby("ticker").groups.items():
-        if t not in covered:
+        if t not in span:
             continue
-        g = groups[t]
-        days = pd.to_datetime(ev.loc[idx, "date"]).values.astype("datetime64[D]")
+        s, e = span[t]
+        rows = pos[idx].values
+        days = ev_days[rows]
         for name, (_, a, b) in FLAGS.items():
-            arr = np.sort(g.loc[sel[name](g), "d"].values)
+            arr = d[s:e][masks[name][s:e]]
             lo = np.searchsorted(arr, days + np.timedelta64(a, "D"), side="left")
             hi = np.searchsorted(arr, days + np.timedelta64(b, "D"), side="right")
             has = (hi - lo) > 0
-            out.loc[idx, name] = (~has) if name == "quiet" else has
+            res[name][rows] = (~has) if name == "quiet" else has
+    for name in FLAGS:
+        out[name] = res[name]
     return out
 
 

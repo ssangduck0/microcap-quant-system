@@ -7,9 +7,19 @@ import db
 import ui_kit as ui
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def table():
-    return rk.compute()
+    """🏁 순위 표 — 🔥 화면 캐시(pagecache 'rank': quant-warm.timer 가 10분마다 갱신)에서 꺼내고, 없거나 25분 넘게 오래됐으면 직접 계산해 넣어 둔다.
+    (2026-10-28: 서버에서 계산 20~27초 → 즉시. 🎯 장마감 체크리스트의 '종합 N위' 열(column)도 이 표를 쓴다)"""
+    import pagecache
+    df = pagecache.get("rank", pagecache.ENTRIES["rank"][2])
+    if df is None:
+        df = rk.compute()
+        try:
+            pagecache.put("rank", df)
+        except Exception:  # noqa: BLE001
+            pass
+    return df
 
 
 def lookup() -> dict:
@@ -33,30 +43,29 @@ def column(tickers, m: dict | None = None) -> list[str]:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def s3_marks(tickers: tuple) -> dict[str, str]:
-    """✅ 스승님 3대 조건 표시(① 💰 거래량+OBV 동반 상승 · ② 📉 과매도 · ③ 🛡 희석 없음) — 켜진 것만 칩으로. 15분 기억."""
-    import setup3
-    import watch_ui
-    from contextlib import closing as _cl
-    px = watch_ui.prices(tickers)
+    """✅ 스승님 3대 조건 표시(① 💰 거래량+OBV 동반 상승 · ② 📉 과매도 · ③ 🛡 희석 없음) — 켜진 것만 칩으로. 15분 기억.
+    판정 데이터는 pagecache.s3_data(🔥 캐시 'rank_s3' 우선, 없으면 setup3.marks 로 직접 — 2026-10-28: 야후 7.5초 → 즉시)."""
+    import pagecache
+    data = pagecache.s3_data(tickers)
     out = {}
-    with _cl(db.connect()) as conn:
-        for t in tickers:
-            df = px.get(t)
-            if df is None or df.empty:
-                continue
-            m, s, d = setup3.money_flow(df), setup3.support_or_oversold(df), setup3.dilution_absent(t, conn)
-            chips = []
-            if m["strong"]:
-                chips.append(ui.chip("①💰", "green", tip=m["label"]))
-            if s["oversold"]:
-                chips.append(ui.chip("②📉", "green", tip=s["label"]))
-            if d["ok"]:
-                chips.append(ui.chip("③🛡", "green", tip=d["label"]))
-            elif d["ok"] is False:
-                chips.append(ui.chip("③❌", "red", tip=d["label"]))
-            n = sum(1 for x in (m["strong"], s["oversold"], d["ok"]) if x)
-            out[t] = (ui.chip("✅ 3대 조건", "green") if n == 3 else "") + "".join(chips)
+    for t in tickers:
+        r = data.get(t)
+        if not r:
+            continue
+        m, s, d = r["m"], r["s"], r["d"]
+        chips = []
+        if m["strong"]:
+            chips.append(ui.chip("①💰", "green", tip=m["label"]))
+        if s["oversold"]:
+            chips.append(ui.chip("②📉", "green", tip=s["label"]))
+        if d["ok"]:
+            chips.append(ui.chip("③🛡", "green", tip=d["label"]))
+        elif d["ok"] is False:
+            chips.append(ui.chip("③❌", "red", tip=d["label"]))
+        n = sum(1 for x in (m["strong"], s["oversold"], d["ok"]) if x)
+        out[t] = (ui.chip("✅ 3대 조건", "green") if n == 3 else "") + "".join(chips)
     return out
+
 
 def render() -> None:
     import report_dialog
@@ -71,6 +80,8 @@ def render() -> None:
     when = c1.radio("예상 시점", ["전체", "⏱ 3일 이내", "⏱ 1~2주", "⏱ 수주"], horizontal=True, key="rk_when", label_visibility="collapsed")
     min_s = c2.slider("종합 ≥", 0, 100, 20, key="rk_min")
     if c3.button("🔄 다시 계산", key="rk_re"):
+        import pagecache
+        pagecache.invalidate("rank")   # 캐시도 비워야 진짜 다시 계산
         table.clear()
     df = table()
     if df.empty:

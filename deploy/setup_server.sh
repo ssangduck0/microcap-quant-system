@@ -141,6 +141,29 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
+cat > /etc/systemd/system/quant-warm.service <<EOF
+[Unit]
+Description=Quant page cache warm (pagecache.py warm)
+[Service]
+Type=oneshot
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+Environment=PYTHONUTF8=1
+Environment=QUANT_DB=$DATA_DIR/quant.db
+ExecStart=$PY pagecache.py warm
+Nice=10
+TimeoutStartSec=20min
+EOF
+cat > /etc/systemd/system/quant-warm.timer <<EOF
+[Unit]
+Description=Quant page cache warm every 10 min
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=30s
+[Install]
+WantedBy=timers.target
+EOF
 cat > /etc/systemd/system/quant-backup.service <<EOF
 [Unit]
 Description=Quant DB backup (keep 14 days)
@@ -168,6 +191,6 @@ cat <<EOF
 Next steps (see deploy/README_SERVER.md):
   1) connectivity test:   sudo -u $APP_USER $PY $APP_DIR/deploy/check_connectivity.py
   2) put DB at $DATA_DIR/quant.db (from Windows C:\\quant_data\\quant.db), then: chown $APP_USER:$APP_USER $DATA_DIR/quant.db
-  3) start everything:    systemctl enable --now quant-scanner quant-dashboard quant-guest quant-tunnel quant-guest-tunnel quant-collector quant-cases.timer quant-backup.timer quant-chartex.timer
+  3) start everything:    systemctl enable --now quant-scanner quant-dashboard quant-guest quant-tunnel quant-guest-tunnel quant-collector quant-cases.timer quant-backup.timer quant-chartex.timer quant-warm.timer
   4) status / logs:       systemctl status 'quant-*'    journalctl -u quant-scanner -f
 EOF

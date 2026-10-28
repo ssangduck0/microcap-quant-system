@@ -106,6 +106,7 @@ systemctl status 'quant-*' --no-pager
 | 스캐너 로그 | `journalctl -u quant-scanner -f` (나가기: Ctrl+C) |
 | 전부 다시 켜기 | `systemctl restart 'quant-*'` |
 | 아침 갱신 지금 | `systemctl start quant-cases` |
+| 🔥 화면 캐시 지금 데우기 / 상태 | `systemctl start quant-warm` · `sudo -u quant /home/quant/quant_system/venv/bin/python /home/quant/quant_system/pagecache.py status` (타이머가 10분마다 돎 · 처음 한 번 `bash deploy/install_warm_timer.sh`) |
 | 타임머신 | `sudo -u quant /home/quant/quant_system/venv/bin/python /home/quant/quant_system/timemachine.py 2` |
 | 백업 목록 | `ls -lh /home/quant/backup` |
 | R2 사본 목록 | `sudo -u quant bash -c 'set -a; . /home/quant/quant_system/.env; set +a; RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare RCLONE_CONFIG_R2_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY RCLONE_CONFIG_R2_ENDPOINT=https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com rclone lsl r2:$R2_BUCKET'` (매일 03:00 백업 뒤 `deploy/backup_db.sh` 가 올림 · R2_KEEP_DAYS 보관) |

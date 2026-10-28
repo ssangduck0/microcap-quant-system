@@ -107,15 +107,14 @@ def render() -> None:
 
 def render_sec_flags(cs: pd.DataFrame, target: float) -> None:
     """급락일 전후 공시 종류별 다음날 결과 — 과거 공시 백필(secbackfill.py) 데이터."""
-    import db
     import secbackfill as sb
     st.markdown("**📑 급락일 전후 공시별 결과** (그때 어떤 공시가 있었나 — 공모·등록 서류, 상장유지 통지, 정관 변경, 뉴스성 공시, 공시 공백)")
     stt = sb.status()
     if not stt["done"]:
         st.info("과거 공시 기록이 아직 없습니다. 명령 프롬프트에서 한 번 실행하세요(이어받기 가능, 수십 분): `python secbackfill.py build --years 10`")
         return
-    hist = db.read_df(f"SELECT ticker, form, filed, items FROM sec_hist WHERE ticker IN ({','.join('?' * cs['ticker'].nunique())})", tuple(cs["ticker"].unique()))
-    fl = sb.event_flags(cs, hist)
+    import pagecache
+    fl = pagecache.secflags(cs)   # 🔥 화면 캐시(사건 전체 플래그를 quant-warm 이 미리 계산) — 없으면 예전처럼 공시를 읽어 계산(2026-10-28: 25초 → 1초)
     rows = []
     covered = fl["offering"].notna()
     base = cs[covered]

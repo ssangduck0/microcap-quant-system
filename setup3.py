@@ -151,6 +151,18 @@ def dilution_absent(t: str, conn, as_of: str | None = None, days: int = DIL_DAYS
 TIER_NAMES = {1: "⭐ 1순위 · RSI≤20 + 희석 없음", 2: "2순위 · RSI≤25 + 희석 없음", 3: "3순위 · 과매도 + 희석 없음(참고 — 비용 빼면 거의 0)"}
 
 
+def marks(tickers, px: dict, conn) -> dict[str, dict]:
+    """🏁 종합 순위 카드의 ✅ 3대 조건 판정 데이터 {티커: {"m": money_flow, "s": support_or_oversold, "d": dilution_absent}} — 일봉 없는 종목은 뺀다.
+    화면(rank_ui.s3_marks)은 이걸 칩으로 그리고, 🔥 화면 캐시(pagecache 'rank_s3')가 상위 60 종목분을 미리 만들어 둔다(2026-10-28)."""
+    out = {}
+    for t in tickers:
+        df = px.get(t)
+        if df is None or df.empty:
+            continue
+        out[t] = {"m": money_flow(df), "s": support_or_oversold(df), "d": dilution_absent(t, conn)}
+    return out
+
+
 def tier(rsi, oversold: bool, dil_ok) -> int | None:
     """검증된 순위(1이 가장 좋음). 희석 서류가 있거나 모르면 순위 없음."""
     if dil_ok is not True:

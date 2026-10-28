@@ -36,6 +36,24 @@ def render_ai_cost() -> None:
         chartpop.bar(pd.Series({k[5:]: v * aipick.FX for k, v in days.items()}, name="원"), key="adm_ai_days", title="날짜별 AI 지출(원)", height=160, fmt=",.0f")
 
 
+def render_pagecache() -> None:
+    """🔥 화면 캐시(pagecache, 2026-10-28) — 느린 화면 계산을 quant-warm.timer 가 10분마다 미리 해 둔 상태. 비어 있으면 서버에 타이머가 없는 것(deploy/install_warm_timer.sh)."""
+    import pagecache
+    with st.expander("🔥 화면 캐시 — 🏁 종합 순위 · 🎯 장마감 체크리스트 · ⚡ EFFECT · 📚 과거 사례가 바로 뜨게 미리 계산해 둔 것"):
+        rows = pagecache.status()
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        else:
+            st.info("아직 비어 있어요. 서버에 `quant-warm.timer` 가 있으면 10분 안에 채워지고(없으면 `bash deploy/install_warm_timer.sh`), 화면은 캐시가 없어도 예전처럼(느리게) 동작해요.")
+        st.caption("주기: 순위·3대 조건 10분 · 일봉 20분 · 공시 플래그 12시간(아침 갱신 끝에 전부 다시). 화면은 '지난 시간'이 순위 25분 · 일봉 45분 · 플래그 36시간을 넘으면 캐시를 버리고 직접 계산해요.")
+        if st.button("🔥 지금 데우기(1~2분)", key="adm_warm"):
+            with st.spinner("순위 · 일봉 · 3대 조건 · 공시 플래그 계산 중…"):
+                logs = []
+                pagecache.warm(force=True, out=logs.append)
+            st.success(" · ".join(logs) or "끝")
+            st.rerun()
+
+
 def _count(conn, table: str, where: str = "") -> str:
     try:
         return f"{conn.execute(f'SELECT COUNT(*) FROM {table} {where}').fetchone()[0]:,}"
@@ -78,6 +96,8 @@ def render() -> None:
         st.rerun()
     st.divider()
     render_ai_cost()
+    st.divider()
+    render_pagecache()
     st.divider()
     render_papertrade()
     st.divider()
