@@ -119,7 +119,8 @@ def render_time() -> None:
         st.markdown(f"**⚡ 단타 기준** — 장마감 종가에 사서 **5거래일 안에 무조건 탈출**(매집·애프터·장마감·3대 조건 방식). 목표에 닿으면 그 가격에 팔고, 못 닿으면 5일째 종가. "
                     f"고점은 🌙 세션별 기록이 있는 날이면 프리·애프터·데이마켓까지 포함(지금 판정의 {res.get('ext_pct', 0)}% — 기록이 쌓일수록 늘어요)")
         st.dataframe(ui.tidy(pd.DataFrame(res["short"])), hide_index=True, width="stretch")
-        st.caption("D+1 +10% = 다음날 고점이 +10% 이상 닿은 비율. '수익' 은 수수료·호가 차이(초소형주 왕복 2~5%)를 빼기 전 값이에요.")
+        st.caption("D+1 +10% = 다음날 고점이 +10% 이상 닿은 비율. '수익' 은 수수료·호가 차이(초소형주 왕복 2~5%)를 빼기 전 값이에요. "
+                   "표 머리글의 ⋮ 메뉴(영어)는 Streamlit 기본 기능: Sort ascending 오름차순 · Sort descending 내림차순 · Statistics 통계 · Autosize 폭 자동 · Pin column 열 고정 · Hide column 열 숨기기.")
         if res.get("exit_days"):
             st.markdown("**⏱ 못 튀면 며칠째 정리할까?** — 분할 매도(+10·20·30% 각 1/3) 수익. 앞 기간으로 고르고 최근 기간으로 확인해야 과거에만 맞는 규칙을 피해요")
             st.dataframe(ui.tidy(pd.DataFrame(res["exit_days"])), hide_index=True, width="stretch")
