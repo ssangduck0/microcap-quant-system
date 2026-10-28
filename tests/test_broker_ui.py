@@ -18,6 +18,7 @@ from streamlit.testing.v1 import AppTest
 APP = os.path.join(os.environ["QS_ROOT"], "dashboard.py")
 at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]
 assert any("💵 실매매" in e.label for e in at.expander)
+assert any("dry-run 결과" in c.value and "아직 없음" in c.value for c in at.caption)                                 # 기록이 없을 땐 안내 글만(2026-10-29 아침)
 btn = lambda k: [b for b in at.button if b.key == k][0]
 assert btn("live_on2").disabled and btn("live_off").disabled and "LIVE_TRADING" not in config.overrides()           # 꺼진 상태: 2단계 버튼 잠김
 at.text_input(key="live_confirm").set_value("아무거나").run(); assert btn("live_on2").disabled                       # 문구가 다르면 잠김
@@ -63,4 +64,14 @@ at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception
 # 끄기
 at.text_input(key="live_confirm").set_value(broker_ui.CONFIRM).run(); [b for b in at.button if b.key == "live_on2"][0].click().run()
 assert config.LIVE_TRADING is True; [b for b in at.button if b.key == "live_off"][0].click().run(); assert config.LIVE_TRADING is False and config.overrides().get("LIVE_TRADING") is None
+# dry-run 결과(그때 1주 샀다면, 2026-10-29 아침): 기록이 생기면 요약 4칸 + 한글 열 표
+import pandas as pd
+from datetime import datetime, timezone
+with closing(db.connect()) as conn:
+    assert broker.mirror_buy(conn, None, "piggy", "DR1", 0.5, tp_px=0.7, sl_px=0.45, now=datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc))["mode"] == "dry"
+    bars = {"DR1": pd.DataFrame({"Open": [0.5, 0.55], "High": [0.6, 0.75], "Low": [0.48, 0.5], "Close": [0.55, 0.7]}, index=pd.to_datetime(["2026-11-02", "2026-11-03"]))}
+    r = broker.simulate_dry(conn, bars, now=datetime(2026, 11, 4, 2, 0, tzinfo=timezone.utc), out=lambda *_: None); assert r["closed"] == 1, r
+at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]
+assert any("그때 1주 샀다면" in m.value for m in at.markdown) and any(m.label == "익절 비율" and m.value == "100%" for m in at.metric), [(m.label, m.value) for m in at.metric]
+assert any("매수가(지정가)" in list(d.value.columns) for d in at.dataframe)
 print("ALL OK")

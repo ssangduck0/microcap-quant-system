@@ -29,6 +29,8 @@ DDL = [
     """CREATE TABLE IF NOT EXISTS live_closed (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, strategy TEXT, qty REAL, buy_px REAL, sell_px REAL, pnl_usd REAL,
        opened_at TEXT, closed_at TEXT, reason TEXT)""",
     """CREATE TABLE IF NOT EXISTS live_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, ticker TEXT, note TEXT, created_at TEXT, done_at TEXT, result TEXT)""",
+    """CREATE TABLE IF NOT EXISTS live_dry_results (client_order_id TEXT PRIMARY KEY, day TEXT, strategy TEXT, ticker TEXT, qty REAL, entry_px REAL, tp_px REAL, sl_px REAL, hold_until TEXT,
+       status TEXT, exit_day TEXT, exit_px REAL, reason TEXT, pnl_pct REAL, pnl_usd REAL, last_day TEXT, last_px REAL, bars_after INTEGER, updated_at TEXT)""",   # dry-run '그때 1주 샀다면'(2026-10-29)
 ]
 LIVE_KEYS = ("LIVE_TRADING", "LIVE_ONE_SHARE", "LIVE_STRATEGIES", "LIVE_USD_PER_TRADE", "LIVE_MAX_ORDERS_PER_DAY", "LIVE_MAX_OPEN", "LIVE_MAX_EXPOSURE_USD",
              "LIVE_MAX_PRICE", "LIVE_MIN_DOLLAR_VOL", "LIVE_LIMIT_SLIP_PCT", "LIVE_ORDER_TTL_MIN", "LIVE_DAILY_LOSS_USD", "LIVE_ACCOUNT_SEQ", "LIVE_SYNC_SEC", "LIVE_EXT_SESSIONS")
@@ -41,6 +43,7 @@ OPEN_STATES = {"PENDING", "PARTIAL_FILLED", "PENDING_CANCEL", "PENDING_REPLACE"}
 DONE_STATES = {"FILLED", "CANCELED", "REJECTED", "REPLACED", "EXPIRED"}
 BLOCK_DIL = ("ATM", "ELOC", "CB")
 KILL_AFTER_FAILS = 3
+DRY_MAX_BARS = 30        # dry-run 결과: 익절·손절·보유일에 안 닿으면 30거래일째 종가로 평가 마감(OCO 만료 30일과 맞춤)
 OCO_DAYS = 30            # 조건주문 만료(최대 1년) — 저금통 보유는 길어야 몇 주
 _fails = 0               # 연속 거부(프로세스 안)
 _account: int | None = None
@@ -753,6 +756,103 @@ def start_background(tc, interval: float | None = None, stop: threading.Event | 
     th.stop = stop  # type: ignore[attr-defined]
     th.start()
     return th
+
+
+
+# ---------------------------------------------------------------- dry-run 결과: 그때 1주 샀다면(2026-10-29 아침)
+def dry_outcome(df, day: str, entry_px: float, tp_px=None, sl_px=None, hold_until: str | None = None, max_bars: int = DRY_MAX_BARS) -> dict:
+    """dry-run 매수 기록 하나를 '그때 1주 샀다면' 으로 일봉 위에서 되감는다(사용자 결정 10/29 아침 'dry-run 유지' → 실주문을 켤지 숫자로 판단하는 근거).
+    규칙 — 실매매 1주 모드의 출구(토스 OCO 익절·손절 · 보유일 만료)를 일봉으로 흉내:
+      매수 **다음 봉부터** ① 저가 ≤ 손절가 → 손절가에 매도 ② 고가 ≥ 익절가 → 익절가 ③ 보유일(hold_until) 도달 → 그날 종가 ④ max_bars(30거래일, OCO 만료 30일과 맞춤) 지나면 종가로 '평가 마감'.
+      같은 봉에서 ①②가 다 닿으면 손절(보수적 — 가상매매 '동시' 규칙과 같음). 매수 당일 봉은 장중 어느 때 샀는지 몰라 쓰지 않는다.
+      손절가 아래로 벌어진 갭은 손절가로 셈(실제는 조금 더 불리할 수 있음). 끝나지 않았으면 status='open' + 마지막 종가로 평가."""
+    import pandas as pd
+    r = {"status": "open", "exit_day": None, "exit_px": None, "reason": None, "pnl_pct": None, "last_day": None, "last_px": None, "bars_after": 0}
+    if df is None or len(df) == 0 or not entry_px or float(entry_px) <= 0:
+        return r
+    entry_px = float(entry_px)
+    d = df.copy()
+    d.index = pd.to_datetime(d.index).tz_localize(None).normalize()
+    d = d[~d.index.duplicated(keep="last")].sort_index().dropna(subset=["High", "Low", "Close"])
+    after = d[d.index > pd.Timestamp(day)]
+    r["bars_after"] = int(len(after))
+    if after.empty:
+        return r
+    for k, (ts, b) in enumerate(after.iterrows(), start=1):
+        ds, hi, lo, c = ts.date().isoformat(), float(b["High"]), float(b["Low"]), float(b["Close"])
+        hit = None
+        if sl_px and lo <= float(sl_px):
+            hit = (float(sl_px), "손절" + ("(같은 날 익절가도 닿음 · 보수적으로 손절)" if tp_px and hi >= float(tp_px) else ""))
+        elif tp_px and hi >= float(tp_px):
+            hit = (float(tp_px), "익절")
+        elif hold_until and ds >= hold_until:
+            hit = (c, "보유일 만료(종가)")
+        elif k >= max_bars:
+            hit = (c, f"{max_bars}거래일 평가 마감(종가)")
+        if hit:
+            r.update(status="closed", exit_day=ds, exit_px=hit[0], reason=hit[1], bars_after=k, pnl_pct=(hit[0] / entry_px - 1) * 100)
+            return r
+    last = after.iloc[-1]
+    r.update(last_day=after.index[-1].date().isoformat(), last_px=float(last["Close"]), pnl_pct=(float(last["Close"]) / entry_px - 1) * 100)
+    return r
+
+
+def simulate_dry(conn, bars: dict | None = None, *, now: datetime | None = None, out=print, lookback_days: int = 120, download=None) -> dict:
+    """dry-run 매수 기록(mode='dry' · 안전장치에 막히지 않은 것)마다 '그때 1주 샀다면' 결과를 live_dry_results 에 저장. 아침 작업(cases.update) 끝에 자동 + `cases.py drysim`.
+    bars({티커: 일봉 DataFrame})를 주지 않으면 야후 일봉 6개월(market.download_daily)을 받는다 — 테스트는 가짜 bars. 이미 끝난(closed) 기록은 다시 계산하지 않는다.
+    체결가는 지정가(limit_px = 기준가 + LIVE_LIMIT_SLIP_PCT)로 가정 — 실제 체결은 그 이하라 결과가 조금 보수적."""
+    from datetime import date as _date
+    from zoneinfo import ZoneInfo as _Z
+    ensure(conn)
+    cutoff = (_now(now).date() - timedelta(days=lookback_days)).isoformat()
+    rows = [dict(r) for r in conn.execute("""SELECT o.*, r.status AS sim_status FROM live_orders o LEFT JOIN live_dry_results r ON r.client_order_id = o.client_order_id
+                                              WHERE o.mode='dry' AND o.side='BUY' AND o.status='DRY' AND o.code IS NULL AND o.limit_px IS NOT NULL AND o.day >= ?
+                                                AND (r.client_order_id IS NULL OR r.status='open') ORDER BY o.day, o.ticker""", (cutoff,))]
+    res = {"rows": len(rows), "updated": 0, "closed": 0, "open": 0}
+    if not rows:
+        out("dry-run 결과: 새로 볼 기록 없음")
+        return res
+    if bars is None:
+        import market
+        bars = (download or market.download_daily)(sorted({r["ticker"] for r in rows}), period="6mo") or {}
+    import cases as _cases
+    now_et = _now(now).astimezone(_Z("America/New_York"))
+    for r in rows:
+        try:
+            meta = json.loads(r.get("note") or "{}")
+        except ValueError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        tp, sl, hold = meta.get("tp"), meta.get("sl"), meta.get("hold")
+        hold_until = (_date.fromisoformat(r["day"]) + timedelta(days=int(hold))).isoformat() if hold else None
+        df = _cases.drop_incomplete_last_bar(bars.get(r["ticker"]), now_et)
+        entry, qty = float(r["limit_px"]), float(r.get("qty") or 1)
+        o = dry_outcome(df, r["day"], entry, tp, sl, hold_until)
+        px_ref = o["exit_px"] if o["status"] == "closed" else o["last_px"]
+        pnl_usd = (float(px_ref) - entry) * qty if px_ref else None
+        conn.execute("""INSERT OR REPLACE INTO live_dry_results (client_order_id, day, strategy, ticker, qty, entry_px, tp_px, sl_px, hold_until, status, exit_day, exit_px, reason,
+                        pnl_pct, pnl_usd, last_day, last_px, bars_after, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (r["client_order_id"], r["day"], r.get("strategy"), r["ticker"], qty, entry, tp, sl, hold_until, o["status"], o["exit_day"], o["exit_px"], o["reason"],
+                      o["pnl_pct"], pnl_usd, o["last_day"], o["last_px"], o["bars_after"], _iso(_now(now))))
+        res["updated"] += 1
+        res["closed" if o["status"] == "closed" else "open"] += 1
+    conn.commit()
+    out(f"dry-run 결과(그때 1주 샀다면): {res['updated']}건 갱신 · 끝 {res['closed']} · 진행 {res['open']}")
+    return res
+
+
+def dry_summary(conn, limit: int = 60) -> dict:
+    """관리 화면용: dry-run '그때 샀다면' 결과 요약(끝난 것의 익절 비율·손익 합·평균 %, 진행 중 평가) + 최근 표 + 실제 체결 왕복(live_closed) 비교."""
+    ensure(conn)
+    rows = [dict(r) for r in conn.execute("SELECT * FROM live_dry_results ORDER BY day DESC, ticker LIMIT ?", (limit,))]
+    n, closed, wins, pnl_closed, avg_pct, pnl_open = conn.execute(
+        """SELECT COUNT(*), COALESCE(SUM(status='closed'),0), COALESCE(SUM(status='closed' AND pnl_usd > 0),0), COALESCE(SUM(CASE WHEN status='closed' THEN pnl_usd END),0),
+                  AVG(CASE WHEN status='closed' THEN pnl_pct END), COALESCE(SUM(CASE WHEN status='open' THEN pnl_usd END),0) FROM live_dry_results""").fetchone()
+    real = conn.execute("SELECT COUNT(*), COALESCE(SUM(pnl_usd),0) FROM live_closed").fetchone()
+    return {"n": int(n), "closed": int(closed), "open": int(n - closed), "wins": int(wins), "win_rate": (wins / closed * 100) if closed else None,
+            "pnl_closed": float(pnl_closed), "avg_pct": float(avg_pct) if avg_pct is not None else None, "pnl_open": float(pnl_open),
+            "real_n": int(real[0]), "real_pnl": float(real[1]), "rows": rows}
 
 
 def status(conn, *, now: datetime | None = None) -> dict:

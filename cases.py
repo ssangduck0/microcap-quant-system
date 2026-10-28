@@ -265,6 +265,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         tracker.update(conn, out=out)
     except Exception as e:  # noqa: BLE001
         log.warning("발견 종목 추적 갱신 실패: %s", e)
+    try:  # 💵 dry-run 매수 기록에 '그때 1주 샀다면' 결과(2026-10-29 아침, broker.simulate_dry — 일봉으로 익절/손절/보유일 판정, 야후 몇 종목)
+        import broker
+        broker.simulate_dry(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("dry-run 결과 갱신 실패: %s", e)
     try:  # 🔁 병합 후 레이더: 최근 1년 분할 기록·경로 갱신 + 오늘의 예측 기록(성과 공표용)
         import config as _cfg
         if _cfg.RSPLIT_DAILY:
@@ -520,6 +525,7 @@ def main() -> int:
     u.add_argument("--threshold", type=float, default=THRESHOLD)
     sub.add_parser("status", help="현황")
     sub.add_parser("backfill3d", help="3일 목표(max_up_3d)가 빈 사건을 저장된 일봉으로 보완(인터넷 없음)")
+    sub.add_parser("drysim", help="💵 dry-run 매수 기록에 '그때 1주 샀다면' 결과 붙이기(야후 일봉)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -529,6 +535,9 @@ def main() -> int:
             status(conn)
         elif args.cmd == "backfill3d":
             print(backfill_3d(conn))
+        elif args.cmd == "drysim":
+            import broker
+            print(broker.simulate_dry(conn))
         elif args.cmd == "build":
             active, delisted = case_universe(not args.no_delisted)
             if not active:

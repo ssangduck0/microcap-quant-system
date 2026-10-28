@@ -122,6 +122,25 @@ def render() -> None:
                 st.markdown("**최근 주문 기록**(dry = 기록만 · live = 실주문)")
                 st.dataframe(pd.DataFrame(s["recent"])[["created_at", "mode", "status", "strategy", "ticker", "side", "qty", "limit_px", "filled_qty", "avg_px", "code", "note"]],
                              hide_index=True, width="stretch")
+            # ---- dry-run 결과: 그때 1주 샀다면(2026-10-29 아침 — 사용자 결정 'dry-run 유지' 뒤 실주문을 켤지 숫자로 보는 근거. 아침 작업이 일봉으로 채움)
+            ds = broker.dry_summary(conn)
+            if ds["n"]:
+                st.markdown("**dry-run 결과 — 그때 1주 샀다면**(아침 07:30 작업이 일봉으로 판정 · 매수 다음 봉부터 손절 → 익절 → 보유일 순, 같은 날 둘 다 닿으면 손절, "
+                            f"{broker.DRY_MAX_BARS}거래일 지나면 종가로 평가 마감 · 체결가는 지정가로 가정해 실제보다 조금 불리)")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("기록", f"{ds['n']}건", help=f"끝 {ds['closed']} · 진행 {ds['open']}")
+                m2.metric("익절 비율", f"{ds['win_rate']:.0f}%" if ds["win_rate"] is not None else "—", help="끝난 것 중 손익 > 0 인 비율")
+                m3.metric("끝난 것 손익 합", f"${ds['pnl_closed']:+.2f}", help=(f"끝난 것 평균 {ds['avg_pct']:+.1f}%" if ds["avg_pct"] is not None else None))
+                m4.metric("진행 중 평가", f"${ds['pnl_open']:+.2f}", help="아직 안 끝난 것의 마지막 종가 기준")
+                if ds["real_n"]:
+                    st.caption(f"참고 — 실제 체결 왕복 {ds['real_n']}건 합계 ${ds['real_pnl']:+.2f}(실주문이 켜져 있던 동안)")
+                cols = {"day": "날짜", "ticker": "종목", "strategy": "전략", "entry_px": "매수가(지정가)", "tp_px": "익절가", "sl_px": "손절가", "status": "상태", "reason": "끝난 이유",
+                        "exit_day": "끝난 날", "exit_px": "매도가", "last_px": "최근 종가", "pnl_pct": "손익 %", "pnl_usd": "손익 $", "bars_after": "지난 봉"}
+                ddf = pd.DataFrame(ds["rows"])
+                ddf["status"] = ddf["status"].map({"closed": "끝", "open": "진행"}).fillna(ddf["status"])
+                st.dataframe(ddf[list(cols)].rename(columns=cols).round(3), hide_index=True, width="stretch")
+            else:
+                st.caption("dry-run 결과(그때 1주 샀다면): 아직 없음 — dry 매수 기록이 생기면 다음 아침 작업(07:30)부터 여기 쌓입니다.")
             try:
                 req = db.read_df("SELECT id, kind, ticker, created_at, done_at, result FROM live_requests ORDER BY id DESC LIMIT 10")
             except Exception:  # noqa: BLE001

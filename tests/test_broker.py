@@ -299,4 +299,41 @@ with closing(db.connect()) as conn:
     broker.sync(conn, tc, now=datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc))
     sells = [c_ for c_ in tc.calls[n0:] if c_[0] == "create" and c_[1] == "RK1" and c_[2] == "SELL"]; assert len(sells) == 1 and abs(sells[0][4] - 1.03) < 1e-9, tc.calls[n0:]   # 1.05 × 0.99 = 1.0395 → $1 이상 2자리 절삭
     config.LIVE_STRATEGIES = "piggy"
+# 14) dry-run 결과 '그때 1주 샀다면'(2026-10-29 아침): 일봉으로 익절/손절/보유일/평가 마감 · 같은 날 둘 다 → 손절 · 봉 없으면 진행 중 · 끝난 건 다시 안 셈 · 요약
+import pandas as pd
+config.LIVE_TRADING = False
+mk = lambda rows: pd.DataFrame({"Open": [r[1] for r in rows], "High": [r[2] for r in rows], "Low": [r[3] for r in rows], "Close": [r[4] for r in rows]}, index=pd.to_datetime([r[0] for r in rows]))
+with closing(db.connect()) as conn:
+    conn.execute("DELETE FROM live_orders"); conn.execute("DELETE FROM live_dry_results"); conn.commit()
+    TD = datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc)                                             # 월요일 10:00 EST 정규장
+    for t, tp, sl, hold in [("TP1", 0.7, 0.45, None), ("SL1", 0.7, 0.45, None), ("BO1", 0.7, 0.45, None), ("HD1", 9.0, 0.1, 2), ("OP1", 9.0, 0.1, None), ("NB1", 0.7, 0.45, None)]:
+        assert broker.mirror_buy(conn, tc, "piggy", t, 0.5, tp_px=tp, sl_px=sl, now=TD, hold_days=hold)["mode"] == "dry"                      # 지정가 0.505 에 산 셈
+    assert broker.mirror_buy(conn, tc, "piggy", "BL1", 0.5, tp_px=0.7, sl_px=0.45, dilution="ATM", now=TD)["ok"] is False                        # 막힌 기록은 결과 대상 아님
+    d0 = ("2026-11-02", 0.5, 0.6, 0.48, 0.55)                                                                                                      # 매수 당일 봉(고가 0.6 — 쓰지 않음)
+    bars = {"TP1": mk([d0, ("2026-11-03", 0.55, 0.75, 0.50, 0.70)]),                                                                             # 다음 봉 고가 0.75 ≥ 0.7 → 익절
+            "SL1": mk([d0, ("2026-11-03", 0.50, 0.55, 0.44, 0.45)]),                                                                             # 저가 0.44 ≤ 0.45 → 손절
+            "BO1": mk([d0, ("2026-11-03", 0.50, 0.80, 0.40, 0.60)]),                                                                             # 둘 다 → 손절(보수적)
+            "HD1": mk([d0, ("2026-11-03", 0.6, 0.62, 0.58, 0.60), ("2026-11-04", 0.6, 0.66, 0.6, 0.65), ("2026-11-05", 0.9, 0.95, 0.9, 0.9)]),   # 보유 2일 → 11/4 종가 0.65
+            "OP1": mk([d0, ("2026-11-03", 0.6, 0.62, 0.58, 0.60), ("2026-11-04", 0.52, 0.53, 0.51, 0.52)])}                                       # 안 닿음 → 진행 중, 마지막 종가 0.52
+    NOW = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)                                                                                           # 11/5 21:00 EST(장 마감 뒤)
+    r = broker.simulate_dry(conn, bars, now=NOW, out=lambda *_: None); assert r == {"rows": 6, "updated": 6, "closed": 4, "open": 2}, r
+    g = lambda t: dict(conn.execute("SELECT * FROM live_dry_results WHERE ticker=?", (t,)).fetchone())
+    x = g("TP1"); assert x["status"] == "closed" and x["exit_day"] == "2026-11-03" and x["reason"] == "익절" and abs(x["exit_px"] - 0.7) < 1e-9 and abs(x["pnl_usd"] - 0.195) < 1e-9 and abs(x["pnl_pct"] - (0.7 / 0.505 - 1) * 100) < 1e-6, x
+    x = g("SL1"); assert x["status"] == "closed" and x["reason"] == "손절" and abs(x["exit_px"] - 0.45) < 1e-9 and abs(x["pnl_usd"] + 0.055) < 1e-9, x
+    x = g("BO1"); assert x["status"] == "closed" and x["reason"].startswith("손절(같은 날") and abs(x["exit_px"] - 0.45) < 1e-9, x
+    x = g("HD1"); assert x["status"] == "closed" and x["hold_until"] == "2026-11-04" and x["exit_day"] == "2026-11-04" and x["reason"].startswith("보유일 만료") and abs(x["exit_px"] - 0.65) < 1e-9 and x["bars_after"] == 2, x
+    x = g("OP1"); assert x["status"] == "open" and x["exit_px"] is None and x["last_day"] == "2026-11-04" and abs(x["last_px"] - 0.52) < 1e-9 and x["bars_after"] == 2 and abs(x["pnl_usd"] - (0.52 - 0.505)) < 1e-9, x
+    x = g("NB1"); assert x["status"] == "open" and x["bars_after"] == 0 and x["pnl_pct"] is None and x["pnl_usd"] is None, x
+    assert conn.execute("SELECT COUNT(*) FROM live_dry_results WHERE ticker='BL1'").fetchone()[0] == 0
+    s = broker.dry_summary(conn); assert s["n"] == 6 and s["closed"] == 4 and s["open"] == 2 and s["wins"] == 2 and abs(s["win_rate"] - 50.0) < 1e-9 and abs(s["pnl_closed"] - (0.195 - 0.055 - 0.055 + 0.145)) < 1e-9 and abs(s["pnl_open"] - 0.015) < 1e-9 and len(s["rows"]) == 6, s
+    # 두 번째 실행: 끝난 건 그대로, 진행 중만 다시 — OP1 에 31봉을 주면 30거래일째 종가로 평가 마감 · NB1 은 여전히 봉 없음
+    days = pd.bdate_range("2026-11-03", periods=31)
+    bars2 = {"OP1": pd.DataFrame({"Open": 0.52, "High": 0.53, "Low": 0.51, "Close": 0.52}, index=days), "TP1": mk([("2026-11-03", 1, 1, 1, 1)])}          # TP1 에 엉뚱한 봉을 줘도 안 바뀜
+    r2 = broker.simulate_dry(conn, bars2, now=datetime(2027, 1, 5, 2, 0, tzinfo=timezone.utc), out=lambda *_: None); assert r2 == {"rows": 2, "updated": 2, "closed": 1, "open": 1}, r2
+    x = g("OP1"); assert x["status"] == "closed" and x["reason"].startswith("30거래일 평가 마감") and x["exit_day"] == days[29].date().isoformat() and x["bars_after"] == 30, x
+    assert g("TP1")["reason"] == "익절" and g("NB1")["status"] == "open"
+    # 오늘 봉(장 마감 전)은 빼고 본다: 11/3 10:00 EST 에 돌리면 11/3 봉은 아직 → NB1 진행 중 그대로
+    r3 = broker.simulate_dry(conn, {"NB1": mk([d0, ("2026-11-03", 0.5, 0.9, 0.5, 0.9)])}, now=datetime(2026, 11, 3, 15, 0, tzinfo=timezone.utc), out=lambda *_: None)
+    assert r3["open"] == 1 and g("NB1")["status"] == "open" and g("NB1")["bars_after"] == 0, (r3, g("NB1"))
+    conn.execute("DELETE FROM live_orders"); conn.execute("DELETE FROM live_dry_results"); conn.commit()
 print("ALL OK")
