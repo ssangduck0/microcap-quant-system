@@ -115,6 +115,47 @@ def save_events(conn, rows: list[dict]) -> None:
                          [tuple(r.get(c) for c in EVENT_COLS) for r in rows])
 
 
+def backfill_3d(conn, out=print) -> dict:
+    """사건의 '3일 안 최고가·최저가'(max_up_3d/max_down_3d)가 비어 있으면 daily_prices(🕰 타임머신이 모아 둔 3년 일봉)로 채운다 — 인터넷 없이 몇 초.
+    2026-10-29 밤: 3일 목표가 뒤늦게 추가돼 과거 10년 사건은 비어 있다. 일봉이 있는 최근 3년치(전체의 약 절반)만 채워지고, 나머지는 `cases.py build --rebuild`(야후 재수집, 수십 분)로.
+    계산은 find_events 와 같다: 사건일 종가 대비 다음 3거래일 고가 최대·저가 최소(%). 뒤 봉이 3개 안 되는 최근 사건은 다음에."""
+    import bisect
+    need = conn.execute("SELECT ticker, date, close FROM case_events WHERE max_up_3d IS NULL AND close IS NOT NULL ORDER BY ticker, date").fetchall()
+    if not need:
+        return {"filled": 0, "left": 0}
+    by: dict[str, list] = {}
+    for r in need:
+        by.setdefault(r[0], []).append((r[1], float(r[2])))
+    upd = []
+    for t, evs in by.items():
+        bars = conn.execute("SELECT date, high, low, close FROM daily_prices WHERE ticker=? AND date>=? ORDER BY date", (t, evs[0][0])).fetchall()
+        if len(bars) < 3:
+            continue
+        dates = [b[0] for b in bars]
+        for d, _c in evs:
+            i = bisect.bisect_right(dates, d)   # 사건 다음 봉부터
+            if i == 0 or dates[i - 1] != d or i + 3 > len(bars):
+                continue   # 사건일 봉이 저장소에 없으면 건너뜀(기준 종가를 같은 자료에서 잡아야 역분할 보정 차이로 엉뚱한 % 가 안 나옴)
+            c = bars[i - 1][3]
+            if not c or c <= 0:
+                continue
+            seg = bars[i:i + 3]
+            d0 = date.fromisoformat(d)   # 일봉이 사건보다 한참 뒤부터만 있으면(저장소는 3년치) 엉뚱한 봉을 붙이지 않게: 첫 봉은 7일 안(연휴 포함), 셋째 봉은 14일 안
+            if seg[0][0] > (d0 + timedelta(days=7)).isoformat() or seg[2][0] > (d0 + timedelta(days=14)).isoformat():
+                continue
+            hs = [float(b[1]) for b in seg if b[1] is not None]
+            ls = [float(b[2]) for b in seg if b[2] is not None]
+            if len(hs) < 3 or len(ls) < 3:
+                continue
+            upd.append((_pct(max(hs), c), _pct(min(ls), c), t, d))
+    if upd:
+        conn.executemany("UPDATE case_events SET max_up_3d=?, max_down_3d=? WHERE ticker=? AND date=?", upd)
+        conn.commit()
+    left = conn.execute("SELECT COUNT(*) FROM case_events WHERE max_up_3d IS NULL").fetchone()[0]
+    out(f"3일 목표 보완: {len(upd):,}건 채움 · 아직 빈 사건 {left:,}건(일봉 없는 옛 사건 — build --rebuild 로)")
+    return {"filled": len(upd), "left": int(left)}
+
+
 def mark(conn, ticker: str, status: str, df=None, n_events: int = 0, delisted: bool = False, msg: str | None = None) -> None:
     n_bars = first = last = None
     if df is not None and len(df):
@@ -215,6 +256,10 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         out(f"  [{min(i + chunk, len(tickers)):,}/{len(tickers):,}] 갱신 사건 {n_new:,}")
         if pause:
             time.sleep(pause)
+    try:  # 3일 목표(2026-10-29 추가)가 빈 과거 사건을 저장된 일봉으로 보완(인터넷 없음, 몇 초)
+        backfill_3d(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("3일 목표 보완 실패: %s", e)
     try:  # 스캐너가 발견한 종목의 결과(다음날/5일 후 등)도 같이 채운다
         import tracker
         tracker.update(conn, out=out)
@@ -474,6 +519,7 @@ def main() -> int:
     u.add_argument("--days", type=int, default=60)
     u.add_argument("--threshold", type=float, default=THRESHOLD)
     sub.add_parser("status", help="현황")
+    sub.add_parser("backfill3d", help="3일 목표(max_up_3d)가 빈 사건을 저장된 일봉으로 보완(인터넷 없음)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -481,6 +527,8 @@ def main() -> int:
     with closing(db.connect()) as conn:
         if args.cmd == "status":
             status(conn)
+        elif args.cmd == "backfill3d":
+            print(backfill_3d(conn))
         elif args.cmd == "build":
             active, delisted = case_universe(not args.no_delisted)
             if not active:

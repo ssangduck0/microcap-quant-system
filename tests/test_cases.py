@@ -120,6 +120,26 @@ with closing(db.connect()) as conn:
     lines=[]; cases.status(conn, out=lines.append); print(lines); assert "사건" in lines[1]
 print("update OK")
 
+# ---------- 3b) backfill_3d: 저장된 일봉으로 3일 목표 보완(2026-10-29) ----------
+with closing(db.connect()) as conn:
+    conn.execute("DELETE FROM case_events WHERE ticker IN ('BF1','BF2')")
+    conn.execute("INSERT INTO case_events (ticker, date, close) VALUES ('BF1','2026-01-05',10.0)")   # 뒤 봉 4개 → 채워짐
+    conn.execute("INSERT INTO case_events (ticker, date, close) VALUES ('BF2','2026-01-05',10.0)")   # 뒤 봉 2개 → 아직 비움
+    conn.execute("INSERT INTO case_events (ticker, date, close) VALUES ('BF1','2020-01-05',10.0)")   # 옛 사건: 일봉이 2026년부터만 → 붙이면 안 됨(첫 구현의 버그)
+    for d, h, l in [("2026-01-05",10.5,9.5),("2026-01-06",11.0,9.0),("2026-01-07",12.0,9.8),("2026-01-08",10.2,8.0),("2026-01-09",13.0,9.9)]:
+        conn.execute("INSERT OR REPLACE INTO daily_prices VALUES ('BF1',?,10,?,?,10,1000)", (d, h, l))
+    for d, h, l in [("2026-01-06",11.0,9.0),("2026-01-07",12.0,9.8)]:
+        conn.execute("INSERT OR REPLACE INTO daily_prices VALUES ('BF2',?,10,?,?,10,1000)", (d, h, l))
+    conn.commit()
+    r = cases.backfill_3d(conn, out=lambda *_: None)
+    a = conn.execute("SELECT max_up_3d, max_down_3d FROM case_events WHERE ticker='BF1' AND date='2026-01-05'").fetchone()
+    old = conn.execute("SELECT max_up_3d FROM case_events WHERE ticker='BF1' AND date='2020-01-05'").fetchone()
+    assert old[0] is None, tuple(old)   # 사건 뒤 7일 안에 봉이 없으면 비워 둠
+    b = conn.execute("SELECT max_up_3d FROM case_events WHERE ticker='BF2'").fetchone()
+    assert r["filled"] >= 1 and approx(a[0], 20.0) and approx(a[1], -20.0) and b[0] is None, (dict(r), tuple(a), tuple(b))   # 1/6~1/8 최고 12(+20%)·최저 8(−20%), 1/9(4번째 봉)·사건일 봉은 제외
+    conn.execute("DELETE FROM case_events WHERE ticker IN ('BF1','BF2')"); conn.execute("DELETE FROM daily_prices WHERE ticker IN ('BF1','BF2')"); conn.commit()
+print("backfill_3d OK")
+
 # ---------- 4) 요약 통계 ----------
 with closing(db.connect()) as conn:
     cs = pd.read_sql_query("SELECT * FROM case_events", conn)

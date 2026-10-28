@@ -345,7 +345,7 @@ def arm_exit(conn, tc, pos: dict, *, now: datetime | None = None) -> str | None:
     body = oco_body(t, float(pos["qty"]), pos.get("tp_px"), pos.get("sl_px"), cid, expire)
     if not body:
         return None
-    for attempt, b in enumerate((body, oco_body(t, float(pos["qty"]), None, pos.get("sl_px"), cid + "s", expire))):
+    for attempt, b in enumerate((body, oco_body(t, float(pos["qty"]), None, pos.get("sl_px"), cid[:35] + "s", expire))):   # 재시도 키도 36자 안(토스 제한)
         if not b:
             continue
         try:
@@ -426,7 +426,9 @@ def _sync(conn, tc, now: datetime, out: dict) -> dict:
     acc = account(tc)
     try:
         remote = {o["orderId"]: o for o in (tc.orders(acc, "OPEN") or [])}
-        since = (now.date() - timedelta(days=2)).isoformat()
+        # 끝난 주문 조회 범위: 최근 2일 + 가장 오래된 미체결의 전날까지(2026-10-29 밤 점검 — 서버가 며칠 멈췄다 켜져도 그 사이 끝난 주문을 찾아 PENDING 이 영원히 남지 않게)
+        oldest = min((_parse_iso(r.get("created_at")) or now for r in pending), default=now)
+        since = (min(oldest, now - timedelta(days=2)) - timedelta(days=1)).date().isoformat()
         for o in tc.orders(acc, "CLOSED", since=since) or []:
             remote.setdefault(o["orderId"], o)
     except Exception as e:  # noqa: BLE001
