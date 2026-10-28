@@ -81,8 +81,8 @@
 - 10/28 밤 폴더 정리: 옛 코드 복사본(`클로드\files` · `files\quant_system` 바로 아래)·설치 파일·PC 로그는 휴지통으로, 옛 코드 98개는 `클로드\옛코드_보관_2026-10.zip`, 옛 인수인계서는 `docs/archive/`
 - 텔레그램 토큰 재발급 여부(예전 채팅 노출) → 재발급 시 서버 `.env` 의 TELEGRAM_TOKEN 수정 후 `systemctl restart 'quant-*'`
 - 방문객 링크 새로 만들기(예전 trycloudflare 링크는 끊김)
-- 🔥 화면 캐시 타이머: PC 에서 `ssh root@158.247.250.15 "bash /home/quant/quant_system/deploy/install_warm_timer.sh"` 한 번(Claude 앱은 서버에 상시 실행 단위를 등록하는 일을 막아 사용자가 실행). 10/28 15:54 배포 뒤 Claude 가 `pagecache.py warm` 을 한 번 돌림(순위 17초 · 일봉 295종목 52초 · 3대 조건 0.8초 · 플래그 5.4초) → 화면 처음 열기 장마감 2.9초 · EFFECT 0.8초 · 과거 사례 1.4초 · 순위 0.4초. 타이머 없으면 순위 25분·일봉 45분 뒤 첫 방문자가 한 번 직접 계산(예전 속도)하고 다시 채움 + 아침 갱신 끝에 매일 한 번. 상태는 관리 모드 '🔥 화면 캐시' 또는 `pagecache.py status`
-- 주말 날짜 기록 정리: 서버에서 `fix_weekend_dates.py` 확인 결과(10/28) — daily_snapshots 174줄(2026-10-18 토요일) 중 금요일로 옮김 31 · 중복이라 지움 143, signals 273줄 중 옮김 34 · 지움 239. **DB 기록을 지우는 일이라 사용자 OK 뒤** `--apply`
+- ~~🔥 화면 캐시 타이머 설치~~ ✅ 10/28 16:02 사용자가 `deploy/install_warm_timer.sh` 실행 → `quant-warm.timer` enabled·active(10분마다). 처음 두 번은 15:57 캐시가 새것이라 '4개 건너뜀'으로 정상 종료. 상태는 관리 모드 '🔥 화면 캐시' 또는 `pagecache.py status`
+- ~~주말 날짜 기록 정리~~ ✅ 10/28 16시 `fix_weekend_dates.py --apply` 실행(사용자 OK): 2026-10-18(일요일) 날짜 기록을 daily_snapshots 금요일(10-16)로 31줄 옮기고 중복 143줄 지움 · signals 31줄 옮기고 242줄 지움 → 주말 날짜 0줄. 원본은 10/28 03:00 백업·R2 사본에 있음
 - 11/15~22 공시 점수 두 방식 합치기 실험(텔레그램 예약 알림 옴) · 2~4주 뒤 AI PICK·검증 순위·스크리너 카드 적중률 확인
 
 ## 6. 알아 둘 사고·교훈
