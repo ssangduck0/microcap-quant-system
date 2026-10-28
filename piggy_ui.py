@@ -33,8 +33,16 @@ def prices_1y(tickers: tuple) -> dict:
         return {}
 
 
-def _q_icon(v) -> str:
-    return "➖" if v is None else ("⚠️" if v == "주의" else ("✅" if v else "❌"))
+def _q_icon(v, warn: bool = False) -> str:
+    """결과 아이콘. warn(⑥ 10~20%) 이면 통과여도 ⚠️ 로 보여 줌(집계는 통과)."""
+    return "➖" if v is None else ("⚠️" if v == "주의" or (warn and v is True) else ("✅" if v else "❌"))
+
+
+def _q_label(x: dict) -> str:
+    """상세 표의 결과 글: ⑥ 10~20% 는 '⚠️ 통과(주의)'."""
+    if x.get("주의") and x["결과"] is True:
+        return "⚠️ 통과(주의)"
+    return {True: "✅ 통과", False: "❌ 미달", "주의": "⚠️ 주의"}.get(x["결과"], "➖ 확인 불가")
 
 
 ZONE_ORDER = {"⚠️ 박스 이탈": 0, "🟢 저점 구간": 1, "🔴 고점 구간": 2, "⏸ 중간": 3, "확인 불가": 4}
@@ -148,7 +156,7 @@ def render_list(fx: float) -> None:
     p1 = prices_1y(tuple(tickers))
     with closing(db.connect()) as conn:
         qs = {t: piggy.quality(t, conn, p1.get(t), dil.get(t)) for t in tickers}
-    tb.insert(3, "손익비 기준", [f"{sum(1 for q in qs[x] if q['결과'] is True)}/{len(qs[x])} " + "".join(_q_icon(q["결과"]) for q in qs[x]) for x in tb["티커"]])
+    tb.insert(3, "손익비 기준", [f"{sum(1 for q in qs[x] if q['결과'] is True)}/{len(qs[x])} " + "".join(_q_icon(q["결과"], q.get("주의", False)) for q in qs[x]) for x in tb["티커"]])
     nz = {t: piggy.near_zone(tb.set_index("티커").loc[t, "현재가($)"], piggy.launch_zones(p1.get(t))) for t in tickers}
     tb.insert(4, "발사대", ["" if not nz.get(x) else (("🎯 " if nz[x]["near"] else "") + f"${nz[x]['level']:.4f} ({nz[x]['dist_pct']:+.0f}%)") for x in tb["티커"]])
     _sf = shortflow_ui.stages(tickers, px)
@@ -365,7 +373,7 @@ def render_profit(t: str, r: dict, df1y, price, budget) -> None:
     with closing(db.connect()) as conn:
         q = piggy.quality(t, conn, df1y, _dilution().get(t))
         cb = piggy.close_bounce(conn, t)
-    st.dataframe(pd.DataFrame([{"기준": x["기준"], "결과": {True: "✅ 통과", False: "❌ 미달", "주의": "⚠️ 주의"}.get(x["결과"], "➖ 확인 불가"), "값": x["값"]} for x in q]),
+    st.dataframe(pd.DataFrame([{"기준": x["기준"], "결과": _q_label(x), "값": x["값"]} for x in q]),
                  hide_index=True, width="stretch")
     if any(x["결과"] is None and x["기준"].startswith("②") for x in q):
         st.caption("② 펀더멘탈은 종목 리포트의 런웨이로 봅니다. 🗂 종목 리포트 탭에서 이 종목 리포트를 만들어 주세요.")

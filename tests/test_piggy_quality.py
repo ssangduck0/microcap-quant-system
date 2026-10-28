@@ -48,6 +48,16 @@ with closing(db.connect()) as conn:
     conn.commit()
     qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
     assert qq["⑥"]["결과"] is False and "+30.0%" in qq["⑥"]["값"] and "SEC 표지" in qq["⑥"]["값"], qq["⑥"]
+    # 10~20% 는 통과이되 "주의"(⚠️, 2026-10-28 검증) · 10% 이하는 그냥 통과 · 정확히 +10.0% 는 통과(반올림) — 자동 담기 제외는 20% 초과만(위 +30% 가 False)
+    _a1 = (date.today() - timedelta(days=80)).isoformat()
+    for shares1, want, warn, txt in ((1_150_000, True, True, "⚠️ 10~20%"), (1_050_000, True, False, "+5.0%"), (1_100_000, True, False, "+10.0%"), (1_300_000, False, False, "+30.0%")):
+        conn.execute("UPDATE shares_hist SET shares=? WHERE ticker='RMSG' AND asof=?", (shares1, _a1)); conn.commit()
+        qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
+        assert qq["⑥"]["결과"] is want and bool(qq["⑥"].get("주의")) is warn and txt in qq["⑥"]["값"], (shares1, qq["⑥"])
+    import piggy_ui
+    assert piggy_ui._q_icon(True, True) == "⚠️" and piggy_ui._q_icon(True) == "✅" and piggy_ui._q_icon("주의") == "⚠️" and piggy_ui._q_icon(None) == "➖" and piggy_ui._q_icon(False, True) == "❌"
+    assert piggy_ui._q_label({"결과": True, "주의": True}) == "⚠️ 통과(주의)" and piggy_ui._q_label({"결과": True}) == "✅ 통과" and piggy_ui._q_label({"결과": "주의"}) == "⚠️ 주의"
+    assert piggy.SHARES_WARN_PCT == 10.0 and piggy.SHARES_MAX_PCT == 20.0
     conn.execute("INSERT INTO piggy_scan VALUES (?, 'RMSG', 0.6, '{}')", (date.today().isoformat(),)); conn.execute("INSERT INTO piggy_list (ticker) VALUES ('COCH')"); conn.commit()
     assert piggy.share_targets(conn) == ["COCH", "RMSG"]
     for d, so in (((date.today() - timedelta(days=80)).isoformat(), 1_000_000), (date.today().isoformat(), 1_300_000)):

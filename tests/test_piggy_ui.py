@@ -37,9 +37,14 @@ at.checkbox(key="ps_nd").set_value(True).run(); at.checkbox(key="ps_low").set_va
 assert list([d.value for d in at.dataframe if "반등" in d.value.columns][0]["티커"]) == ["LOWZ"]   # 저점 구간만
 # 후보 상세(첫 행 LOWZ) → 카테고리 고르고 담기
 [b for b in at.button if b.key == "ps_add_LOWZ"][0].click().run(); assert piggy.tickers() == ["LOWZ"] and not at.exception
+import shares as _sh; _dt = __import__("datetime")
+with closing(db.connect()) as _c:   # ⑥ 직전 분기 +15% → ⚠️ 아이콘이되 손익비 N/7 에선 통과로 셈(2026-10-28 ②안)
+    _c.execute(_sh.HIST_DDL); _c.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("LOWZ", (_dt.date.today() - _dt.timedelta(days=170)).isoformat(), "f", "10-Q", 1_000_000), ("LOWZ", (_dt.date.today() - _dt.timedelta(days=80)).isoformat(), "f", "10-Q", 1_150_000)]); _c.commit()
 piggy.add("HIGHZ", "바이오·헬스"); piggy.add("BRK", "기타")
 st.cache_data.clear(); at = AppTest.from_file(APP, default_timeout=120).run(); assert not at.exception
 lst = [d.value for d in at.dataframe if "상태" in d.value.columns and "박스 위치(%)" in d.value.columns][0]; print(lst[["카테고리", "티커", "상태", "현재가(원)", "수량(주)", "박스"]].to_string(index=False))
+import re as _re; _pl = lst.set_index("티커").loc["LOWZ", "손익비 기준"]; _tk = _re.findall("➖|⚠️|✅|❌", _pl)
+assert _tk[5] == "⚠️" and int(_pl.split("/")[0]) == _tk.count("✅") + 1, _pl   # ⑥ 자리가 ⚠️ 이고 통과 수에 포함(① 의 ⚠️ 는 포함 안 됨)
 z = dict(zip(lst["티커"], lst["상태"])); assert z == {"LOWZ": "🟢 저점 구간", "HIGHZ": "🔴 고점 구간", "BRK": "⚠️ 박스 이탈"}
 low = lst.set_index("티커").loc["LOWZ"]; assert low["수량(주)"] == int(1_000_000 / (0.51 * 1342.0)) and low["박스"] == "자동"
 mt = {m.label: m.value for m in at.metric}; assert mt["담은 종목"] == "3개" and mt["🟢 저점 구간"] == "1" and mt["⚠️ 박스 이탈"] == "1"

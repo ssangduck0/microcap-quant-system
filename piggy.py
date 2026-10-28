@@ -287,7 +287,7 @@ def rule_ok(m: dict | None, dil_status: str | None, fx: float, r: dict | None = 
         try:
             with closing(db.connect()) as c:
                 sc = shares_change(c, m["ticker"])
-            if sc is not None and sc["pct"] > SHARES_MAX_PCT:
+            if sc is not None and round(sc["pct"], 6) > SHARES_MAX_PCT:   # 경계값 반올림(quality 와 같은 기준)
                 return False
         except Exception:  # noqa: BLE001
             pass
@@ -466,7 +466,7 @@ def close_bounce(conn, ticker: str) -> dict | None:
 
 
 def quality(ticker: str, conn, df_long: pd.DataFrame | None, dilution_status: str | None = None) -> list[dict]:
-    """스승님의 손익비 기준 5가지. 결과 True=통과, False=미달, "주의"=경계(①만), None=확인 불가."""
+    """스승님의 손익비 기준 5가지. 결과 True=통과, False=미달, "주의"=경계(①만). ⑥ 은 10~20% 면 True 이되 "주의" 키 True(⚠️ 표시, 통과로 셈), None=확인 불가."""
     t = ticker.upper()
     out = []
     below1 = 0
@@ -507,15 +507,21 @@ def quality(ticker: str, conn, df_long: pd.DataFrame | None, dilution_status: st
                 "값": "-" if sp_h["spikes20"] is None else f"{sp_h['spikes20']}회"})
     # 2026-10-27 스승님 '반복 흐름 주의사항': ⑥ 주식수 변동이 크지 않을 것 · ⑦ 희석 구조가 변하지 않았을 것(③ 펀더멘털은 ② 런웨이가 맡음)
     sc = shares_change(conn, t)
-    out.append({"기준": "⑥ 주식수 변동 작음(90일 +20% 이내)", "결과": None if sc is None else sc["pct"] <= SHARES_MAX_PCT,
-                "값": _hold_text(conn, t) if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']} · {sc.get('src', 'ChartExchange')})"})
+    # 2026-10-28 검증(docs/studies/2026-10-28_shares_change_vs_return.md, 904종목·2만 쌍): 10~20% 도 60일 뒤 중앙값 −10%·−30% 급락 터치 44%(20% 이내 전체는 −5%·35%)
+    # → 10~20% 는 통과(스승님 기준 20%)이되 "주의" 키로 ⚠️ 표시(사용자 선택 ②안: 손익비 N/7 집계에선 통과로 셈). 자동 담기 제외(rule_ok)는 20% 초과 그대로.
+    p6 = None if sc is None else round(sc["pct"], 6)   # 1.1M/1.0M = 10.000000000000009% 같은 부동소수점 꼬리 때문에 경계값은 반올림 뒤 비교
+    warn6 = p6 is not None and SHARES_WARN_PCT < p6 <= SHARES_MAX_PCT
+    out.append({"기준": "⑥ 주식수 변동 작음(90일 +20% 이내)", "결과": None if p6 is None else p6 <= SHARES_MAX_PCT, "주의": warn6,
+                "값": _hold_text(conn, t) if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']} · {sc.get('src', 'ChartExchange')})"
+                + (" · ⚠️ 10~20%: 검증에서 60일 급락 44%" if warn6 else "")})
     dc = dilution_changed(conn, t, dilution_status)
     out.append({"기준": "⑦ 희석 구조 변화 없음(45일)", "결과": None if dc is None else not dc["changed"],
                 "값": "이력 부족" if dc is None else ("변화 없음 · " + (dilution_status or "미확인") if not dc["changed"] else f"{dc['from']} → {dc['to']} ({dc['date']})")})
     return out
 
 
-SHARES_MAX_PCT = 20.0   # ⑥ 90일 발행주식 증가 상한
+SHARES_MAX_PCT = 20.0   # ⑥ 90일 발행주식 증가 상한(자동 담기 제외 기준 — 10/28 검증으로 유지 확정)
+SHARES_WARN_PCT = 10.0  # ⑥ 10~20% 는 ⚠️ 표시만(10/28 검증: 60일 급락 44%) — 통과로 세고 자동 담기 제외에도 안 씀
 DIL_WINDOW_DAYS = 45    # ⑦ 희석 상태 변화를 보는 기간
 
 
