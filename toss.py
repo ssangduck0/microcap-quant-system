@@ -134,9 +134,12 @@ class TossClient:
             if json is not None:
                 kw["json"] = json
             r = fn(f"{self.base}{path}", **kw)
-            if r.status_code in (200, 201):
-                j = r.json() if r.text else {}
-                return j.get("result", j)
+            if r.status_code in (200, 201, 202, 204):   # 204 = 내용 없는 성공(조건주문 DELETE 가 이렇게 옴 — 2026-10-29 FAMI 취소에서 확인)
+                try:
+                    j = r.json() if (r.text or "").strip() else {}
+                except ValueError:
+                    j = {}
+                return j.get("result", j) if isinstance(j, dict) else j
             err = self._error(r)
             if r.status_code == 401 and err.code in TOKEN_RELATED and not refreshed:
                 refreshed = True

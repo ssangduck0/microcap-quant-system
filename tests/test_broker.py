@@ -160,7 +160,10 @@ class Sess:
         return Resp(404, {"error": {"code": "not-found", "message": ""}})
     def delete(s, url, params=None, headers=None, timeout=0):
         path = "/" + url.split("://", 1)[1].split("/", 1)[1]
-        s.log.append(("DELETE", path, None, headers)); return Resp(200, {"result": {"conditionalOrderId": path.rsplit("/", 1)[1]}})
+        s.log.append(("DELETE", path, None, headers))
+        if path.endswith("/COND204"):   # 토스 조건주문 DELETE 는 204(본문 없음)로 온다(2026-10-29 실측)
+            r = Resp(204, {}); r.text = ""; return r
+        return Resp(200, {"result": {"conditionalOrderId": path.rsplit("/", 1)[1]}})
 class Clock:
     def __init__(s): s.t = 1000.0; s.slept = []
     def now(s): return s.t
@@ -177,6 +180,7 @@ assert [o["orderId"] for o in cl.orders(77, "OPEN")] == ["A"] and [o["orderId"] 
 body = broker.oco_body("AAA", 1, 0.7, 0.45, "oco-1", "2026-11-28"); r = cl.cond_create(77, body)
 assert r["conditionalOrderId"] == "COND9" and sess.log[-1][2]["first"] == {"orderSide": "SELL", "triggerPrice": "0.7", "orderPrice": "0.7"} and sess.log[-1][2]["quantity"] == "1" and sess.log[-1][2]["type"] == "OCO"
 assert cl.cond_cancel(77, "COND9") == {"conditionalOrderId": "COND9"} and sess.log[-1][0] == "DELETE"
+assert cl.cond_cancel(77, "COND204") == {} and sess.log[-1][1].endswith("/COND204")   # 204 = 성공(예외 아님)
 try:
     cl.order_create(77, "AAA", "BUY", 1, None); raise AssertionError("지정가인데 가격 없이 통과")
 except ValueError:
