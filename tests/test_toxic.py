@@ -44,5 +44,14 @@ with closing(db.connect()) as conn:
 badge = toxic.badge("OMH"); assert badge and badge[0].startswith("⚠️ 폭락 경로") and "50%" in badge[0] and badge[1] == "red"
 assert toxic.badge("NONE") is None
 import company_ui
-hf = company_ui.header_facts("OMH"); assert isinstance(hf, dict)
+hf = company_ui.header_facts("OMH"); assert isinstance(hf, dict) and hf["share_chg"] is None and company_ui.share_chip(hf) == ""   # 표지 없음 → 칩 없음
+import shares as _sh6
+from datetime import date as _d, timedelta as _td
+with closing(db.connect()) as conn:   # 🔬 ⑥ 헤더 칩(2026-10-28): 직전 분기 +30% 빨강 · +15% 주황 · +3% 회색(순위 카드와 같은 기준)
+    conn.execute(_sh6.HIST_DDL)
+    for s1, cls, color, txt in ((1_300_000, "bad", "qk-red", "+30%"), (1_150_000, "warn", "qk-orange", "+15%"), (1_030_000, "ok", "qk-gray", "+3%")):
+        conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("HDR6", (_d.today() - _td(days=170)).isoformat(), "f", "10-Q", 1_000_000),
+                                                                                 ("HDR6", (_d.today() - _td(days=80)).isoformat(), "f", "10-Q", s1)]); conn.commit()
+        hf = company_ui.header_facts("HDR6"); chip = company_ui.share_chip(hf)
+        assert hf["share_chg"]["cls"] == cls and f"주식수 {txt}(분기)" in chip and color in chip and "SEC 표지" in chip, (s1, hf["share_chg"], chip)
 print("ALL OK")

@@ -22,10 +22,13 @@ def header_facts(t: str) -> dict:
     """헤더 한 줄: 섹터·산업(SIC) · 발행 주식 · 유통 주식 · 유통 비율 · 희석 조달 상태. 값이 없으면 None(화면엔 '-')."""
     from contextlib import closing
     import db
-    out = {"industry": None, "themes": [], "shares_out": None, "float": None, "float_pct": None, "dilution": None}
+    out = {"industry": None, "themes": [], "shares_out": None, "float": None, "float_pct": None, "dilution": None, "share_chg": None}
     try:
         with closing(db.connect()) as conn:
-            m = conn.execute("SELECT sic_desc, themes FROM ticker_meta WHERE ticker=?", (t,)).fetchone()
+            try:
+                m = conn.execute("SELECT sic_desc, themes FROM ticker_meta WHERE ticker=?", (t,)).fetchone()
+            except Exception:  # noqa: BLE001  (표가 아직 없는 새 DB·테스트 — 한 단계 실패가 나머지 정보까지 비우지 않게, 2026-10-28)
+                m = None
             if m:
                 out["industry"] = m[0]
                 try:
@@ -47,6 +50,14 @@ def header_facts(t: str) -> dict:
                 out["float_pct"] = float(out["float"]) / float(out["shares_out"]) * 100
             d = db.get_dilution(conn, t) or {}
             out["dilution"] = d.get("status")
+            try:  # 🔬 ⑥ 직전 분기 주식수 변동(SEC 표지 이력, 2026-10-28) — 🏁 순위 카드·🎯 PICK·🐷 저금통과 같은 기준·색
+                import shares as _sh
+                sc = _sh.change(t, conn)
+                if sc:
+                    _p = round(sc["pct"], 6)
+                    out["share_chg"] = {"pct": sc["pct"], "cls": "bad" if _p > 20 else "warn" if _p > 10 else "ok", "d": f"{sc['d0']}→{sc['d1']}", "src": sc.get("src", "")}
+            except Exception:  # noqa: BLE001
+                out["share_chg"] = None
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -54,6 +65,16 @@ def header_facts(t: str) -> dict:
 
 def _fmt_sh(v) -> str:
     return "-" if not v else (f"{v / 1e6:,.2f}M주" if v >= 1e6 else f"{v:,.0f}주")
+
+
+def share_chip(hf: dict) -> str:
+    """⑥ 직전 분기 주식수 변동 칩(순위 카드와 같은 색: +20% 초과 빨강 · 10~20% 주황 · 이내 회색). 표지 자료가 없으면 빈 문자열."""
+    sc = hf.get("share_chg")
+    if not sc:
+        return ""
+    color = {"bad": "red", "warn": "orange"}.get(sc["cls"], "gray")
+    return ui.chip(f"주식수 {sc['pct']:+.0f}%(분기)", color,
+                   f"직전 두 분기 SEC 표지 {sc['d']} · 검증(10/28): +20% 초과는 60일 뒤 중앙값 −16%·급락 터치 52%, 10~20% 는 −10%·44%, 이내는 −5%·35%")
 
 
 def render(t: str) -> None:
@@ -88,7 +109,7 @@ def render(t: str) -> None:
         _cv = ""
     st.markdown(ui.kv([("산업", hf["industry"] or (c["sector"] or "-")), ("발행 주식", _fmt_sh(hf["shares_out"]) if hf["shares_out"] else _fmt_sh(c["shares"])),
                        ("유통 주식", _fmt_sh(hf["float"])), ("유통 비율", "-" if hf["float_pct"] is None else f"{hf['float_pct']:.1f}%")])
-                + "<div style='margin:4px 0 8px'>" + ui.chip(f"희석 조달 {badge[0]}", badge[1]) + (ui.chip(f"⛔ {_tl}", "red") if _tl else "") + (ui.chip(_tx[0], _tx[1]) if _tx else "") + _cv
+                + "<div style='margin:4px 0 8px'>" + ui.chip(f"희석 조달 {badge[0]}", badge[1]) + share_chip(hf) + (ui.chip(f"⛔ {_tl}", "red") if _tl else "") + (ui.chip(_tx[0], _tx[1]) if _tx else "") + _cv
                 + "".join(ui.chip(x, "blue") for x in hf["themes"][:3]) + "</div>", unsafe_allow_html=True)
     with st.expander("⚡ 지금 분석(1분봉 · 장전·정규장·애프터)"):
         import live_ui
