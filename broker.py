@@ -79,6 +79,15 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _parse_iso(v) -> datetime | None:
+    """ISO 문자열(토스는 KST +09:00, 우리는 UTC) → UTC aware datetime. 못 읽으면 None."""
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
 def _day(now: datetime | None = None) -> str:
     return _now(now).astimezone(timezone.utc).date().isoformat()
 
@@ -256,8 +265,9 @@ def mirror_buy(conn, tc, strategy: str, ticker: str, ref_px: float, *, tp_px: fl
         return {"ok": False, "mode": "live", "why": str(code), "coid": cid}
 
 
-def sell(conn, tc, ticker: str, ref_px: float, reason: str, *, now: datetime | None = None) -> dict:
-    """보유 종목을 지정가로 판다(가상매매 청산 판정·화면 요청). 조건주문(OCO)이 걸려 있으면 먼저 취소."""
+def sell(conn, tc, ticker: str, ref_px: float, reason: str, *, now: datetime | None = None, force: bool = False) -> dict:
+    """보유 종목을 지정가로 판다(가상매매 청산 판정·화면 요청). 조건주문(OCO)이 걸려 있으면 먼저 취소.
+    force=True(관리 화면 '지금 팔기'): 실매매가 꺼져 있거나 킬 상태여도 판다 — 보유를 줄이는 쪽은 막지 않는다(2026-10-29)."""
     ensure(conn)
     t, day = ticker.upper(), _day(now)
     pos = conn.execute("SELECT * FROM live_positions WHERE ticker=?", (t,)).fetchone()
@@ -269,7 +279,7 @@ def sell(conn, tc, ticker: str, ref_px: float, reason: str, *, now: datetime | N
     cid = coid(pos.get("strategy") or "live", t, "SELL", day, n)
     base = {"client_order_id": cid, "day": day, "strategy": pos.get("strategy"), "ticker": t, "side": "SELL", "qty": qty, "limit_px": lp, "ref_px": ref_px, "note": reason,
             "created_at": _iso(_now(now))}
-    if not is_live():
+    if not is_live() and not force:
         _record(conn, **base, status="DRY", mode="dry")
         conn.commit()
         return {"ok": True, "mode": "dry", "coid": cid}
@@ -382,13 +392,13 @@ def sync(conn, tc, *, now: datetime | None = None) -> dict:
     ensure(conn)
     now = _now(now)
     out = {"filled": 0, "canceled": 0, "ttl": 0, "oco_fills": 0, "kill": None}
-    if not is_live() or tc is None:
-        return out
-    acc = account(tc)
+    if tc is None:
+        return out   # 2026-10-29: 실매매가 꺼져/킬 상태여도 이미 나간 주문·보유는 계속 추적(체결 반영·OCO 감지). 새 매수만 스위치가 막는다
     pending = [dict(r) for r in conn.execute("SELECT * FROM live_orders WHERE mode='live' AND status IN ('PENDING','PARTIAL_FILLED','PENDING_CANCEL','PENDING_REPLACE')")]
     pos = positions(conn)
     if not pending and not pos:
-        return out
+        return out   # 추적할 것이 없으면 토스를 부르지 않음(계좌 조회 포함)
+    acc = account(tc)
     try:
         remote = {o["orderId"]: o for o in (tc.orders(acc, "OPEN") or [])}
         since = (now.date() - timedelta(days=2)).isoformat()
@@ -434,14 +444,27 @@ def sync(conn, tc, *, now: datetime | None = None) -> dict:
                     _notify(f"⏱ {r['ticker']} 매수 {int(config.LIVE_ORDER_TTL_MIN)}분 미체결 → 취소(오늘 재시도 안 함)")
                 except Exception as e:  # noqa: BLE001
                     log.warning("%s TTL 취소 실패: %s", r["ticker"], e)
-    # OCO(토스 서버)로 팔린 보유: 우리 멱등키가 없는 SELL FILLED 가 보유 종목에 있으면 그걸로 정리
+    # OCO(토스 서버)로 팔린 보유 — 2026-10-29 01:15 사고: 사용자가 따로 들고 있던 POM 386주를 직접 판 기록을 우리 1주 포지션의 OCO 체결로 잘못 붙여
+    # −$115 로 기록하고 킬 스위치까지 작동. 이제는 ① 조건주문이 실제 발동(ORDERED/COMPLETED)했을 때만 ② 수량이 우리 보유와 같고 ③ 보유 시작 뒤에 낸 SELL 체결만 인정
     ours = {r["order_id"] for r in conn.execute("SELECT order_id FROM live_orders WHERE order_id IS NOT NULL")}
     for p in positions(conn):
+        if not p.get("cond_id"):
+            continue   # 조건주문이 없으면 토스가 대신 팔았을 리 없음
+        try:
+            cst = str((tc.cond_order(acc, p["cond_id"]) or {}).get("status") or "")
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s 조건주문 상태 확인 실패: %s", p["ticker"], e)
+            continue
+        if cst not in ("ORDERED", "COMPLETED"):
+            continue
+        opened = _parse_iso(p.get("opened_at"))
         for o in remote.values():
-            if o.get("symbol") == p["ticker"] and str(o.get("side")) == "SELL" and str(o.get("status")) == "FILLED" and o.get("orderId") not in ours \
-                    and str(o.get("orderedAt") or "") >= str(p.get("opened_at") or "")[:10]:
+            if o.get("symbol") == p["ticker"] and str(o.get("side")) == "SELL" and str(o.get("status")) == "FILLED" and o.get("orderId") not in ours:
                 ex = o.get("execution") or {}
-                px, qty = float(ex.get("averageFilledPrice") or o.get("price") or 0), float(ex.get("filledQuantity") or o.get("quantity") or p["qty"])
+                px, qty = float(ex.get("averageFilledPrice") or o.get("price") or 0), float(ex.get("filledQuantity") or o.get("quantity") or 0)
+                ordered = _parse_iso(o.get("orderedAt"))
+                if abs(qty - float(p["qty"])) > 1e-9 or (opened and ordered and ordered < opened):
+                    continue   # 수량이 다르거나 보유 전 주문이면 사용자의 다른 거래
                 _record(conn, client_order_id=f"oco-{o['orderId']}"[:36], day=_day(now), strategy=p.get("strategy"), ticker=p["ticker"], side="SELL", qty=qty, limit_px=o.get("price"),
                         ref_px=None, status="FILLED", mode="live", order_id=o["orderId"], filled_qty=qty, avg_px=px, note="OCO 체결")
                 _close_position(conn, p["ticker"], px, qty, "익절·손절 조건주문 체결", now)
@@ -504,7 +527,7 @@ def process_requests(conn, tc, prices: dict | None = None, *, now: datetime | No
         elif r["kind"] == "sell":
             px = (prices or {}).get(r["ticker"])
             pos = conn.execute("SELECT avg_px FROM live_positions WHERE ticker=?", (r["ticker"],)).fetchone()
-            res = json.dumps(sell(conn, tc, r["ticker"], float(px or (pos["avg_px"] if pos else 0) or 0), r.get("note") or "화면 요청", now=now), ensure_ascii=False)
+            res = json.dumps(sell(conn, tc, r["ticker"], float(px or (pos["avg_px"] if pos else 0) or 0), r.get("note") or "화면 요청", now=now, force=True), ensure_ascii=False)
         elif r["kind"] == "probe":   # 1주 왕복 테스트(관리 화면): 지금 가격으로 1주 매수 → 체결되면 sync 가 바로 되판다
             px = (prices or {}).get(r["ticker"])
             if px is None and tc is not None:

@@ -18,7 +18,7 @@ import notify; notify.send_telegram = lambda text: sent.append(text) or True
 class FakeTC:
     """토스 흉내: 주문은 PENDING 으로 받고, fill() 로 체결시킨다. 조건주문·계좌·매수가능금액 포함."""
     def __init__(s):
-        s.db, s.cond, s.calls, s.n, s.bp, s.fail = {}, {}, [], 0, 1000.0, None
+        s.db, s.cond, s.calls, s.n, s.bp, s.fail, s.cond_status = {}, {}, [], 0, 1000.0, None, {}
     def accounts(s): s.calls.append("accounts"); return [{"accountSeq": 77, "accountNo": "123-45", "accountType": "BROKERAGE"}]
     def buying_power(s, account, currency="USD"): assert account == 77; return {"currency": currency, "cashBuyingPower": s.bp}
     def order_create(s, account, symbol, side, qty, price=None, *, order_type="LIMIT", tif="DAY", client_order_id=None):
@@ -35,11 +35,12 @@ class FakeTC:
         return [o for o in s.db.values() if (o["status"] in broker.OPEN_STATES) == (status == "OPEN")]
     def cond_create(s, account, body): s.calls.append(("cond", body)); cid = f"C{len(s.cond) + 1}"; s.cond[cid] = body; return {"conditionalOrderId": cid, "clientOrderId": body.get("clientOrderId")}
     def cond_cancel(s, account, cid): s.calls.append(("cond_cancel", cid)); s.cond.pop(cid, None); return {"conditionalOrderId": cid}
+    def cond_order(s, account, cid): return {"conditionalOrderId": cid, "status": s.cond_status.get(cid, "WATCHING")}
     def fill(s, oid, px): o = s.db[oid]; o["status"] = "FILLED"; o["execution"] = {"filledQuantity": o["quantity"], "averageFilledPrice": px}
-    def oco_sell(s, symbol, qty, px):   # 토스 서버의 OCO 가 체결시킨 매도(우리 멱등키 없음)
+    def oco_sell(s, symbol, qty, px, ordered_at="2026-10-30T01:00:00+09:00"):   # 토스 서버의 OCO 가 체결시킨 매도(우리 멱등키 없음) — 또는 사용자의 다른 거래
         s.n += 1; oid = f"X{s.n}"
         s.db[oid] = {"orderId": oid, "clientOrderId": None, "symbol": symbol, "side": "SELL", "orderType": "LIMIT", "status": "FILLED", "quantity": qty, "price": px,
-                     "orderedAt": "2026-10-30T01:00:00+09:00", "execution": {"filledQuantity": qty, "averageFilledPrice": px}}
+                     "orderedAt": ordered_at, "execution": {"filledQuantity": qty, "averageFilledPrice": px}}
 
 
 tc = FakeTC()
@@ -81,10 +82,16 @@ with closing(db.connect()) as conn:
     s = broker.sync(conn, tc, now=T0 + timedelta(minutes=32)); assert s["canceled"] == 1
     assert dict(conn.execute("SELECT status FROM live_orders WHERE client_order_id='piggy-BBB-20261029-B1'").fetchone())["status"] == "CANCELED"
     assert broker.mirror_buy(conn, tc, "piggy", "BBB", 1.234, now=T0)["why"] == "오늘 이미 거부·취소된 종목"
-# 5) OCO 체결 감지(토스가 판 것) → 보유 정리·손익·일지
+# 5) OCO 체결 감지(토스가 판 것) → 보유 정리·손익·일지. 2026-10-29 사고 재현: 사용자의 다른 거래(수량 다름·보유 전·조건주문 미발동)는 절대 우리 것으로 붙이지 않음
 with closing(db.connect()) as conn:
+    tc.oco_sell("AAA", 386, 0.59)                                                                      # 사용자가 따로 판 386주(수량 다름)
+    tc.oco_sell("AAA", 1, 0.66, ordered_at="2026-10-29T20:00:00+09:00")                                # 보유 시작(T0 = 10/29 23:00 KST) 전의 1주 매도
+    s = broker.sync(conn, tc, now=T0 + timedelta(hours=2, minutes=30)); assert s["oco_fills"] == 0 and len(broker.positions(conn)) == 1, s   # 조건주문 WATCHING → 아무것도 안 함
+    tc.cond_status["C1"] = "COMPLETED"
+    s = broker.sync(conn, tc, now=T0 + timedelta(hours=2, minutes=40)); assert s["oco_fills"] == 0 and len(broker.positions(conn)) == 1, s   # 발동했어도 수량 다름·보유 전 매도는 무시
     tc.oco_sell("AAA", 1, 0.70)
     s = broker.sync(conn, tc, now=T0 + timedelta(hours=3)); assert s["oco_fills"] == 1 and broker.positions(conn) == [], s
+    assert broker._parse_iso("2026-10-29T01:00:00+09:00") == datetime(2026, 10, 28, 16, 0, tzinfo=timezone.utc) and broker._parse_iso(None) is None
     cl = db.read_df("SELECT * FROM live_closed"); assert len(cl) == 1 and abs(cl.iloc[0]["pnl_usd"] - 0.2) < 1e-9 and cl.iloc[0]["reason"].startswith("익절·손절")
     jl = db.read_df("SELECT * FROM trade_journal"); assert len(jl) == 2 and jl.iloc[-1]["side"] == "매도" and "+0.20" in jl.iloc[-1]["note"]
     assert broker.day_stats(conn, D)["realized"] == 0.2
@@ -202,6 +209,14 @@ with closing(db.connect()) as conn:
     tc.fill(row["order_id"], 1.02); broker.sync(conn, tc, now=T2 + timedelta(minutes=1))
     pos = broker.positions(conn); assert [p["ticker"] for p in pos] == ["PGA"] and pos[0]["tp_px"] == 1.3 and abs(pos[0]["sl_px"] - 0.95) < 1e-9 and pos[0]["cond_id"], pos
     config.LIVE_STRATEGIES = ""; assert broker.scan_piggy(conn, tc, prices=PX, now=T2)["checked"] == 0; config.LIVE_STRATEGIES = "piggy"
+    # 실매매를 꺼도(킬 포함) 보유 추적·'지금 팔기'(force) 는 계속 — 2026-10-29 사고 뒤: 꺼진 동안 체결 동기화와 매도가 멈추면 안 됨
+    config.LIVE_TRADING = False
+    assert broker.sell(conn, tc, "PGA", 1.0, "화면 요청")["mode"] == "dry"                                       # 보통 호출은 dry
+    _cid = broker.positions(conn)[0]["cond_id"]
+    r = broker.sell(conn, tc, "PGA", 1.0, "화면 요청", force=True, now=T2 + timedelta(minutes=5)); assert r["ok"] and r["mode"] == "live" and tc.calls[-1][2] == "SELL" and ("cond_cancel", _cid) in tc.calls, r
+    tc.fill(r["order_id"], 1.0)
+    s = broker.sync(conn, tc, now=T2 + timedelta(minutes=6)); assert s["filled"] == 1 and broker.positions(conn) == [], s                 # 꺼져 있어도 체결 반영
+    config.LIVE_TRADING = True
 # 10) 1주 왕복 테스트(probe): 요청 표 → 주가 상한·전략 목록 무시하고 1주 매수 → 체결 → OCO 대신 바로 되팔기 → 체결 → 정리
 with closing(db.connect()) as conn:
     T3 = T2 + timedelta(hours=1)

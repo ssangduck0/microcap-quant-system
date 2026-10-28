@@ -217,6 +217,10 @@ class TossClient:
                 b[k] = {kk: (str(v) if kk in ("triggerPrice", "orderPrice") else v) for kk, v in b[k].items()}
         return self._call("POST", "CONDITIONAL_ORDER", "/api/v1/conditional-orders", json=b, account=account) or {}
 
+    def cond_order(self, account: int, cond_id: str) -> dict:
+        """조건주문 상세(status: WATCHING·PAUSED·ORDERING·ORDERED·COMPLETED·EXPIRED) — 발동 여부 확인용."""
+        return self._call("GET", "CONDITIONAL_ORDER_HISTORY", f"/api/v1/conditional-orders/{cond_id}", account=account) or {}
+
     def cond_cancel(self, account: int, cond_id: str) -> dict:
         return self._call("DELETE", "CONDITIONAL_ORDER", f"/api/v1/conditional-orders/{cond_id}", account=account) or {}
 
