@@ -212,3 +212,31 @@ def change(t: str, conn=None, min_gap: int = 75, max_gap: int = 200, max_age: in
     if s0 <= 0 or not p1["shares"]:
         return None
     return {"pct": (float(p1["shares"]) / s0 - 1) * 100, "d0": p0["asof"], "d1": p1["asof"], "from": s0, "to": float(p1["shares"]), "src": "SEC 표지", "splits": n_sp}
+
+
+def hold_reason(t: str, conn=None, min_gap: int = 75, max_gap: int = 200, max_age: int = 200) -> str:
+    """change() 가 None(판정 보류) 인 이유를 한 줄로(🐷 ⑥ 화면 값). 2026-10-28 서버 소급 결과 ➖ 143종목 중 82가 20-F 연 1회 보고라
+    '표지 2개 미만' 한 문구로는 틀려서 이유별로 나눔: 표지 없음 · 1개 · 최신 표지 오래됨 · 연 1회 보고 · 직전 분기 표지 없음."""
+    if conn is None:
+        with closing(db.connect()) as c:
+            return hold_reason(t, c, min_gap, max_gap, max_age)
+    pts = history(t, conn)
+    if not pts:
+        return "SEC 표지 없음(XBRL 미제출·CIK 없음) · ChartExchange 없음"
+    p1 = pts[-1]
+    form = str(p1.get("form") or "")
+    if len(pts) == 1:
+        return f"SEC 표지 1개뿐({p1['asof']} {form}) — 다음 분기 보고 뒤 판정"
+    try:
+        d1 = date.fromisoformat(p1["asof"])
+        age = (date.today() - d1).days
+        gap = (d1 - date.fromisoformat(pts[-2]["asof"])).days
+    except ValueError:
+        return "SEC 표지 날짜 이상"
+    if age > max_age:
+        return f"SEC 최신 표지가 {age}일 전({p1['asof']} {form}) — 보고 중단·지연"
+    if form.upper().startswith(("20-F", "40-F")) or gap > max_gap:
+        return f"연 1회 보고({form or '20-F'} · 표지 간격 {gap}일) — 분기 변동 판정 불가"
+    if gap < min_gap:
+        return f"직전 분기 표지 없음(최근 두 표지 간격 {gap}일)"
+    return "표지 값 이상(0 또는 음수)"

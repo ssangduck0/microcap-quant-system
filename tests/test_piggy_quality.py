@@ -31,6 +31,15 @@ with closing(db.connect()) as conn:
     import chartex; chartex.ensure(conn)
     qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
     assert qq["⑥"]["결과"] is None and qq["⑦"]["결과"] is None and len(qq) == 7
+    assert qq["⑥"]["값"].startswith("판정 보류 — SEC 표지 없음"), qq["⑥"]
+    import shares
+    conn.execute(shares.HIST_DDL)
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("RMSG", (date.today() - timedelta(days=400)).isoformat(), "f0", "20-F", 900_000),
+                                                                             ("RMSG", (date.today() - timedelta(days=35)).isoformat(), "f0", "20-F", 1_000_000)])
+    conn.commit()
+    qq = {x["기준"][:1]: x for x in piggy.quality("RMSG", conn, df, "CLEAN")}
+    assert qq["⑥"]["결과"] is None and "연 1회 보고(20-F" in qq["⑥"]["값"], qq["⑥"]   # 연 1회 보고는 표지가 2개여도 보류 + 이유 문구(2026-10-28)
+    conn.execute("DELETE FROM shares_hist WHERE ticker='RMSG'"); conn.commit()
     # ⑥ SEC 분기 표지 이력(2026-10-28): ChartExchange 가 없을 때 직전 두 분기 표지 비교(1.0M → 1.3M = +30%)
     import shares
     conn.execute(shares.HIST_DDL)

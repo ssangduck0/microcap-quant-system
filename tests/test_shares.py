@@ -45,4 +45,12 @@ with closing(db.connect()) as conn:
         ("OLD", d(400), "f", "10-Q", 1e6), ("OLD", d(300), "f", "10-Q", 2e6)])
     conn.commit()
     assert shares.change("ONE", conn) is None and shares.change("FPI", conn) is None and shares.change("OLD", conn) is None and shares.change("NONE", conn) is None
+    # 보류 이유 문구(🐷 ⑥ 화면 값): 1개 · 연 1회(20-F) · 오래됨 · 없음 · 직전 분기 표지 없음(간격 < 75일)
+    rs = {t: shares.hold_reason(t, conn) for t in ("ONE", "FPI", "OLD", "NONE", "HUBC")}; print(rs)
+    assert rs["ONE"].startswith("SEC 표지 1개뿐") and A1 in rs["ONE"] and rs["FPI"].startswith("연 1회 보고(20-F") and "365일" in rs["FPI"]
+    assert rs["OLD"].startswith("SEC 최신 표지가 300일 전") and rs["NONE"].startswith("SEC 표지 없음") and "ChartExchange" in rs["NONE"]
+    conn.execute("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", ("HUBC", d(60), "f", "10-Q", 6e7)); conn.commit()   # 최신 표지 뒤 17일 만에 또 표지(S-1 등) → 직전 분기 표지는 그 전 것
+    assert shares.change("HUBC", conn)["d0"] == A0 and shares.hold_reason("CLOSE", conn).startswith("SEC 표지 없음")
+    conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [("CLOSE", d(50), "f", "10-Q", 1e6), ("CLOSE", d(20), "f", "10-Q", 1e6)]); conn.commit()
+    assert shares.change("CLOSE", conn) is None and rs["HUBC"] and shares.hold_reason("CLOSE", conn) == "직전 분기 표지 없음(최근 두 표지 간격 30일)"
 print("ALL OK")

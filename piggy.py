@@ -508,7 +508,7 @@ def quality(ticker: str, conn, df_long: pd.DataFrame | None, dilution_status: st
     # 2026-10-27 스승님 '반복 흐름 주의사항': ⑥ 주식수 변동이 크지 않을 것 · ⑦ 희석 구조가 변하지 않았을 것(③ 펀더멘털은 ② 런웨이가 맡음)
     sc = shares_change(conn, t)
     out.append({"기준": "⑥ 주식수 변동 작음(90일 +20% 이내)", "결과": None if sc is None else sc["pct"] <= SHARES_MAX_PCT,
-                "값": "주식수 이력 없음(SEC 표지 2개 미만 · ChartExchange 없음)" if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']} · {sc.get('src', 'ChartExchange')})"})
+                "값": _hold_text(conn, t) if sc is None else f"{sc['pct']:+.1f}% ({sc['d0']}→{sc['d1']} · {sc.get('src', 'ChartExchange')})"})
     dc = dilution_changed(conn, t, dilution_status)
     out.append({"기준": "⑦ 희석 구조 변화 없음(45일)", "결과": None if dc is None else not dc["changed"],
                 "값": "이력 부족" if dc is None else ("변화 없음 · " + (dilution_status or "미확인") if not dc["changed"] else f"{dc['from']} → {dc['to']} ({dc['date']})")})
@@ -536,6 +536,15 @@ def shares_change(conn, ticker: str, days: int = 90) -> dict | None:
         return shares.change(ticker, conn)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _hold_text(conn, ticker: str) -> str:
+    """⑥ 판정 보류(➖) 일 때 화면 값: 이유별 문구(shares.hold_reason). 2026-10-28: 20-F 연 1회 보고 종목이 '표지 2개 미만' 으로 잘못 나오던 것을 고침."""
+    try:
+        import shares
+        return "판정 보류 — " + shares.hold_reason(ticker, conn)
+    except Exception:  # noqa: BLE001
+        return "주식수 이력 없음(SEC 표지 2개 미만 · ChartExchange 없음)"
 
 
 def share_targets(conn, days: int = 30) -> list[str]:
