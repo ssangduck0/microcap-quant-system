@@ -48,6 +48,16 @@
 - 10년 전체 3일 목표 재수집(`build --rebuild`)을 할지 — 지금 3년치로도 모델은 학습됨(위 표).
 - 남은 결정(이전부터): 방문객 사이트의 토스 데이터 정책 · 11월 말 rank vs rank6 비교 · 시간외 1주 테스트(LIVE_EXT_SESSIONS 켜기 전)
 
+**🌤 10/29 출근 뒤 Claude 가 한 일(사용자: "시작하고 출근하고 올테니까 다음 작업들도 바로바로 진행해줘")**
+| 일 | 결과 |
+|---|---|
+| ① 💵 dry-run 결과 — 그때 1주 샀다면 | 커밋 babeea5 — `broker.dry_outcome/simulate_dry/dry_summary` + 표 `live_dry_results`(CREATE IF NOT EXISTS). dry 매수 기록(막히지 않은 것)마다 야후 일봉으로 되감아 결과를 붙임: 매수 **다음 봉부터** 손절 → 익절 → 보유일 → 30거래일 평가 마감(같은 날 둘 다 닿으면 손절 · 체결가는 지정가 가정). 아침 작업(`cases.update`) 끝에 자동 + `python cases.py drysim`. 💵 구역에 '기록 · 익절 비율 · 끝난 것 손익 합 · 진행 중 평가' 4칸 + 한글 열 표(기록 없으면 안내 글). 테스트: test_broker 14절(익절·손절·동시·보유일·진행·봉 없음·재실행·오늘 봉 제외) · test_broker_ui(안내 글 → 요약·표) · test_cases/test_admin/test_pagecache/test_aicost/test_guide 통과 |
+| 배포 | Claude 가 07:05 `deploy_from_pc.py` 시도 → 앱 안전장치 'Production Deploy' 가 막음(채팅 허락으로는 안 풀림, 네 번째) → **저녁에 사용자가 배포**(아래 '저녁에 할 일' 1번). 서버는 아직 85d2779(06:27 배포본) |
+
+**저녁에 할 일**
+1. 배포: `python deploy/deploy_from_pc.py` → ⚙️ 관리 모드 💵 실매매 맨 아래에 'dry-run 결과(그때 1주 샀다면): 아직 없음' 안내가 보이면 반영된 것. 결과는 다음 아침 07:30 작업부터 쌓임(바로 보려면 서버에서 `sudo -u quant venv/bin/python -X utf8 cases.py drysim` — 지금까지의 dry 기록 5건에도 붙음).
+2. (선택) 3일 목표 10년 재수집 — 위 결정 목록 3번째 명령.
+
 
 ## 1. 지금 상태 한눈에
 | 영역 | 상태 |
@@ -136,6 +146,7 @@
 
 ## 5. 사용자가 할 일(확인 필요)
 - **10/29 아침**: ✅ 배포·서버 2줄 완료(06:27, Claude 확인 06:41) → 남은 것: ⚙️ 관리 모드 💵 실매매 화면 눈으로 확인 + 결정 3개(맨 위 ☀️ · 1주 모드는 'dry-run 유지'로 결정)
+- **10/29 저녁**: 배포(`python deploy/deploy_from_pc.py`) → 💵 실매매 맨 아래 'dry-run 결과' 안내 확인(맨 위 🌤 '저녁에 할 일')
 - Vultr 콘솔 → 서버 → Backups 탭에서 자동 백업이 켜져 있는지 확인(설치 문서엔 '선택'으로 적혀 있음). R2 사본이 있어 필수는 아님
 - ~~10/28 밤 폴더 정리~~ ✅ 10/28 저녁 확인(`files/`·`files/quant_system/` 아래 옛 복사본 없음, zip·첨부·토큰 폴더만 남음): 옛 코드 복사본(`클로드\files` · `files\quant_system` 바로 아래)·설치 파일·PC 로그는 휴지통으로, 옛 코드 98개는 `클로드\옛코드_보관_2026-10.zip`, 옛 인수인계서는 `docs/archive/`
 - 텔레그램 토큰 재발급 여부(예전 채팅 노출) → 재발급 시 서버 `.env` 의 TELEGRAM_TOKEN 수정 후 `systemctl restart 'quant-*'`
