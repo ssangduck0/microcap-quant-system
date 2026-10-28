@@ -31,6 +31,11 @@ v, tag = shares.best("NOPE", 5e6); assert v == 5e6 and tag.startswith("야후")
 assert shares.estimate("NOPE", FC()) is None and shares.build_missing(FC(), ["HUBC", "NOPE"], out=lambda *_: None) == 0   # 7일 안 = 건너뜀
 assert shares.build_missing(FC(), ["HUBC"], out=lambda *_: None, force=True) == 1 and len(FC.calls) == 2                 # force 는 다시 받음(서버 소급용)
 assert shares.build_missing(FC(), ["HUBC"], out=lambda *_: None, max_age=30) == 0 and shares.build_missing(FC(), ["HUBC"], out=lambda *_: None, max_age=-1) == 1   # max_age(우주 30일 주기)
+class NF:   # 아무 종목도 SEC 자료가 없는 가짜 → 시도 횟수 상한(limit×3)에서 멈춤(예전엔 목록 끝까지)
+    calls = 0
+    def cik_for(s, t): NF.calls += 1; return None
+    def companyfacts(s, cik): return {}
+assert shares.build_missing(NF(), [f"X{i:04d}" for i in range(2000)], limit=50, out=lambda *_: None) == 0 and NF.calls == 150
 # 🐷 ⑥: 표지 이력 · 직전 두 분기 변동률(사이 분할 반영) · 같은 연결 재사용
 with closing(db.connect()) as conn:
     h = shares.history("HUBC", conn); assert [(p["asof"], p["shares"]) for p in h] == [(A0, 30_000_000), (A1, 52_500_000)]

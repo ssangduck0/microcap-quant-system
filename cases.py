@@ -323,8 +323,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             except Exception as e:  # noqa: BLE001
                 log.warning("저금통 주식수 이력 갱신 실패: %s", e)
             try:  # 🏁 ⑥ 를 순위·PICK 에도 쓰므로(2026-10-28) 스캐너 우주 전체의 표지 이력을 30일 주기로 돌아가며 갱신(하루 110종목 ≈ 30초, SEC 무료)
-                with closing(db.connect()) as _c:
-                    _uni = [r[0] for r in _c.execute("SELECT ticker FROM universe ORDER BY ticker")] if _c.execute("SELECT 1 FROM sqlite_master WHERE name='universe'").fetchone() else []
+                import universe as _uv
+                _uni = _uv.cached_tickers()   # 상장 종목 캐시 파일(스캐너가 매일 갱신) — DB 표가 아님(10/28 밤 수정)
+                if not _uni:   # 캐시 파일이 없으면 최근 120일 스냅샷 종목으로
+                    with closing(db.connect()) as _c:
+                        _uni = [r[0] for r in _c.execute("SELECT DISTINCT ticker FROM daily_snapshots WHERE date >= date('now','-120 day') ORDER BY ticker")]
                 if _uni:
                     _shS.build_missing(_cl, _uni, limit=110, out=lambda m: out(f"🏁 우주 {m}"), max_age=30)
             except Exception as e:  # noqa: BLE001

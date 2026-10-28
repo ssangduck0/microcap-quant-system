@@ -92,6 +92,23 @@ def load_listed(include_amex: bool) -> list[str]:
     return _cached_listing(key, lambda: _fetch_listed(include_amex))
 
 
+def cached_tickers() -> list[str]:
+    """캐시 파일에 있는 상장 종목 목록(네트워크 없음, 오래됐어도 그대로). 아침 작업이 SEC 표지 이력을 우주 전체로 30일 주기 갱신할 때 씀(2026-10-28).
+    토스 목록(universe_cache_toss_nasdaq.json) 먼저, 없으면 나스닥 파일 목록. 둘 다 없으면 []."""
+    mode = config.SCAN_UNIVERSE if config.SCAN_UNIVERSE in ("nasdaq", "nasdaq+amex") else "nasdaq"
+    for key in (f"toss:{mode}", mode):
+        p = _cache_path(key)
+        if not p.exists():
+            continue
+        try:
+            t = json.loads(p.read_text(encoding="utf-8")).get("tickers") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        if t:
+            return sorted(set(t))
+    return []
+
+
 def _cached_listing(key: str, fetch, min_count: int = 500) -> list[str]:
     path, cache = _cache_path(key), None
     if path.exists():

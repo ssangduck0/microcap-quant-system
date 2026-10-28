@@ -33,6 +33,7 @@ import market
 assert market.download_daily(["AAA", "BBB"]) == {} and market.download_intraday(["AAA"]) == {} and market.fetch_splits("AAA") == [] and market.fetch_fundamentals("AAA") is None
 import sec
 cl = sec.SecClient("T t@e.com")
+t0 = time.time(); assert cl.cik_for("AAPL") is None and all(cl.cik_for(f"T{i}") is None for i in range(300)) and time.time() - t0 < 2   # 종목표 실패를 60초 기억(종목마다 재시도 안 함)
 try:
     r = cl.companyfacts(320193); assert not r, r
 except requests.exceptions.ConnectionError:

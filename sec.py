@@ -60,6 +60,7 @@ class SecClient:
         self._last = 0.0
         self._map: dict[str, int] | None = None
         self._map_at = 0.0
+        self._map_fail_at = 0.0   # 2026-10-28: 종목표(company_tickers.json) 내려받기 실패를 60초 기억 — 종목마다 다시 시도하면 수천 종목 × 0.12초 대기가 됨
         self._subs: dict[int, tuple[float, dict]] = {}  # 같은 사이클 안의 중복 요청 방지(희석 판정 + 공통 인텔이 같은 회사를 볼 때)
 
     def _throttle(self):  # SEC 한도: 초당 10회 이하
@@ -74,11 +75,20 @@ class SecClient:
         r.raise_for_status()
         return r
 
+    MAP_FAIL_TTL = 60.0  # 초. 종목표 실패 뒤 이 동안은 다시 안 받고 None(옛 표가 있으면 옛 표)
+
     def cik_for(self, ticker: str) -> int | None:
         if self._map is None or time.time() - self._map_at > 86400:
-            data = self._get("https://www.sec.gov/files/company_tickers.json").json()
-            self._map = {v["ticker"].upper(): int(v["cik_str"]) for v in data.values()}
-            self._map_at = time.time()
+            if time.time() - self._map_fail_at < self.MAP_FAIL_TTL:
+                return self._map.get(ticker.upper()) if self._map else None
+            try:
+                data = self._get("https://www.sec.gov/files/company_tickers.json").json()
+                self._map = {v["ticker"].upper(): int(v["cik_str"]) for v in data.values()}
+                self._map_at = time.time()
+            except Exception:  # noqa: BLE001  (네트워크·오프라인 테스트) — 실패 기억, 옛 표가 있으면 그대로 씀
+                self._map_fail_at = time.time()
+                if not self._map:
+                    return None
         return self._map.get(ticker.upper())
 
     SUBMISSIONS_TTL = 120.0  # 초. 새 공시 반영이 최대 2분 늦어질 수 있음
