@@ -16,7 +16,7 @@
 - 기능마다 `tests/test_*.py`(가짜 데이터·가짜 API·Streamlit AppTest). 새 기능엔 새 테스트를 같이 만든다.
 - 하나만: `python tests/test_screener.py` → 마지막 줄 `ALL OK`
 - 전체(5부분): `bash tests/run_all.sh 1` … `5` (Git Bash). 실패한 파일만 줄로 나온다.
-- 테스트는 인터넷 없이 돌아가야 한다(야후·SEC·Claude 는 가짜로).
+- 테스트는 인터넷 없이 돌아가야 한다(야후·SEC·Claude 는 가짜로). `QUANT_DB` 가 임시 폴더면 `config` 가 **오프라인 모드**를 자동으로 켬(requests 전부 차단·Claude/텔레그램 키 비움·야후 건너뜀, `QUANT_OFFLINE=1` 로 강제). 진짜 인터넷·API 가 필요한 코드는 `http_get`/`post`/`download` 인자로 가짜를 넘겨 테스트.
 
 ## 서버 반영
 - 서버: Vultr 서울 `root@158.247.250.15`(Ubuntu 24.04). 코드 `/home/quant/quant_system`, 실행 사용자 `quant`, 파이썬 `/home/quant/quant_system/venv/bin/python`

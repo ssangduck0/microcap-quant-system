@@ -13,9 +13,12 @@ from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import logging
 import requests
 
 import db
+
+log = logging.getLogger("regsho")
 
 ET = ZoneInfo("America/New_York")
 URL = "https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{d}.txt"
@@ -99,7 +102,13 @@ def refresh(conn, http_get=None, now: datetime | None = None, days: int = 40) ->
         h = have.get(k)
         if h and (h["status"] == "ok" or now.timestamp() - (h["fetched_at"] or 0) < MISS_RETRY):
             continue
-        code, text = get(URL.format(d=d.strftime("%Y%m%d")))
+        try:
+            code, text = get(URL.format(d=d.strftime("%Y%m%d")))
+        except Exception as e:  # noqa: BLE001  — 2026-10-28: 네트워크 오류(연결 끊김·오프라인 테스트)가 그날 갱신 전체를 터뜨리지 않게. 이번 라운드는 여기서 멈추고 다음 주기에 다시
+            log.warning("Reg SHO %s 받기 실패(%s) — 이번 라운드 중단", k, str(e)[:120])
+            conn.execute("INSERT OR REPLACE INTO regsho_files (date, status, n, fetched_at) VALUES (?,?,?,?)", (k, "error", 0, now.timestamp()))
+            conn.commit()
+            break
         rows = parse(text) if code == 200 else {}
         if rows:
             conn.execute("DELETE FROM regsho_list WHERE date=?", (k,))

@@ -14,6 +14,34 @@ try:
 except ImportError:
     pass
 
+# ----------------------------------------------------------------- 🔌 오프라인(테스트) 모드 — 2026-10-28
+# 테스트는 인터넷 없이 돌아야 한다(CLAUDE.md). 그런데 scanner.run_cycle 의 주기 작업(FRED 레짐·나스닥 Reg SHO·수입물가·뉴스 번역)이 테스트 안에서
+# 진짜 인터넷을 95번 부르고(느린 테스트 9개의 원인: 1회 120초) 번역은 .env 의 진짜 키로 Claude 를 실제 호출해 돈이 나갔다.
+# → QUANT_OFFLINE=1 이거나(run_all.sh) QUANT_DB 가 임시 폴더 아래면(모든 테스트): 돈·메시지가 나가는 키를 비우고 requests 의 모든 호출을
+#   즉시 ConnectionError 로 막는다(코드의 try/except 가 "못 받음" 으로 처리 → 느린 타임아웃 대신 0초). 야후는 market 이 config.OFFLINE 을 보고 건너뜀.
+#   QUANT_OFFLINE=0 이면 임시 DB 라도 켜지 않음(서버·PC 운영 DB 는 임시 폴더가 아니라 영향 없음).
+def _under_tmp(p: str) -> bool:
+    try:
+        import tempfile
+        return bool(p) and Path(p).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+OFFLINE = os.environ.get("QUANT_OFFLINE") == "1" or (os.environ.get("QUANT_OFFLINE") != "0" and _under_tmp(os.environ.get("QUANT_DB", "")))
+if OFFLINE:
+    for _k in ("ANTHROPIC_API_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"):
+        os.environ[_k] = ""
+    try:
+        import requests as _rq
+
+        def _offline_request(self, method, url, *a, **k):
+            raise _rq.exceptions.ConnectionError(f"오프라인(테스트) 모드: 인터넷 호출 차단 — {method} {url}")
+
+        _rq.sessions.Session.request = _offline_request
+    except Exception:  # noqa: BLE001
+        pass
+
 _DEFAULT_DB = Path(r"C:\quant_data\quant.db") if os.name == "nt" and Path(r"C:\quant_data\quant.db").exists() else BASE_DIR / "quant.db"
 DB_PATH = Path(os.environ.get("QUANT_DB") or _DEFAULT_DB)  # .env 에 QUANT_DB 가 없어도 기존 C:\quant_data\quant.db 가 있으면 그것을 씀
 MANUAL_TICKERS_FILE = BASE_DIR / "manual_tickers.txt"

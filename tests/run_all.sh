@@ -2,7 +2,7 @@
 # 전체 테스트 실행(어느 폴더·어느 PC 에서나 — 테스트가 자기 위치에서 프로젝트 폴더를 찾음).
 # 한 번에 5분 제한이 있어 4~5번에 나눠 돌린다: bash tests/run_all.sh 1 (2,3,4,5)
 cd "$(dirname "$0")"
-export DASH_PASSWORD= PYTHONUTF8=1 PYTHONIOENCODING=utf-8   # .env 의 비밀번호가 있으면 화면이 비밀번호 창에서 멈춰 모든 화면 테스트가 실패 · 한글 파일 읽기
+export DASH_PASSWORD= PYTHONUTF8=1 PYTHONIOENCODING=utf-8 QUANT_OFFLINE=1   # QUANT_OFFLINE: 인터넷·Claude 호출 차단(config 오프라인 모드, 임시 DB 면 자동) · .env 의 비밀번호가 있으면 화면이 비밀번호 창에서 멈춰 모든 화면 테스트가 실패 · 한글 파일 읽기
 TMPD=$(python -c "import tempfile; print(tempfile.gettempdir())")
 cp apps/*_app.py "$TMPD"/ 2>/dev/null
 ALL=$(ls test_*.py | sort)

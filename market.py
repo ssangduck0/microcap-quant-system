@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+import config
+
 log = logging.getLogger("market")
 
 EXCHANGE_MAP = {"NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NASDAQ": "NASDAQ",
@@ -43,6 +45,9 @@ def _split(df: pd.DataFrame, tickers: list[str]) -> dict[str, pd.DataFrame]:
 
 def _download(tickers: list[str], chunk_size: int = CHUNK, **kw) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
+    if config.OFFLINE:   # 🔌 테스트 오프라인 모드(config 참고): 야후(curl_cffi 라 requests 차단에 안 걸림)는 여기서 건너뜀
+        log.info("오프라인 모드: 야후 다운로드 건너뜀 (%s ...)", tickers[:3])
+        return result
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
         try:
@@ -63,6 +68,8 @@ def download_intraday(tickers: list[str]) -> dict[str, pd.DataFrame]:
 
 def fetch_splits(ticker: str) -> list[dict]:
     out = []
+    if config.OFFLINE:
+        return out
     for d, r in yf.Ticker(ticker).splits.items():
         r = float(r)
         if r <= 0 or r == 1:
@@ -96,6 +103,8 @@ def quick_screen(daily: pd.DataFrame) -> dict | None:
 
 def fetch_fundamentals(ticker: str) -> dict | None:
     """느린 호출이므로 호출하는 쪽에서 DB에 24시간 캐시합니다."""
+    if config.OFFLINE:
+        return None
     try:
         info = yf.Ticker(ticker).info
     except Exception as e:  # noqa: BLE001

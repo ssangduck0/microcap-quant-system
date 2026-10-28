@@ -1,11 +1,12 @@
 import os as _os_qs; _os_qs.environ.setdefault("QS_ROOT", _os_qs.path.dirname(_os_qs.path.dirname(_os_qs.path.abspath(__file__))))  # 프로젝트 폴더(어느 PC 에서나)
 import os, sys, tempfile, json
 tmp = tempfile.mkdtemp(); os.environ.pop("QUANT_TEST_ALL_PAGES", None)
-os.environ["QUANT_DB"]=os.path.join(tmp,"q.db"); os.environ["SEC_USER_AGENT"]="T t@e.com"; os.environ["ANTHROPIC_API_KEY"] = "test-key"
+os.environ["QUANT_DB"]=os.path.join(tmp,"q.db"); os.environ["SEC_USER_AGENT"]="T t@e.com"
 sys.path.insert(0,__import__("os").environ["QS_ROOT"])
 from contextlib import closing
 from datetime import date
 import db, aisummary as ai, forensic, config, halts
+os.environ["ANTHROPIC_API_KEY"] = "test-key"   # config 오프라인 모드가 import 때 진짜 키를 비우므로 가짜 키는 그 뒤에(가짜 http_post 로만 호출)
 db.init_db(); halts.fetch = lambda *a, **k: []; db.set_meta("usdkrw", "1350")
 now = db.utcnow_iso()
 with closing(db.connect()) as conn:
