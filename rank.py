@@ -135,12 +135,25 @@ def compute(today: date | None = None) -> pd.DataFrame:
                     why.append(f"회전율 {_to['pct']:.0f}% — 하루에 주식 전체가 한 번 넘게 손바뀜")
             except Exception:  # noqa: BLE001
                 pass
+            # 🔬 ⑥ 직전 분기 주식수 변동(SEC 표지 이력, 2026-10-28 검증 docs/studies: +20% 초과는 60일 중앙값 −16%·급락 터치 52%, 20% 이내 −5%·35%, 급등 기회는 같음)
+            # 본 점수(score)는 그대로 두고 표시(칩) + 변형 점수(score6: ❌ −10 · ⚠️ −5, 희석 감점이 이미 있으면 절반)만 만든다 → 🧪 가상매매 '🏁 순위(⑥ 반영)' 전략으로 4주 비교 뒤 감점 여부 결정(사용자 결정 10/28)
+            sc6, cls6 = None, None
+            try:
+                sc6 = _sh.change(t, conn)
+                if sc6:
+                    _p6 = round(sc6["pct"], 6)
+                    cls6 = "bad" if _p6 > 20 else "warn" if _p6 > 10 else "ok"
+            except Exception:  # noqa: BLE001
+                sc6, cls6 = None, None
+            dil_pen = False
             if dil_status.get(t) in ("ATM", "ELOC") or (pr and pr.get("atm_open")):
                 strength -= 15
                 risk.append("ATM·ELOC 열림")
+                dil_pen = True
             if t in dil_recent:
                 strength -= 15
                 risk.append("최근 30일 희석 서류")
+                dil_pen = True
             penalized = False
             if evt and ev_worst and ev_worst[0] < -1:  # −1%p 넘게 나쁜 칸만 감점(−7.5%p 이하면 최대 15)
                 strength -= min(15.0, -ev_worst[0] * 2)
@@ -150,6 +163,10 @@ def compute(today: date | None = None) -> pd.DataFrame:
                 strength -= 10
                 risk.append("최근 3일 악재 공시")
             strength = max(0.0, min(100.0, strength))
+            pen6 = 10.0 if cls6 == "bad" else 5.0 if cls6 == "warn" else 0.0
+            if pen6 and dil_pen:   # ATM·ELOC·희석 서류 감점이 이미 있으면 절반(이중 감점 방지)
+                pen6 /= 2
+            strength6 = max(0.0, strength - pen6)
             u, when = 10, []
             ad = acc_d.get(t)
             if ad and ad.get("n_strong"):
@@ -174,7 +191,9 @@ def compute(today: date | None = None) -> pd.DataFrame:
             if u == 10 and a:
                 u = 25
             total = round(strength * _cf.RANK_W_STRENGTH + u * (1 - _cf.RANK_W_STRENGTH), 1)
-            rows.append({"ticker": t, "score": total, "strength": round(strength, 1), "urgency": u, "when": LABEL[u], "why": why, "when_why": when[:3], "risk": risk,
+            rows.append({"ticker": t, "score": total, "score6": round(strength6 * _cf.RANK_W_STRENGTH + u * (1 - _cf.RANK_W_STRENGTH), 1),
+                         "share_pct": (round(sc6["pct"], 1) if sc6 else None), "share_cls": cls6, "share_d": (f"{sc6['d0']}→{sc6['d1']}" if sc6 else None),
+                         "strength": round(strength, 1), "urgency": u, "when": LABEL[u], "why": why, "when_why": when[:3], "risk": risk,
                          "parts": {"매집": round(c_acc), "압박": round(c_pr), "스퀴즈": round(c_sq), "멀티": round(c_ms), "공시": round(c_news), "내부자": round(c_ins)}})
     df = pd.DataFrame(rows)
     if df.empty:
@@ -182,4 +201,6 @@ def compute(today: date | None = None) -> pd.DataFrame:
     df = df.sort_values(["score", "urgency"], ascending=False).reset_index(drop=True)
     df["rank"] = range(1, len(df) + 1)
     df["top_pct"] = [max(1, int(round(r / len(df) * 100))) for r in df["rank"]]  # 순위 대상 중 상위 몇 %(1위가 50점대여도 위치가 보이게)
+    df["rank6"] = 0
+    df.loc[df.sort_values(["score6", "urgency"], ascending=False).index, "rank6"] = range(1, len(df) + 1)   # ⑥ 반영 순위(가상매매 비교용)
     return df

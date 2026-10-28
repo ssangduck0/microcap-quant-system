@@ -115,10 +115,11 @@ def best(t: str, yahoo_float: float | None = None, conn=None) -> tuple[float | N
     return None, "주식 수 정보 없음"
 
 
-def build_missing(client, tickers: list[str], limit: int = 60, out=print, force: bool = False) -> int:
-    """추정이 없거나 7일 지난 종목만(아침 작업·상한). force 면 전부 다시(서버 소급 — 🐷 ⑥ 표지 이력 채우기)."""
+def build_missing(client, tickers: list[str], limit: int = 60, out=print, force: bool = False, max_age: int = 7) -> int:
+    """추정이 없거나 max_age 일(기본 7) 지난 종목만(아침 작업·상한). force 면 전부 다시(서버 소급 — 🐷 ⑥ 표지 이력 채우기).
+    max_age=30: 스캐너 우주 전체를 한 달 주기로 돌아가며 갱신(⑥ 를 순위·PICK 에도 쓰므로, 2026-10-28)."""
     n = 0
-    cut = (date.today() - timedelta(days=7)).isoformat()
+    cut = (date.today() - timedelta(days=max_age)).isoformat()
     for t in tickers:
         if n >= limit:
             break

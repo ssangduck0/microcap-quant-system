@@ -200,7 +200,7 @@ def render_pick() -> None:
             report_dialog.open_report(pick)
     with st.expander(f"하방 희석·매도 압력·다른 해결 방법 등으로 뺀 종목 — {len(s['fail'])}종목"):
         if s["fail"]:
-            st.dataframe(pd.DataFrame([{"티커": r["ticker"], "탈락 조건": r["fail"], "목표": r["target_name"] or "-", "목표가": r["target"], "필요 상승(%)": r["pct"], "상태": r["status"]}
+            st.dataframe(pd.DataFrame([{"티커": r["ticker"], "탈락 조건": r["fail"], "주식수(분기)": r.get("share_chg") or "-", "목표": r["target_name"] or "-", "목표가": r["target"], "필요 상승(%)": r["pct"], "상태": r["status"]}
                                        for r in s["fail"]]), hide_index=True, width="stretch", column_config={"필요 상승(%)": st.column_config.NumberColumn(format="%+.0f")})
     with st.expander(f"미등록 — 최근 매집 신호 {len(s['unregistered'])}종목"):
         st.caption("회사 압박·펀드스캔 분석이 아직 없는 매집 의심 종목이에요. 분석이 쌓이면 목표가로 판단해요.")

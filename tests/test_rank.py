@@ -25,15 +25,28 @@ with closing(db.connect()) as conn:
         conn.execute("INSERT INTO regsho_files VALUES (?,'ok',1,0)", (d,)); conn.execute("INSERT INTO regsho_list VALUES (?,'BNAI','B')", (d,))
     conn.commit()
 watch.add_event("BNAI", (today + timedelta(days=2)).isoformat(), "주총", "특별 주총")
+import shares as _sh, config as _cfg
+with closing(db.connect()) as conn:   # 🔬 ⑥ 직전 분기 주식수: BNAI +30%(❌) · BRNX +15%(⚠️, ATM 감점과 겹쳐 절반)
+    conn.execute(_sh.HIST_DDL)
+    for t, s1 in (("BNAI", 1_300_000), ("BRNX", 1_150_000)):
+        conn.executemany("INSERT OR REPLACE INTO shares_hist VALUES (?,?,?,?,?)", [(t, (today - timedelta(days=170)).isoformat(), "f", "10-Q", 1_000_000),
+                                                                                   (t, (today - timedelta(days=80)).isoformat(), "f", "10-Q", s1)])
+    conn.commit()
 df = rank.compute().set_index("ticker"); print(df[["rank", "score", "strength", "when", "when_why", "risk"]].to_string())
 assert df.loc["BNAI", "rank"] < df.loc["BRNX", "rank"] and df.loc["BNAI", "when"] == "⏱ 3일 이내" and df.loc["BRNX", "when"] == "⏱ 수주"
 assert any("13일 강제 상환까지 2일" in x for x in df.loc["BNAI", "when_why"]) and any("D-2 주총" in x for x in df.loc["BNAI", "when_why"]) and "ATM·ELOC 열림" in df.loc["BRNX", "risk"]
+_W = _cfg.RANK_W_STRENGTH   # ⑥: 본 점수는 그대로(risk 에 안 들어감), score6 만 감점 — ❌ −10 · ⚠️ −5(희석 감점 겹치면 절반) · rank6 는 score6 순
+assert df.loc["BNAI", "share_cls"] == "bad" and abs(df.loc["BNAI", "share_pct"] - 30.0) < 1e-9 and df.loc["BRNX", "share_cls"] == "warn" and not any("주식수" in x for x in df.loc["BNAI", "risk"])
+assert abs(df.loc["BNAI", "score6"] - round(max(0.0, df.loc["BNAI", "strength"] - 10) * _W + df.loc["BNAI", "urgency"] * (1 - _W), 1)) < 1e-9
+assert abs(df.loc["BRNX", "score6"] - round(max(0.0, df.loc["BRNX", "strength"] - 2.5) * _W + df.loc["BRNX", "urgency"] * (1 - _W), 1)) < 1e-9
+assert df.loc["BNAI", "score6"] <= df.loc["BNAI", "score"] and set(df["rank6"]) == {1, 2} and df.loc["BNAI", "rank6"] == 1
 os.environ["QUANT_TEST_PAGE"] = "rank"
 from streamlit.testing.v1 import AppTest
 at = AppTest.from_file(__import__("os").path.join(__import__("os").environ["QS_ROOT"], "dashboard.py"), default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]
 at.slider(key="rk_min").set_value(0).run()
 assert any("🧾 공시분석 있음(45일)" in m.value for m in at.markdown)   # 2026-10-28: 공시분석 범위 카드
 cards = [m.value for m in at.markdown if 'class="qk-rank"' in m.value]; assert "BNAI" in cards[0] and "⏱ 3일 이내" in cards[0] and "BRNX" in cards[1]
+assert "주식수 +30%(분기)" in cards[0] and "주식수 +15%(분기)" in cards[1]   # ⑥ 칩(빨강·주황)
 at.radio(key="rk_when").set_value("⏱ 3일 이내").run(); assert len([m for m in at.markdown if 'class="qk-rank"' in m.value]) == 1
 os.environ["QUANT_TEST_PAGE"] = "accum"
 at = AppTest.from_file(__import__("os").path.join(__import__("os").environ["QS_ROOT"], "dashboard.py"), default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]

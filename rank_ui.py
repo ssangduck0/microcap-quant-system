@@ -108,6 +108,9 @@ def render() -> None:
         t = r["ticker"]
         parts = _s3.get(t, "") + "".join(ui.chip(f"{k} {p}", "blue") for k, p in r["parts"].items() if p)
         risk = "".join(ui.chip(x, "red") for x in r["risk"])
+        if r.get("share_cls") in ("bad", "warn"):   # 🔬 ⑥ 직전 분기 주식수 변동(10/28): 표시만, 본 점수 불변(가상매매로 4주 비교 중)
+            risk += ui.chip(f"주식수 {r['share_pct']:+.0f}%(분기)", "red" if r["share_cls"] == "bad" else "orange",
+                            f"SEC 표지 {r.get('share_d') or ''} · 검증: +20% 초과는 60일 뒤 중앙값 −16%·급락 터치 52%, 10~20% 는 −10%·44%")
         color = "red" if r["urgency"] == 100 else "orange" if r["urgency"] == 60 else "gray"
         lines = ([f"⏱ {' · '.join(r['when_why'])}"] if r["when_why"] else []) + r["why"][:4]
         with st.container(border=True):

@@ -1,7 +1,7 @@
 """🎯 PICK +30% — 회사가 노리는 목표가(회사 압박 목표가 · 워런트 최저 행사가) 중 지금보다 위에 있는 가장 가까운 값이
 +30% 이상 · +150% 이하이고, 하방 희석·매도 압력·다른 해결 방법이 없는 종목만 남긴다(김곰 PICK 방식).
 
-고정 조건(순서대로, 탈락 수를 셈): 목표가 +30% 이상 → 도달 범위 안(+150% 이하) → 최근 미도달(20일 고가 < 목표가) → 하방 희석 없음(ATM·ELOC·전환사채)
+고정 조건(순서대로, 탈락 수를 셈): 목표가 +30% 이상 → 도달 범위 안(+150% 이하) → 최근 미도달(20일 고가 < 목표가) → 하방 희석 없음(ATM·ELOC·전환사채 · 2026-10-28 부터 직전 분기 주식수 +20% 초과도 — SEC 표지, 실제로 늘어난 주식은 '하방 희석 없음' 과 모순; 10~20% 는 ⚠️ 표시만)
 → 매도 압력 없음(행사가가 현재가보다 낮은 워런트가 주식 10% 이상 · 최근 60일 재판매 등록) → 다른 해결 방법 없음($1 목표인데 1년 안 병합 이력이 없으면 병합으로 해결 가능)
 주총·역분할·결과 전 소송은 상승 요인으로 치지 않는다(임박도 계산에서 뺌). 상태: 유력(임박 14일↓ + 압박 5↑) · 가능(임박 45일↓ 또는 런웨이 3개월↓) · 대기.
 'baby shelf 탈출'은 약한 목표: 기한이 없고, 도달하면 회사가 오히려 대량 조달(희석)할 수 있다 → '유력'이 될 수 없고 같은 상태 안에서 강한 목표(상장 유지·워런트·시총) 뒤로.
@@ -64,6 +64,15 @@ def evaluate(t: str, conn, pr: dict | None, fsa: dict | None) -> dict:
     if runway is None and not rn:
         runway = (fsa or {}).get("runway_now")
     imm = min(days) if days else None
+    sc6, cls6 = None, None   # 🔬 ⑥ 직전 분기 주식수 변동(SEC 표지, 10/28 검증: +20% 초과 60일 중앙값 −16%·급락 52%)
+    try:
+        import shares as _sh6
+        sc6 = _sh6.change(t, conn)
+        if sc6:
+            _p6 = round(sc6["pct"], 6)
+            cls6 = "bad" if _p6 > 20 else "warn" if _p6 > 10 else "ok"
+    except Exception:  # noqa: BLE001
+        sc6, cls6 = None, None
     fail = None
     if pct is None:
         fail = "목표가 있음"  # 회사 목표가(압박·워런트)를 아직 못 찾음
@@ -73,7 +82,7 @@ def evaluate(t: str, conn, pr: dict | None, fsa: dict | None) -> dict:
         fail = "목표가 도달 범위 안"
     elif snap and snap["high_20d"] and tval and snap["high_20d"] >= tval:
         fail = "목표가 최근 미도달"
-    elif (snap["dilution_status"] if snap else None) in ("ATM", "ELOC", "CB"):
+    elif (snap["dilution_status"] if snap else None) in ("ATM", "ELOC", "CB") or cls6 == "bad":   # ⑥ ❌: 실제로 주식이 +20% 넘게 늘었으면 하방 희석 있음
         fail = "하방 희석 없음"
     else:
         itm = sum(w["qty"] for w in (fsa or {}).get("warrants") or [] if price and w["price"] and w["price"] < price)
@@ -93,7 +102,9 @@ def evaluate(t: str, conn, pr: dict | None, fsa: dict | None) -> dict:
     weak = is_weak(tname)
     status = "유력" if (imm is not None and imm[0] <= 14 and score >= 5 and not weak) else ("가능" if ((imm is not None and imm[0] <= 45) or (runway is not None and runway <= 3)) else "대기")
     why = reason(status, imm, score, runway, n_ev, bool(pr and pr.get("listing")), past, rn)
-    return {"weak": weak, "why": why, "has_runway": runway is not None or bool(rn), "runway_info": rn, "has_listing": bool(pr and pr.get("listing")), "n_events": n_ev, "past": past,"ticker": t, "price": price, "target_name": tname, "target": tval, "pct": pct, "imm_days": None if imm is None else imm[0], "imm_kind": None if imm is None else imm[1],
+    if cls6 == "warn":
+        why += f" · ⚠️ 주식수 {sc6['pct']:+.0f}%(분기)"
+    return {"weak": weak, "why": why, "share_cls": cls6, "share_chg": (f"{sc6['pct']:+.0f}% ({sc6['d0']}→{sc6['d1']})" if sc6 else None), "has_runway": runway is not None or bool(rn), "runway_info": rn, "has_listing": bool(pr and pr.get("listing")), "n_events": n_ev, "past": past,"ticker": t, "price": price, "target_name": tname, "target": tval, "pct": pct, "imm_days": None if imm is None else imm[0], "imm_kind": None if imm is None else imm[1],
             "pressure": score, "runway": runway, "status": status, "fail": fail}
 
 

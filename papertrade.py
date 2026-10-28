@@ -33,6 +33,8 @@ NEW_COLS = {"strategy": "TEXT", "tp": "REAL", "sl": "REAL", "hold": "INTEGER", "
 
 STRATEGIES: dict[str, dict] = {
     "rank": {"name": "🏁 종합 순위", "desc": "매일 아침 종합 순위 1~N위를 직전 종가로 매수", "tp": 20.0, "sl": 10.0, "hold": 3, "usd": 1000.0, "n": 3, "on": True},
+    "rank6": {"name": "🏁 순위(⑥ 반영)", "desc": "종합 순위에 ⑥ 직전 분기 주식수 변동 감점(+20% 초과 −10 · 10~20% −5, 희석 감점이 이미 있으면 절반)을 적용한 순위 1~N위를 직전 종가로 매수 — 2026-10-28 부터 4주간 🏁 종합 순위와 비교해 감점 여부 결정",
+              "tp": 20.0, "sl": 10.0, "hold": 3, "usd": 1000.0, "n": 3, "on": True},
     "pick": {"name": "🎯 PICK +30%", "desc": "PICK 통과 '유력' 종목을 그날 가격으로 매수(같은 종목은 30일에 한 번)", "tp": 30.0, "sl": 15.0, "hold": 20, "usd": 1000.0, "n": 3, "on": True},
     "close": {"name": "🎯 장마감 체크리스트", "desc": "장마감 전 BEST·후보 판정 순간 가격으로 매수 → 시간외 포함, 다음 거래일 종가까지", "tp": 10.0, "sl": 5.0, "hold": 1, "usd": 1000.0, "n": 5, "on": True},
     "piggy": {"name": "🐷 저금통", "desc": "저금통 종목이 🟢 저점 구간에 들어오면 매수. 익절 0 = 박스 상단 · 손절 0 = 박스 이탈 · 보유 0 = 제한 없음 · 저금통 기준 이탈 시 정리",
@@ -468,20 +470,26 @@ def open_trade(conn, strategy: str, day: str, ticker: str, price: float, *, rank
     return True
 
 
-def open_new(rank_df: pd.DataFrame, last_close: dict, day: str | None = None) -> list[str]:
-    """🏁 종합 순위 상위 N개를 직전 종가로(이미 들고 있는 종목·가격 없는 종목은 건너뜀). 같은 날 두 번 사지 않음."""
-    c = cfg("rank")
+def open_new(rank_df: pd.DataFrame, last_close: dict, day: str | None = None, strategy: str = "rank") -> list[str]:
+    """🏁 종합 순위 상위 N개를 직전 종가로(이미 들고 있는 종목·가격 없는 종목은 건너뜀). 같은 날 두 번 사지 않음.
+    strategy="rank6"(2026-10-28): 같은 표를 ⑥ 반영 점수(score6)로 다시 줄 세워 상위 N개 — 4주 비교용."""
+    c = cfg(strategy)
     day = day or date.today().isoformat()
     bought = []
+    if rank_df is None or rank_df.empty:
+        return []
+    if strategy == "rank6":
+        if "score6" not in rank_df.columns:
+            return []
+        cols = ["score6"] + (["urgency"] if "urgency" in rank_df.columns else [])
+        rank_df = rank_df.sort_values(cols, ascending=False).reset_index(drop=True).assign(rank=lambda d: range(1, len(d) + 1), score=lambda d: d["score6"])
     with closing(db.connect()) as conn:
         ensure(conn)
-        if conn.execute("SELECT 1 FROM pt_trades WHERE strategy='rank' AND day=? AND book=? LIMIT 1", (day, book("rank"))).fetchone():
-            return []
-        if rank_df is None or rank_df.empty:
+        if conn.execute("SELECT 1 FROM pt_trades WHERE strategy=? AND day=? AND book=? LIMIT 1", (strategy, day, book(strategy))).fetchone():
             return []
         for r in rank_df.head(int(c["n"])).to_dict("records"):
             t, px = r["ticker"], last_close.get(r["ticker"])
-            if open_trade(conn, "rank", day, t, px, rank=int(r["rank"]), score=float(r["score"]), parts=r.get("parts") or {}, c=c):
+            if open_trade(conn, strategy, day, t, px, rank=int(r["rank"]), score=float(r["score"]), parts=r.get("parts") or {}, c=c):
                 bought.append(t)
         conn.commit()
     return bought
@@ -663,7 +671,7 @@ def daily(out=print) -> dict:
         ensure(conn)
         held = [x[0] for x in conn.execute("SELECT DISTINCT ticker FROM pt_trades WHERE status='open'")]
     try:
-        rk = rank.compute() if st["rank"]["on"] else pd.DataFrame()
+        rk = rank.compute() if (st["rank"]["on"] or st.get("rank6", {}).get("on")) else pd.DataFrame()
     except Exception as e:  # noqa: BLE001
         out(f"가상매매: 종합 순위 계산 실패({e})")
         rk = pd.DataFrame()
@@ -682,12 +690,18 @@ def daily(out=print) -> dict:
                 master_tk = [r["ticker"] for r in master_candidates(conn, date.today().isoformat())]
         except Exception as e:  # noqa: BLE001
             out(f"가상매매: 스승 눌림목 후보 확인 실패({e})")
-    tick = list(dict.fromkeys(held + ([] if rk.empty else list(rk["ticker"].head(int(st["rank"]["n"])))) + piggy_tk + master_tk))
+    rk6_tk = [] if (rk.empty or "score6" not in rk.columns or not st.get("rank6", {}).get("on")) else list(rk.sort_values(["score6", "urgency"], ascending=False)["ticker"].head(int(st["rank6"]["n"])))
+    tick = list(dict.fromkeys(held + ([] if rk.empty else list(rk["ticker"].head(int(st["rank"]["n"])))) + rk6_tk + piggy_tk + master_tk))
     bars = market.download_daily(tick, period="3mo") if tick else {}  # 3개월: 병합 보정·보관소 겹침 확인에 충분
     closed = update(bars, piggy_out=breakers)
     last = {t: float(df["Close"].dropna().iloc[-1]) for t, df in bars.items() if df is not None and not df.dropna(subset=["Close"]).empty}
     lastday = max((df.index[-1].strftime("%Y-%m-%d") for df in bars.values() if df is not None and len(df)), default=date.today().isoformat())
     bought = {"rank": [] if rk.empty else open_new(rk, last, lastday)}
+    if st.get("rank6", {}).get("on") and not rk.empty:
+        try:
+            bought["rank6"] = open_new(rk, last, lastday, "rank6")
+        except Exception as e:  # noqa: BLE001
+            out(f"가상매매: 순위(⑥ 반영) 매수 실패({e})")
     if st["pick"]["on"]:
         try:
             import pick30
