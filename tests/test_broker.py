@@ -1,7 +1,7 @@
 """💵 broker(4단계 1주 모드 1부, 2026-10-29) — 가짜 토스 클라이언트로: 기본 dry-run(실제 호출 0) · 안전장치 전부 · 1주 지정가 매수 · 체결 → 보유·일지·OCO · TTL 취소 ·
 OCO 체결 감지 · 매도 · 일손실 킬 스위치 · 연속 거부 킬 · 요청 표 · toss.py 주문 메서드(헤더·본문·페이지·429)."""
 import os as _os_qs; _os_qs.environ.setdefault("QS_ROOT", _os_qs.path.dirname(_os_qs.path.dirname(_os_qs.path.abspath(__file__))))  # 프로젝트 폴더(어느 PC 에서나)
-import os, sys, tempfile, json
+import os, sys, tempfile, json, time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 tmp = tempfile.mkdtemp(); os.environ["QUANT_DB"] = os.path.join(tmp, "q.db"); os.environ["SEC_USER_AGENT"] = "T t@e.com"
@@ -240,4 +240,27 @@ with closing(db.connect()) as conn:
     res = json.loads(dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid,)).fetchone())["result"])
     assert res["ok"] and res["accounts"] == [{"accountSeq": 77, "accountNo": "**3-45", "type": "BROKERAGE"}] and res["usd_buying_power"] == 1000.0, res
     assert broker._mask("12345678") == "****5678" and broker._mask(None) == ""
+# 12) ② 겹침 방지 잠금 · tick · 배경 스레드(아주 짧은 주기로 몇 번 돌고 멈춤) · 지금 팔기는 현재가로
+import threading
+with closing(db.connect()) as conn:
+    r = broker.mirror_buy(conn, tc, "piggy", "LCK", 0.5, tp_px=0.7, sl_px=0.45, now=T3 + timedelta(hours=1)); assert r["ok"]
+    tc.fill(r["order_id"], 0.5)
+    assert broker._sync_lock.acquire(blocking=False)
+    try:
+        assert broker.sync(conn, tc, now=T3 + timedelta(hours=1, minutes=1))["filled"] == 0 and broker.process_requests(conn, tc, now=T3) == 0   # 잠겨 있으면 건너뜀
+    finally:
+        broker._sync_lock.release()
+    s = broker.tick(conn, tc, now=T3 + timedelta(hours=1, minutes=2), apply=False); assert s["filled"] == 1 and s["requests"] == 0 and broker.positions(conn)[0]["ticker"] == "LCK"
+    rid = broker.request(conn, "sell", "LCK", "관리 화면")
+    tc.prices = lambda syms: {t: {"price": 0.62} for t in syms}                                   # 가격을 안 주면 토스 현재가로
+    assert broker.process_requests(conn, tc, now=T3 + timedelta(hours=1, minutes=3)) == 1
+    res = json.loads(dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid,)).fetchone())["result"]); assert res["ok"] and abs(tc.calls[-1][4] - 0.6138) < 1e-9, (res, tc.calls[-1])   # 0.62 × 0.99 = 0.6138($1 미만은 소수 4자리)
+    tc.fill(res["order_id"], 0.61)
+    before = broker._bg_runs; stop = threading.Event()
+    th = broker.start_background(tc, interval=0.05, stop=stop, apply=False)
+    for _ in range(60):
+        if broker._bg_runs >= before + 2: break
+        time.sleep(0.05)
+    stop.set(); th.join(2)
+    assert broker._bg_runs >= before + 2 and not th.is_alive() and broker.positions(conn) == [], (broker._bg_runs, before)   # 스레드가 체결(매도)을 반영해 보유를 정리
 print("ALL OK")

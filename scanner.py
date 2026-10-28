@@ -695,6 +695,13 @@ def main() -> None:
     if tc is not None and config.TOSS_WS_ENABLED:
         collector = tossws.FlowCollector(tc._token)
         collector = collector if collector.start() else None
+    if tc is not None:
+        try:  # 💵 실매매 동기화 스레드(2026-10-29 ②): 체결 반영·화면 요청을 스캐너 주기와 별도로 LIVE_SYNC_SEC 마다
+            import broker
+            broker.start_background(tc)
+            log.info("실매매 동기화 스레드: %d초마다", int(getattr(config, "LIVE_SYNC_SEC", 60)))
+        except Exception as e:  # noqa: BLE001
+            log.warning("실매매 동기화 스레드 시작 실패: %s", e)
     fintel_client = shortdata.ShortClient.from_config()  # 공매도: FINRA·IBKR(무료) + Fintel(키가 있을 때만)
     log.info("토스 실시간(체결강도): %s · 공매도: %s · 거래정지(업킷, 백업 나스닥): %s", "사용" if collector else "미사용", fintel_client.label,
              "사용" if config.HALTS_ENABLED else "미사용")

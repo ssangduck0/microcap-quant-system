@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
@@ -30,7 +31,9 @@ DDL = [
     """CREATE TABLE IF NOT EXISTS live_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, ticker TEXT, note TEXT, created_at TEXT, done_at TEXT, result TEXT)""",
 ]
 LIVE_KEYS = ("LIVE_TRADING", "LIVE_ONE_SHARE", "LIVE_STRATEGIES", "LIVE_USD_PER_TRADE", "LIVE_MAX_ORDERS_PER_DAY", "LIVE_MAX_OPEN", "LIVE_MAX_EXPOSURE_USD",
-             "LIVE_MAX_PRICE", "LIVE_MIN_DOLLAR_VOL", "LIVE_LIMIT_SLIP_PCT", "LIVE_ORDER_TTL_MIN", "LIVE_DAILY_LOSS_USD", "LIVE_ACCOUNT_SEQ")
+             "LIVE_MAX_PRICE", "LIVE_MIN_DOLLAR_VOL", "LIVE_LIMIT_SLIP_PCT", "LIVE_ORDER_TTL_MIN", "LIVE_DAILY_LOSS_USD", "LIVE_ACCOUNT_SEQ", "LIVE_SYNC_SEC")
+_sync_lock = threading.Lock()   # sync/process_requests 가 스캐너 주기와 배경 스레드에서 동시에 돌지 않게(겹치면 체결을 두 번 반영할 수 있음)
+_bg_runs = 0
 OPEN_STATES = {"PENDING", "PARTIAL_FILLED", "PENDING_CANCEL", "PENDING_REPLACE"}     # 토스 OrderStatus 중 아직 끝나지 않은 것
 DONE_STATES = {"FILLED", "CANCELED", "REJECTED", "REPLACED", "EXPIRED"}
 BLOCK_DIL = ("ATM", "ELOC", "CB")
@@ -388,10 +391,22 @@ def _close_position(conn, ticker: str, sell_px: float, qty: float, reason: str, 
 
 
 def sync(conn, tc, *, now: datetime | None = None) -> dict:
-    """스캐너 주기마다: 토스 주문 상태를 우리 표에 반영(체결 → 보유·일지·OCO, 취소·거부), TTL 지난 미체결 매수 취소, OCO 체결 감지, 일손실 킬 스위치."""
+    """토스 주문 상태를 우리 표에 반영(체결 → 보유·일지·OCO, 취소·거부), TTL 지난 미체결 매수 취소, OCO 체결 감지, 일손실 킬 스위치.
+    스캐너 주기(≈13분)와 배경 스레드(LIVE_SYNC_SEC, 기본 60초) 양쪽에서 부르며 잠금으로 겹치지 않게 한다(2026-10-29 ②)."""
     ensure(conn)
     now = _now(now)
     out = {"filled": 0, "canceled": 0, "ttl": 0, "oco_fills": 0, "kill": None}
+    if tc is None:
+        return out
+    if not _sync_lock.acquire(blocking=False):
+        return out   # 다른 쪽이 돌고 있음 — 이번엔 건너뜀
+    try:
+        return _sync(conn, tc, now, out)
+    finally:
+        _sync_lock.release()
+
+
+def _sync(conn, tc, now: datetime, out: dict) -> dict:
     if tc is None:
         return out   # 2026-10-29: 실매매가 꺼져/킬 상태여도 이미 나간 주문·보유는 계속 추적(체결 반영·OCO 감지). 새 매수만 스위치가 막는다
     pending = [dict(r) for r in conn.execute("SELECT * FROM live_orders WHERE mode='live' AND status IN ('PENDING','PARTIAL_FILLED','PENDING_CANCEL','PENDING_REPLACE')")]
@@ -518,23 +533,40 @@ def request(conn, kind: str, ticker: str = "", note: str = "") -> int:
 
 
 def process_requests(conn, tc, prices: dict | None = None, *, now: datetime | None = None) -> int:
+    """화면 요청(팔기·킬·1주 왕복·계좌 확인) 처리. 가격이 없으면 토스 현재가를 받는다('지금 팔기' 가 옛 평단가 기준이 되지 않게)."""
     ensure(conn)
+    if not _sync_lock.acquire(blocking=False):
+        return 0
+    try:
+        return _process_requests(conn, tc, prices, now)
+    finally:
+        _sync_lock.release()
+
+
+def _px_now(tc, ticker: str, prices: dict | None):
+    px = (prices or {}).get(ticker)
+    if isinstance(px, dict):
+        px = px.get("price")
+    if px is None and tc is not None:
+        try:
+            px = ((tc.prices([ticker]) or {}).get(ticker) or {}).get("price")
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s 현재가 조회 실패: %s", ticker, e)
+    return px
+
+
+def _process_requests(conn, tc, prices: dict | None, now: datetime | None) -> int:
     n = 0
     for r in conn.execute("SELECT * FROM live_requests WHERE done_at IS NULL ORDER BY id").fetchall():
         r = dict(r)
         if r["kind"] == "kill":
             res = kill(conn, tc, r.get("note") or "화면 요청", now=now)
         elif r["kind"] == "sell":
-            px = (prices or {}).get(r["ticker"])
+            px = _px_now(tc, r["ticker"], prices)
             pos = conn.execute("SELECT avg_px FROM live_positions WHERE ticker=?", (r["ticker"],)).fetchone()
             res = json.dumps(sell(conn, tc, r["ticker"], float(px or (pos["avg_px"] if pos else 0) or 0), r.get("note") or "화면 요청", now=now, force=True), ensure_ascii=False)
         elif r["kind"] == "probe":   # 1주 왕복 테스트(관리 화면): 지금 가격으로 1주 매수 → 체결되면 sync 가 바로 되판다
-            px = (prices or {}).get(r["ticker"])
-            if px is None and tc is not None:
-                try:
-                    px = ((tc.prices([r["ticker"]]) or {}).get(r["ticker"]) or {}).get("price")
-                except Exception as e:  # noqa: BLE001
-                    log.warning("probe 가격 조회 실패: %s", e)
+            px = _px_now(tc, r["ticker"], prices)
             res = json.dumps(mirror_buy(conn, tc, "probe", r["ticker"], float(px), now=now), ensure_ascii=False) if px else "가격 없음"
         elif r["kind"] == "check":   # 읽기만: 계좌·달러 매수가능금액 — 키가 계좌 API 를 쓸 수 있는지(= 주문 권한의 간접 확인). 실주문이 꺼져 있어도 됨
             try:
@@ -616,6 +648,44 @@ def scan_piggy(conn, tc, *, prices: dict | None = None, now: datetime | None = N
 def _mask(no) -> str:
     s = str(no or "")
     return ("*" * max(0, len(s) - 4) + s[-4:]) if s else ""
+
+
+def tick(conn, tc, *, now: datetime | None = None, apply: bool = True) -> dict:
+    """한 번의 동기화: (관리 모드 설정 다시 읽기) → 체결 반영 → 화면 요청 처리. 스캐너 주기와 배경 스레드가 같이 쓴다."""
+    if apply:
+        try:
+            config.apply_overrides()
+        except Exception:  # noqa: BLE001
+            pass
+    s = sync(conn, tc, now=now)
+    s["requests"] = process_requests(conn, tc, now=now)
+    return s
+
+
+def start_background(tc, interval: float | None = None, stop: threading.Event | None = None, apply: bool = True) -> threading.Thread:
+    """스캐너 프로세스 안에서 LIVE_SYNC_SEC(기본 60초)마다 tick 을 도는 데몬 스레드(2026-10-29 ②: 정규장 스캐너 한 주기 ≈13분이라 체결·요청 반영이 늦었음).
+    토스 클라이언트는 잠금이 있어 스레드에서 같이 써도 된다(tossws 수집기와 같은 방식). 반환한 스레드는 stop.set() 으로 멈춘다."""
+    global _bg_runs
+    stop = stop or threading.Event()
+    iv = float(interval if interval is not None else getattr(config, "LIVE_SYNC_SEC", 60))
+
+    def _loop():
+        global _bg_runs
+        while not stop.is_set():
+            stop.wait(iv)
+            if stop.is_set():
+                break
+            try:
+                with closing(db.connect()) as conn:
+                    tick(conn, tc, apply=apply)
+                _bg_runs += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("실매매 배경 동기화 실패: %s", e)
+
+    th = threading.Thread(target=_loop, name="broker-sync", daemon=True)
+    th.stop = stop  # type: ignore[attr-defined]
+    th.start()
+    return th
 
 
 def status(conn, *, now: datetime | None = None) -> dict:
