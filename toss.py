@@ -1,6 +1,7 @@
-"""토스증권 공식 Open API 클라이언트 (읽기 전용).
+"""토스증권 공식 Open API 클라이언트.
 
-시세·종목·랭킹·환율·장 캘린더만 호출합니다. 계좌/주문/조건주문 API는 일부러 구현하지 않았습니다.
+시세·종목·랭킹·환율·장 캘린더 + (2026-10-29, 4단계 1주 모드) 계좌·매수가능금액·주문 생성/취소/조회·조건주문.
+주문 메서드는 broker.py 만 부른다(기본 dry-run, 관리 모드 LIVE_TRADING 을 켜야 실제 호출). 오프라인(테스트) 모드에선 config 가 requests 를 막는다.
 
 운영상 중요한 점 (공식 문서 기준)
   - 토큰은 클라이언트당 1개만 유효: 새로 발급하면 이전 토큰이 즉시 무효화됩니다.
@@ -24,7 +25,9 @@ log = logging.getLogger("toss")
 ET = "America/New_York"
 # 공식 문서의 초당 한도(AUTH 5, MARKET_DATA 15, MARKET_DATA_CHART 20, RANKING 5, STOCK 5, STOCK_ALL 1, MARKET_INFO 3)의 80%만 사용
 MIN_INTERVAL = {"AUTH": 1 / 4, "MARKET_DATA": 1 / 12, "MARKET_DATA_CHART": 1 / 16, "RANKING": 1 / 4,
-                "STOCK": 1 / 4, "STOCK_ALL": 1.25, "MARKET_INFO": 1 / 2.4}
+                "STOCK": 1 / 4, "STOCK_ALL": 1.25, "MARKET_INFO": 1 / 2.4,
+                # 주문 쪽(공식 한도의 80%): ACCOUNT 1 · ASSET 5 · ORDER 10 · ORDER_INFO 6(09:00~09:10 KST 3) · ORDER_HISTORY 5 · CONDITIONAL_ORDER 5 · CONDITIONAL_ORDER_HISTORY 10
+                "ACCOUNT": 1.25, "ASSET": 1 / 4, "ORDER": 1 / 8, "ORDER_INFO": 1 / 2.4, "ORDER_HISTORY": 1 / 4, "CONDITIONAL_ORDER": 1 / 4, "CONDITIONAL_ORDER_HISTORY": 1 / 8}
 TOKEN_RELATED = {"expired-token", "token-revoked", "invalid-token"}
 BLOCK_SECONDS = 300  # 인증 실패(IP 미허용 등) 후 이 시간 동안은 재시도하지 않음 (실패 호출 폭주 방지)
 
@@ -117,6 +120,109 @@ class TossClient:
                 continue
             raise err
         raise TossError(429, "rate-limit-exceeded", "재시도 횟수를 초과했습니다.")
+
+    def _call(self, method: str, group: str, path: str, *, params: dict | None = None, json: dict | None = None, account: int | None = None):
+        """GET 외(POST/DELETE) 공통. 계좌·주문 API 는 X-Tossinvest-Account 헤더 필요. 재시도 규칙은 _get 과 같되, 주문 생성 POST 는 429 라도 멱등키가 있을 때만 재시도."""
+        refreshed = False
+        for attempt in range(4):
+            self._wait(group)
+            headers = {"Authorization": f"Bearer {self._token()}"}
+            if account is not None:
+                headers["X-Tossinvest-Account"] = str(account)
+            fn = getattr(self.s, method.lower())
+            kw = {"params": params, "timeout": 15, "headers": headers}
+            if json is not None:
+                kw["json"] = json
+            r = fn(f"{self.base}{path}", **kw)
+            if r.status_code in (200, 201):
+                j = r.json() if r.text else {}
+                return j.get("result", j)
+            err = self._error(r)
+            if r.status_code == 401 and err.code in TOKEN_RELATED and not refreshed:
+                refreshed = True
+                self._token(force=True)
+                continue
+            idem = bool((json or {}).get("clientOrderId")) or method.upper() != "POST"
+            if r.status_code == 429 and attempt < 3 and idem:
+                try:
+                    wait = float(r.headers.get("Retry-After", 2 ** attempt))
+                except ValueError:
+                    wait = 2 ** attempt
+                self.sleep(min(wait, 10))
+                continue
+            raise err
+        raise TossError(429, "rate-limit-exceeded", "재시도 횟수를 초과했습니다.")
+
+    # ------------------------------------------------------------ 계좌·주문(2026-10-29, broker 전용)
+    def accounts(self) -> list[dict]:
+        """[{accountSeq, accountNo, accountType}] — accountSeq 를 주문 헤더에 쓴다(ACCOUNT 한도 1/s → 한 번만 부를 것)."""
+        res = self._call("GET", "ACCOUNT", "/api/v1/accounts")
+        return list(res.get("accounts", res) if isinstance(res, dict) else (res or []))
+
+    def buying_power(self, account: int, currency: str = "USD") -> dict:
+        """{currency, cashBuyingPower} — 현금 기준 매수 가능 금액."""
+        return self._call("GET", "ORDER_INFO", "/api/v1/buying-power", params={"currency": currency}, account=account) or {}
+
+    def sellable_quantity(self, account: int, symbol: str) -> dict:
+        return self._call("GET", "ORDER_INFO", "/api/v1/sellable-quantity", params={"symbol": symbol}, account=account) or {}
+
+    def order_create(self, account: int, symbol: str, side: str, qty, price=None, *, order_type: str = "LIMIT", tif: str = "DAY", client_order_id: str | None = None) -> dict:
+        """주문 생성 → {orderId, clientOrderId}. 지정가는 price 필수, 시장가는 price 없이. 수량은 주 단위(소수점은 미국 시장가 매도만)."""
+        body = {"symbol": symbol, "side": side, "orderType": order_type, "quantity": str(qty)}
+        if order_type == "LIMIT":
+            if price is None:
+                raise ValueError("지정가는 price 가 필요합니다")
+            body["price"] = str(price)
+        if tif and tif != "DAY":
+            body["timeInForce"] = tif
+        if client_order_id:
+            body["clientOrderId"] = client_order_id
+        return self._call("POST", "ORDER", "/api/v1/orders", json=body, account=account) or {}
+
+    def order_cancel(self, account: int, order_id: str) -> dict:
+        return self._call("POST", "ORDER", f"/api/v1/orders/{order_id}/cancel", json={}, account=account) or {}
+
+    def order(self, account: int, order_id: str) -> dict:
+        return self._call("GET", "ORDER_HISTORY", f"/api/v1/orders/{order_id}", account=account) or {}
+
+    def orders(self, account: int, status: str = "OPEN", *, symbol: str | None = None, since: str | None = None, until: str | None = None, limit: int = 100, max_pages: int = 5) -> list[dict]:
+        """주문 목록. status OPEN(대기 전부) 또는 CLOSED(끝난 것, 커서로 최대 max_pages 쪽). since/until = YYYY-MM-DD(KST, orderedAt 기준)."""
+        out, cursor = [], None
+        for _ in range(max_pages if status == "CLOSED" else 1):
+            params = {"status": status}
+            if symbol:
+                params["symbol"] = symbol
+            if since:
+                params["from"] = since
+            if until:
+                params["to"] = until
+            if status == "CLOSED":
+                params["limit"] = limit
+                if cursor:
+                    params["cursor"] = cursor
+            res = self._call("GET", "ORDER_HISTORY", "/api/v1/orders", params=params, account=account) or {}
+            rows = res.get("orders", []) if isinstance(res, dict) else list(res)
+            out += rows
+            cursor = res.get("nextCursor") if isinstance(res, dict) else None
+            if not (isinstance(res, dict) and res.get("hasNext") and cursor):
+                break
+        return out
+
+    def cond_create(self, account: int, body: dict) -> dict:
+        """조건주문 생성(SINGLE/OCO/OTO) → {conditionalOrderId, clientOrderId}. body 는 broker.oco_body 가 만든다."""
+        b = dict(body)
+        b["quantity"] = str(b["quantity"])
+        for k in ("first", "second"):
+            if k in b and b[k]:
+                b[k] = {kk: (str(v) if kk in ("triggerPrice", "orderPrice") else v) for kk, v in b[k].items()}
+        return self._call("POST", "CONDITIONAL_ORDER", "/api/v1/conditional-orders", json=b, account=account) or {}
+
+    def cond_cancel(self, account: int, cond_id: str) -> dict:
+        return self._call("DELETE", "CONDITIONAL_ORDER", f"/api/v1/conditional-orders/{cond_id}", account=account) or {}
+
+    def cond_orders(self, account: int) -> list[dict]:
+        res = self._call("GET", "CONDITIONAL_ORDER_HISTORY", "/api/v1/conditional-orders", account=account) or {}
+        return res.get("conditionalOrders", res.get("orders", [])) if isinstance(res, dict) else list(res)
 
     # ------------------------------------------------------------ 시세
     def prices(self, symbols: list[str]) -> dict[str, dict]:

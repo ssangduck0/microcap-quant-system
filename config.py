@@ -201,6 +201,20 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "RANK_W_MS": (float, 0.0, 1.0, "순위 가중치", "강도: 멀티 시그널 비중"),
     "RANK_W_NEWS": (float, 0.0, 1.0, "순위 가중치", "강도: 공시 호재 비중"),
     "RANK_W_INS": (float, 0.0, 1.0, "순위 가중치", "강도: 내부자 매수 비중"),
+    # 💵 실매매(4단계 1주 모드, 2026-10-29 — broker.py). 기본 전부 꺼짐·1주. 설계: docs/broker_design_2026-10.md
+    "LIVE_TRADING": (bool, None, None, "실매매", "💵 실주문 스위치(끄면 dry-run: 기록만). 관리 모드에서 두 단계 확인 뒤 켬"),
+    "LIVE_ONE_SHARE": (bool, None, None, "실매매", "1주 모드: 금액과 상관없이 종목당 1주만(11월 말 결정 뒤 끄면 아래 금액 적용)"),
+    "LIVE_STRATEGIES": (str, None, None, "실매매", "실주문을 내는 가상매매 전략(쉼표로): piggy · rank · pick · master · close · after"),
+    "LIVE_USD_PER_TRADE": (float, 10.0, 500.0, "실매매", "1주 모드가 꺼졌을 때 종목당 매수 금액($)"),
+    "LIVE_MAX_ORDERS_PER_DAY": (int, 1, 10, "실매매", "하루 매수 주문 상한(어뷰징 방지)"),
+    "LIVE_MAX_OPEN": (int, 1, 10, "실매매", "동시 보유 종목 상한"),
+    "LIVE_MAX_EXPOSURE_USD": (float, 50.0, 5000.0, "실매매", "보유 평가액 + 미체결 매수 합계 상한($)"),
+    "LIVE_MAX_PRICE": (float, 0.5, 50.0, "실매매", "이 주가($) 넘는 종목은 안 삼"),
+    "LIVE_MIN_DOLLAR_VOL": (float, 0.0, 10000000.0, "실매매", "20일 평균 거래대금($) 미만이면 안 삼"),
+    "LIVE_LIMIT_SLIP_PCT": (float, 0.2, 3.0, "실매매", "지정가 여유폭(%): 매수 +, 매도 −"),
+    "LIVE_ORDER_TTL_MIN": (int, 5, 240, "실매매", "미체결 매수를 취소하기까지(분). 그날 재시도 안 함"),
+    "LIVE_DAILY_LOSS_USD": (float, 5.0, 1000.0, "실매매", "오늘 실현손실이 이 금액($)을 넘으면 킬 스위치"),
+    "LIVE_ACCOUNT_SEQ": (str, None, None, "실매매", "주문 계좌 accountSeq(비우면 첫 종합매매 계좌)"),
     "RANK_NEWS_EVIDENCE": (bool, None, None, "순위 가중치", "🧮 공시 점수를 과거 성과(이벤트 연구) 기준으로 — 검증 통과 때만, 끄면 예전 호재/악재 규칙"),
     "AI_AUTO_CHECK": (bool, None, None, "기능", "🔀 새 덕구 보고서가 들어오면 자동 교차검증"),
     "AI_MODEL": (str, None, None, "AI", "🤖 AI 모델(Opus 는 더 정확하지만 비용 약 2배)"),
@@ -209,6 +223,10 @@ PT_TOP_N, PT_TP, PT_SL, PT_HOLD, PT_USD = 3, 20.0, 10.0, 3, 1000.0          # �
 PIGGY_AUTO_ADD, PIGGY_AUTO_N, PIGGY_AUTO_SCORE, PIGGY_AUTO_BOUNCES, PIGGY_AUTO_DVOL, PIGGY_MAX_KRW = True, 20, 60, 2, 20000.0, 1000.0   # 🐷 저금통 자동 담기 기준(2026-10-27)
 RANK_W_STRENGTH, RANK_W_ACC, RANK_W_PR, RANK_W_SQ, RANK_W_MS, RANK_W_NEWS, RANK_W_INS = 0.7, 0.25, 0.20, 0.20, 0.15, 0.10, 0.10   # 🏁 순위 가중치
 RANK_NEWS_EVIDENCE = True   # 🧮 공시 점수 = 과거 성과 기반(evscore, 검증 통과 때만)
+# 💵 실매매 기본값(전부 안전한 쪽): 꺼짐 · 1주 모드 · 저금통만 · 하루 3건 · 3종목/$500 · $5 이하 · 거래대금 $50k · 여유 1% · 30분 TTL · 일손실 $50
+LIVE_TRADING, LIVE_ONE_SHARE, LIVE_STRATEGIES, LIVE_USD_PER_TRADE = False, True, "piggy", 100.0
+LIVE_MAX_ORDERS_PER_DAY, LIVE_MAX_OPEN, LIVE_MAX_EXPOSURE_USD, LIVE_MAX_PRICE, LIVE_MIN_DOLLAR_VOL = 3, 3, 500.0, 5.0, 50000.0
+LIVE_LIMIT_SLIP_PCT, LIVE_ORDER_TTL_MIN, LIVE_DAILY_LOSS_USD, LIVE_ACCOUNT_SEQ = 1.0, 30, 50.0, ""
 GUEST_ALERTS = os.environ.get("GUEST_ALERTS", "1") != "0"                      # 👥 방문객 접속 알림
 AI_MONTHLY_BUDGET_KRW = int(os.environ.get("AI_MONTHLY_BUDGET_KRW", "10000"))   # 🤖 AI 월 예산(원)
 AI_AUTO_CHECK = os.environ.get("AI_AUTO_CHECK", "1") != "0"                     # 🔀 새 덕구 보고서 자동 교차검증
