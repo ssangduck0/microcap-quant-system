@@ -54,6 +54,13 @@ def strategies() -> set[str]:
     return {s.strip() for s in str(getattr(config, "LIVE_STRATEGIES", "") or "").split(",") if s.strip()}
 
 
+def _regular(now: datetime | None = None) -> bool:
+    """미국 정규장(동부 09:30~16:00, 평일)인지 — scanner.is_regular_session 과 같은 규칙(순환 import 를 피해 여기 둠)."""
+    from zoneinfo import ZoneInfo
+    et = _now(now).astimezone(ZoneInfo("America/New_York"))
+    return et.weekday() < 5 and (9, 30) <= (et.hour, et.minute) < (16, 0)
+
+
 def killed() -> str | None:
     """킬 스위치가 켜져 있으면 그 이유(날짜 포함), 아니면 None."""
     m = db.get_meta("live:kill")
@@ -147,13 +154,13 @@ def can_buy(conn, strategy: str, ticker: str, ref_px: float, qty: int, *, diluti
             dollar_vol: float | None = None, buying_power: float | None = None, day: str | None = None) -> tuple[bool, str]:
     """안전장치 전부. (True, "") 또는 (False, 이유)."""
     day = day or _day()
-    if strategy not in strategies():
+    if strategy != "probe" and strategy not in strategies():
         return False, f"전략 '{strategy}' 은 실매매 대상이 아님"
     if qty < 1:
         return False, "1주 미만"
     if ref_px is None or ref_px <= 0:
         return False, "가격 없음"
-    if ref_px > float(config.LIVE_MAX_PRICE):
+    if strategy != "probe" and ref_px > float(config.LIVE_MAX_PRICE):
         return False, f"주가 ${ref_px:.2f} > 상한 ${float(config.LIVE_MAX_PRICE):g}"
     if dilution in BLOCK_DIL:
         return False, f"희석 {dilution}"
@@ -204,7 +211,7 @@ def mirror_buy(conn, tc, strategy: str, ticker: str, ref_px: float, *, tp_px: fl
     global _fails
     ensure(conn)
     t, day = ticker.upper(), day or _day(now)
-    if strategy not in strategies():
+    if strategy != "probe" and strategy not in strategies():
         return {"ok": False, "mode": "off", "why": "전략 꺼짐", "coid": None}
     qty = quantity_for(ref_px)
     lp = limit_price(ref_px, "BUY") if ref_px else None
@@ -403,9 +410,13 @@ def sync(conn, tc, *, now: datetime | None = None) -> dict:
             out["filled"] += 1
             if r["side"] == "BUY":
                 _open_position(conn, r, o, now)
-                p = conn.execute("SELECT * FROM live_positions WHERE ticker=?", (r["ticker"],)).fetchone()
-                if p:
-                    arm_exit(conn, tc, dict(p), now=now)
+                if r.get("strategy") == "probe":   # 1주 왕복 테스트: 익절·손절 대신 체결가 −여유% 지정가로 바로 되판다
+                    conn.commit()
+                    sell(conn, tc, r["ticker"], float(ap or r["limit_px"]), "1주 왕복 테스트 매도", now=now)
+                else:
+                    p = conn.execute("SELECT * FROM live_positions WHERE ticker=?", (r["ticker"],)).fetchone()
+                    if p:
+                        arm_exit(conn, tc, dict(p), now=now)
             else:
                 _close_position(conn, r["ticker"], float(ap or r["limit_px"]), fq or float(r["qty"]), r.get("note") or "매도", now)
         elif stt in ("CANCELED", "REJECTED", "EXPIRED"):
@@ -494,12 +505,78 @@ def process_requests(conn, tc, prices: dict | None = None, *, now: datetime | No
             px = (prices or {}).get(r["ticker"])
             pos = conn.execute("SELECT avg_px FROM live_positions WHERE ticker=?", (r["ticker"],)).fetchone()
             res = json.dumps(sell(conn, tc, r["ticker"], float(px or (pos["avg_px"] if pos else 0) or 0), r.get("note") or "화면 요청", now=now), ensure_ascii=False)
+        elif r["kind"] == "probe":   # 1주 왕복 테스트(관리 화면): 지금 가격으로 1주 매수 → 체결되면 sync 가 바로 되판다
+            px = (prices or {}).get(r["ticker"])
+            if px is None and tc is not None:
+                try:
+                    px = ((tc.prices([r["ticker"]]) or {}).get(r["ticker"]) or {}).get("price")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("probe 가격 조회 실패: %s", e)
+            res = json.dumps(mirror_buy(conn, tc, "probe", r["ticker"], float(px), now=now), ensure_ascii=False) if px else "가격 없음"
         else:
             res = "모르는 요청"
         conn.execute("UPDATE live_requests SET done_at=?, result=? WHERE id=?", (_iso(_now(now)), str(res)[:300], r["id"]))
         n += 1
     conn.commit()
     return n
+
+
+def piggy_targets(conn) -> list[dict]:
+    """🐷 저금통 종목 + 박스(가상매매 open_piggy 와 같은 계산) + 금지 목록 재료(희석 상태 · ⑥ 주식수 변동 · 20일 거래대금)."""
+    import piggy
+    import shares
+    mm = piggy.metrics_map()
+    out = []
+    for r in piggy.items().to_dict("records"):
+        t = r["ticker"]
+        lo, hi, _src = piggy.box_of(r, mm.get(t))
+        snap = conn.execute("SELECT dilution_status, avg_dollar_vol FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
+        cls6 = None
+        try:
+            sc = shares.change(t, conn)
+            if sc:
+                p6 = round(sc["pct"], 6)
+                cls6 = "bad" if p6 > 20 else "warn" if p6 > 10 else "ok"
+        except Exception:  # noqa: BLE001
+            cls6 = None
+        out.append({"ticker": t, "lo": lo, "hi": hi, "category": r.get("category"), "dilution": snap["dilution_status"] if snap else None,
+                    "dollar_vol": snap["avg_dollar_vol"] if snap else None, "share_cls": cls6})
+    return out
+
+
+def scan_piggy(conn, tc, *, prices: dict | None = None, now: datetime | None = None) -> dict:
+    """스캐너 주기마다(미국 정규장만): 저금통 종목이 🟢 저점 구간이면 1주 지정가 매수 — 가상매매 open_piggy 와 같은 조건, 익절 = 박스 상단 · 손절 = 박스 하단 −5%.
+    종목당 하루 한 번만 시도(dry 든 live 든 live_orders 에 오늘 기록이 있으면 건너뜀). prices 가 없으면 토스 현재가를 받는다(한 번에 200종목)."""
+    out = {"checked": 0, "bought": [], "dry": [], "skipped": {}}
+    if "piggy" not in strategies() or not _regular(now):
+        return out
+    import piggy
+    ensure(conn)
+    tg = piggy_targets(conn)
+    if not tg:
+        return out
+    if prices is None:
+        prices = tc.prices([x["ticker"] for x in tg]) if tc is not None else {}
+    day = _day(now)
+    for x in tg:
+        t = x["ticker"]
+        p = prices.get(t)
+        px = p.get("price") if isinstance(p, dict) else p
+        if not px or not x["lo"] or not x["hi"]:
+            continue
+        out["checked"] += 1
+        if piggy.zone(float(px), x["lo"], x["hi"]) != "🟢 저점 구간":
+            continue
+        if conn.execute("SELECT 1 FROM live_orders WHERE ticker=? AND day=? AND side='BUY'", (t, day)).fetchone():
+            continue   # 오늘 이미 시도(기록·주문·거부) — 하루 한 번
+        r = mirror_buy(conn, tc, "piggy", t, float(px), tp_px=x["hi"], sl_px=x["lo"] * 0.95, dilution=x["dilution"], share_cls=x["share_cls"], dollar_vol=x["dollar_vol"], day=day, now=now)
+        if r.get("ok") and r.get("mode") == "live":
+            out["bought"].append(t)
+        elif r.get("ok") and r.get("mode") == "dry":
+            out["dry"].append(t)
+        else:
+            out["skipped"][t] = r.get("why")
+    return out
 
 
 def status(conn, *, now: datetime | None = None) -> dict:

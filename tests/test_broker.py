@@ -174,4 +174,43 @@ try:
     cl.order_create(77, "AAA", "BUY", 1, None); raise AssertionError("지정가인데 가격 없이 통과")
 except ValueError:
     pass
+# 9) 정규장 저금통 저점 구간 → 1주 매수(dry 는 하루 한 번 기록, 라이브는 주문 · 희석 ATM 은 금지) · 장 밖·전략 꺼짐이면 아무것도 안 함
+import piggy
+piggy.ensure_tables(); piggy.add("PGA", "좁은 박스(15~30%)", 1.00, 1.30); piggy.add("PGB", "좁은 박스(15~30%)", 2.00, 2.50); piggy.add("PGC", "좁은 박스(15~30%)", 3.00, 4.00)
+now_ = db.utcnow_iso()
+with closing(db.connect()) as conn:
+    for t, dil, dv in (("PGA", "CLEAN", 90000.0), ("PGB", "ATM", 90000.0), ("PGC", "CLEAN", 90000.0)):
+        db.upsert_snapshot(conn, {"date": D, "ticker": t, "exchange": "NASDAQ", "first_seen": now_, "last_seen": now_, "price": 1.0, "high_20d": 2.0, "low_20d": 0.9, "drawdown_pct": -40.0,
+                                  "volume_mult": 2.0, "buy_pressure": 55.0, "float_shares": 3e7, "atr14": 0.01, "quant_score": 50.0, "quant_detail": "{}", "pump_score": 40.0, "pump_detail": '{"checks":[]}',
+                                  "dilution_status": dil, "excluded": 0, "avg_dollar_vol": dv})
+    PX = {"PGA": {"price": 1.02}, "PGB": {"price": 2.05}, "PGC": {"price": 3.60}}          # PGA·PGB 저점 구간, PGC 는 중간
+    T1 = datetime(2026, 10, 30, 14, 0, tzinfo=timezone.utc)                               # 금요일 10:00 ET(정규장)
+    assert broker._regular(T1) and not broker._regular(datetime(2026, 10, 30, 2, 0, tzinfo=timezone.utc)) and not broker._regular(datetime(2026, 11, 1, 15, 0, tzinfo=timezone.utc))
+    assert broker.scan_piggy(conn, tc, prices=PX, now=datetime(2026, 10, 30, 2, 0, tzinfo=timezone.utc)) == {"checked": 0, "bought": [], "dry": [], "skipped": {}}   # 장 밖
+    config.LIVE_TRADING = False
+    r = broker.scan_piggy(conn, tc, prices=PX, now=T1); assert r["checked"] == 3 and r["dry"] == ["PGA"] and r["skipped"] == {"PGB": "희석 ATM"} and r["bought"] == [], (r, broker.strategies(), broker.piggy_targets(conn), piggy.items().to_dict("records"))
+    assert broker.scan_piggy(conn, tc, prices=PX, now=T1 + timedelta(minutes=1)) == {"checked": 3, "bought": [], "dry": [], "skipped": {}}   # 같은 날 두 번 안 함
+    rows = db.read_df("SELECT ticker, status, mode, note FROM live_orders WHERE day='2026-10-30'"); assert sorted(rows["ticker"]) == ["PGA", "PGB"] and set(rows["mode"]) == {"dry"}
+    config.LIVE_TRADING = True
+    T2 = T1 + timedelta(days=3, hours=1)                                                    # 월요일 11/2 15:00 UTC = 10:00 EST(11/1 에 서머타임 끝 → 14:00 UTC 는 09:00 이라 장 밖!)
+    n_calls = len(tc.calls)
+    r = broker.scan_piggy(conn, tc, prices=PX, now=T2); assert r["bought"] == ["PGA"] and r["skipped"] == {"PGB": "희석 ATM"}, r
+    assert tc.calls[n_calls][0] == "create" and tc.calls[n_calls][1:4] == ("PGA", "BUY", 1) and abs(tc.calls[n_calls][4] - 1.03) < 1e-9   # 1.02 × 1.01 = 1.0302 → $1 이상은 소수 2자리 절삭
+    oid = tc.calls[n_calls][5]; row = dict(conn.execute("SELECT * FROM live_orders WHERE client_order_id=?", (oid,)).fetchone()); assert json.loads(row["note"]) == {"tp": 1.3, "sl": 0.95}
+    tc.fill(row["order_id"], 1.02); broker.sync(conn, tc, now=T2 + timedelta(minutes=1))
+    pos = broker.positions(conn); assert [p["ticker"] for p in pos] == ["PGA"] and pos[0]["tp_px"] == 1.3 and abs(pos[0]["sl_px"] - 0.95) < 1e-9 and pos[0]["cond_id"], pos
+    config.LIVE_STRATEGIES = ""; assert broker.scan_piggy(conn, tc, prices=PX, now=T2)["checked"] == 0; config.LIVE_STRATEGIES = "piggy"
+# 10) 1주 왕복 테스트(probe): 요청 표 → 주가 상한·전략 목록 무시하고 1주 매수 → 체결 → OCO 대신 바로 되팔기 → 체결 → 정리
+with closing(db.connect()) as conn:
+    T3 = T2 + timedelta(hours=1)
+    rid = broker.request(conn, "probe", "aapl", "관리 화면 1주 왕복")
+    n_calls, n_cond = len(tc.calls), len(tc.cond)
+    assert broker.process_requests(conn, tc, {"AAPL": 250.0}, now=T3) == 1
+    res = json.loads(dict(conn.execute("SELECT result FROM live_requests WHERE id=?", (rid,)).fetchone())["result"]); assert res["ok"] and res["mode"] == "live" and res["qty"] == 1 and res["limit_px"] == 252.5, res
+    tc.fill(res["order_id"], 250.0)
+    s = broker.sync(conn, tc, now=T3 + timedelta(minutes=1)); assert s["filled"] == 1 and len(tc.cond) == n_cond and tc.calls[-1][0] == "create" and tc.calls[-1][2] == "SELL" and tc.calls[-1][4] == 247.5, (s, tc.calls[-1])
+    sell_oid = tc.calls[-1][5]; row = dict(conn.execute("SELECT * FROM live_orders WHERE client_order_id=?", (sell_oid,)).fetchone()); tc.fill(row["order_id"], 249.0)
+    s = broker.sync(conn, tc, now=T3 + timedelta(minutes=2)); assert s["filled"] == 1 and all(p["ticker"] != "AAPL" for p in broker.positions(conn))
+    cl = db.read_df("SELECT * FROM live_closed WHERE ticker='AAPL'"); assert len(cl) == 1 and abs(cl.iloc[0]["pnl_usd"] + 1.0) < 1e-9 and cl.iloc[0]["reason"] == "1주 왕복 테스트 매도"
+    assert any("1주 왕복" in x or "AAPL" in x for x in sent)
 print("ALL OK")

@@ -503,6 +503,16 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
                 log.info("저금통 알림: %s", msg.splitlines()[0])
         except Exception as e:  # noqa: BLE001
             log.warning("저금통 알림 실패: %s", e)
+    if tc is not None:
+        try:  # 💵 실매매(4단계 1주 모드, 2026-10-29 — broker.py): 주문 동기화 → 화면 요청(팔기·킬·1주 왕복) → 정규장이면 저금통 저점 구간 1주 매수(기본 dry-run 기록만)
+            import broker
+            broker.sync(conn, tc)
+            broker.process_requests(conn, tc, {t: m["price"] for t, m in passing if m.get("price")})
+            _lv = broker.scan_piggy(conn, tc)
+            if _lv.get("bought") or _lv.get("dry"):
+                log.info("실매매: 매수 %s · dry 기록 %s", _lv["bought"], _lv["dry"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("실매매 처리 실패: %s", e)
     try:  # Cowork 자동 공시분석 결과(inbox) 가져오기
         fx = forensic.import_inbox()
         if fx.get("imported") and config.AI_AUTO_CHECK and os.environ.get("ANTHROPIC_API_KEY", "").strip():

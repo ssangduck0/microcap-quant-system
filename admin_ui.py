@@ -101,6 +101,9 @@ def render() -> None:
     st.divider()
     render_papertrade()
     st.divider()
+    import broker_ui   # 💵 실매매(4단계 1주 모드, 2026-10-29)
+    broker_ui.render()
+    st.divider()
     l, r = st.columns(2)
     with l:
         st.markdown("**📌 항상 감시할 종목** (manual_tickers.txt — 한 줄에 하나)")
