@@ -63,13 +63,21 @@ def render() -> None:
                 st.rerun()
             # ---- 보유·미체결
             if s["positions"]:
-                st.markdown("**보유(실계좌)**")
+                st.markdown("**보유(실계좌)** — 팔 종목을 체크하고 한 번에(2026-10-29: 한 줄씩 누르던 것을 고침)")
+                picked = []
                 for p in s["positions"]:
-                    x, y = st.columns([5, 1])
-                    x.write(f"{p['ticker']} · {p['qty']:g}주 @${p['avg_px']:g} · 익절 ${p.get('tp_px') or 0:g} / 손절 ${p.get('sl_px') or 0:g} · OCO {p.get('cond_id') or '없음'} · {p.get('strategy')}")
-                    if y.button("지금 팔기", key=f"live_sell_{p['ticker']}"):
-                        broker.request(conn, "sell", p["ticker"], "관리 화면")
-                        st.info(f"{p['ticker']} 매도 요청 — 스캐너가 1분 안에 지정가(−{lim['LIVE_LIMIT_SLIP_PCT']:g}%)로 냅니다.")
+                    if st.checkbox(f"{p['ticker']} · {p['qty']:g}주 @${p['avg_px']:g} · 익절 ${p.get('tp_px') or 0:g} / 손절 ${p.get('sl_px') or 0:g} · OCO {p.get('cond_id') or '없음'} · {p.get('strategy')}",
+                                   key=f"live_pick_{p['ticker']}"):
+                        picked.append(p["ticker"])
+                b1, b2, _ = st.columns([1, 1, 3])
+                if b1.button(f"선택한 {len(picked)}종목 지금 팔기", key="live_sell_sel", disabled=not picked):
+                    for t in picked:
+                        broker.request(conn, "sell", t, "관리 화면(선택)")
+                    st.info(f"{', '.join(picked)} 매도 요청 — 스캐너가 다음 주기에 OCO 를 취소하고 지정가(−{lim['LIVE_LIMIT_SLIP_PCT']:g}%)로 냅니다.")
+                if b2.button(f"전부 팔기({len(s['positions'])}종목)", key="live_sell_all"):
+                    for p in s["positions"]:
+                        broker.request(conn, "sell", p["ticker"], "관리 화면(전부)")
+                    st.info("보유 전부 매도 요청 — 스캐너가 다음 주기에 냅니다.")
             else:
                 st.caption("보유 없음")
             if s["pending"]:

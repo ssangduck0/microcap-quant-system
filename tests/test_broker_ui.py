@@ -45,6 +45,21 @@ assert kinds == ["probe", "check", "kill"] and config.LIVE_TRADING is False and 
 db.set_meta("live:kill", "2026-10-29 테스트"); at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception
 assert any(b.key == "live_unkill" for b in at.button) and not any(b.key == "live_kill" for b in at.button)
 [b for b in at.button if b.key == "live_unkill"][0].click().run(); assert not broker.killed()
+# 보유 선택 팔기 · 전부 팔기(2026-10-29): 체크한 것만 요청, 전부 버튼은 모두
+with closing(db.connect()) as conn:
+    conn.executemany("INSERT OR REPLACE INTO live_positions (ticker, strategy, qty, avg_px, tp_px, sl_px, cond_id, opened_at, buy_coid) VALUES (?,?,?,?,?,?,?,?,?)",
+                     [("AAA", "piggy", 1, 0.5, 0.7, 0.45, "C1", "2026-10-28T16:00:00+00:00", "k1"), ("BBB", "piggy", 1, 1.0, 1.3, 0.9, "C2", "2026-10-28T16:00:00+00:00", "k2")]); conn.commit()
+at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception
+assert [b for b in at.button if b.key == "live_sell_sel"][0].disabled and not any(b.key.startswith("live_sell_AAA") for b in at.button)
+at.checkbox(key="live_pick_BBB").check().run(); assert not [b for b in at.button if b.key == "live_sell_sel"][0].disabled
+[b for b in at.button if b.key == "live_sell_sel"][0].click().run(); assert not at.exception
+with closing(db.connect()) as conn:
+    assert [tuple(r) for r in conn.execute("SELECT kind, ticker FROM live_requests WHERE id>3 ORDER BY id")] == [("sell", "BBB")]
+[b for b in at.button if b.key == "live_sell_all"][0].click().run(); assert not at.exception
+with closing(db.connect()) as conn:
+    assert [tuple(r) for r in conn.execute("SELECT kind, ticker FROM live_requests WHERE id>3 ORDER BY id")] == [("sell", "BBB"), ("sell", "AAA"), ("sell", "BBB")]
+    conn.execute("DELETE FROM live_positions"); conn.commit()
+at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception
 # 끄기
 at.text_input(key="live_confirm").set_value(broker_ui.CONFIRM).run(); [b for b in at.button if b.key == "live_on2"][0].click().run()
 assert config.LIVE_TRADING is True; [b for b in at.button if b.key == "live_off"][0].click().run(); assert config.LIVE_TRADING is False and config.overrides().get("LIVE_TRADING") is None
