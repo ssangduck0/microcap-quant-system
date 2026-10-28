@@ -35,6 +35,11 @@ with closing(db.connect()) as conn:
     db.upsert_snapshot(conn, base_snap("NOW1", LATEST, day_change_pct=-22.0, pre_dd_pct=-30.0, avg_dollar_vol=2e6, volume_mult=4.0, win_p=0.41, win_score=83.0, win_model="high_10"))
     db.upsert_snapshot(conn, base_snap("NOW2", LATEST, day_change_pct=-4.0, pre_dd_pct=-30.0, avg_dollar_vol=2e6, volume_mult=1.0))          # 등락률 -10% 미만 -> 점수 없음
     db.upsert_snapshot(conn, base_snap("NOW3", LATEST, day_change_pct=None))                                                           # 이전 버전 데이터
+# 🧠 신호 승률 모델(2단계)도 같은 models 표에 들어온다(2026-10-28 서버에서 이것 때문에 탭이 KeyError 로 죽었음) → 선택 상자엔 안 보이고 3절에 따로 나와야 함
+db.save_model("sigmodel", {"name": "sigmodel", "n_train": 1200, "n_test": 300, "cutoff": "2026-09-01", "n_tickers": 150, "from": "2024-10-01", "to": "2026-10-20", "fitted_at": "2026-10-25T00:00:00",
+    "targets": {"p30": {"horizon": 20, "target_pct": 30, "auc_train": 0.71, "auc_test": 0.64, "base_rate_test": 12.0, "base_rate_train": 11.0, "lift_top": 2.1, "weights": [{"특징": "급등 폭", "key": "spike", "가중치": 0.8}, {"특징": "거래량 배수", "key": "vol", "가중치": -0.3}],
+                        "deciles": [{"분위": 1, "표본": 30, "예측 확률(%)": 3.0, "실제 적중(%)": 2.5}, {"분위": 10, "표본": 30, "예측 확률(%)": 30.0, "실제 적중(%)": 25.0}]},
+                "p10": {"horizon": 5, "target_pct": 10, "auc_train": 0.66, "auc_test": 0.60, "base_rate_test": 20.0, "base_rate_train": 19.0, "lift_top": 1.6, "weights": [{"특징": "급등 폭", "key": "spike", "가중치": 0.5}], "deciles": []}}})
 print("db ready")
 
 from streamlit.testing.v1 import AppTest
@@ -60,6 +65,8 @@ ms, info = card("NOW3"); print("NOW3:", info); assert info
 mm = {m.label: m.value for m in at.metric}
 print("검증 탭 지표:", {k: v for k, v in mm.items() if k.startswith(("OOS","기준 성공","상위 20","학습 구간","결과가 확인","전체 성공"))})
 assert "OOS AUC" in mm and float(mm["OOS AUC"]) > 0.6
+_sb = at.selectbox[[s.label for s in at.selectbox].index("검증할 모델")]; assert not any("sigmodel" in o for o in _sb.options) and any(o.startswith("high_10") for o in _sb.options) and any(o.startswith("close_0") for o in _sb.options), _sb.options   # options 는 표시 글
+assert any("🧠 신호 승률 모델" in m.value for m in at.markdown) and any(m.label == "검증 AUC" and m.value == "0.640" for m in at.metric) and any(m.label == "상위 10% 배수" and m.value == "×2.10" for m in at.metric)
 assert int(mm["결과가 확인된 점수 기록"].replace(",","")) == 80
 print("warnings:", [w.value[:50] for w in at.warning if "표본" in w.value])
 shapes = [d.value.shape for d in at.dataframe]; print("tables:", shapes)

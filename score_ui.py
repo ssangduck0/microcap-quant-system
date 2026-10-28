@@ -31,18 +31,48 @@ def load_live() -> pd.DataFrame:
                       "FROM daily_snapshots s JOIN case_events e ON e.ticker=s.ticker AND e.date=s.date")
 
 
+def render_sigmodel() -> None:
+    """🧠 신호 승률 모델(우리만의 AI 2단계, sigmodel): 승률 점수와 같은 models 표에 저장되지만 입력·목표가 달라 따로 보여 준다(2026-10-28).
+    이 모델이 10/28 에 처음 저장되면서 위 선택 상자가 이름을 '종류_목표' 로 쪼개다 KeyError 로 죽었음 → 선택 상자는 승률 모델만, 🧠 은 여기."""
+    st.markdown("### 3. 🧠 신호 승률 모델 — 신호(📐·🚦·매집 등)가 난 뒤 큰 목표/작은 목표에 닿을 확률")
+    try:
+        sm = db.get_model("sigmodel")
+    except Exception:  # noqa: BLE001
+        sm = None
+    if not sm or not isinstance(sm.get("targets"), dict):
+        st.info("아직 학습되지 않았습니다(토요일 아침 작업에서 월 1회 학습 · 서버에서 `sigmodel.py fit`).")
+        return
+    try:
+        import sigmodel
+        st.caption(sigmodel.summary(sm))
+    except Exception:  # noqa: BLE001
+        st.caption(f"표본 학습 {sm.get('n_train') or 0:,} · 검증 {sm.get('n_test') or 0:,} · 검증 시작 {sm.get('cutoff') or '-'} · 학습 시각 {sm.get('fitted_at') or '-'}")
+    cols = st.columns(2)
+    for col, key, title in zip(cols, ("p30", "p10"), ("p30 · 큰 목표", "p10 · 작은 목표")):
+        t = sm["targets"].get(key) or {}
+        with col:
+            st.markdown(f"**{title}** — {t.get('horizon', '?')}거래일 안 +{t.get('target_pct', '?')}%")
+            a, b, c = st.columns(3)
+            a.metric("검증 AUC", "-" if t.get("auc_test") is None else f"{t['auc_test']:.3f}", help=auc_comment(t.get("auc_test")))
+            b.metric("기준 적중", "-" if t.get("base_rate_test") is None else f"{t['base_rate_test']:.1f}%", help="확률과 무관하게 검증 구간 신호 전체의 적중 비율")
+            c.metric("상위 10% 배수", "-" if t.get("lift_top") is None else f"×{t['lift_top']:.2f}", help="예측 확률 상위 10% 신호의 적중률 ÷ 기준 적중")
+    st.caption("확률 분위표·특징 가중치·다시 학습 버튼은 🔍 부검 탭의 🧠 구역에 있어요(같은 모델). 라이브 적중(🏆 성과 공표의 🧠 확률 분위)은 11/15~22 에 함께 봅니다.")
+
+
 def render() -> None:
     st.subheader("🧪 승률 점수 검증")
-    models = load_models()
+    # 2026-10-28: models 표에는 🧠 sigmodel 같은 다른 모델도 저장된다 → 승률 모델(label·target·metrics 가 있는 것)만 고른다(안 그러면 아래 selectbox 가 KeyError)
+    models = [m for m in load_models() if m.get("label") in winmodel.LABELS and m.get("target") is not None and isinstance(m.get("metrics"), dict)]
     if not models:
         st.info("아직 학습된 모델이 없습니다. 과거 사례 DB를 만든 뒤(`python cases.py build --years 10`) "
                 "`python winmodel.py fit` 을 실행하세요.")
         return
     names = [m["name"] for m in models]
+    by = {m["name"]: m for m in models}
     default = names.index(config.WIN_MODEL) if config.WIN_MODEL in names else 0
     pick = st.selectbox("검증할 모델", names, index=default, key="score_model",
-                        format_func=lambda n: f"{n}  ({winmodel.LABELS[n.split('_')[0]][1]} ≥ +{n.split('_')[1]}%)")
-    md = models[names.index(pick)]
+                        format_func=lambda n: f"{n}  ({winmodel.LABELS[by[n]['label']][1]} ≥ +{by[n]['target']:g}%)")   # 이름을 쪼개지 않고 저장된 값으로
+    md = by[pick]
     m = md["metrics"]
     label_ko = winmodel.LABELS[md["label"]][1]
     st.caption(f"입력 {len(md['features'])}개({md.get('feature_set', 'v1')}) · {'2차(상호작용 포함)' if md.get('quad') else '선형'} 모델 · "
@@ -100,7 +130,8 @@ def render() -> None:
     st.caption(f"입력값은 가격·거래량·시장 지표 {len(md['features'])}개뿐입니다{' (계수는 선형 모델 기준 참고값)' if md.get('quad') else ''}. 공시(희석) 정보는 과거 시점별로 재현하지 못해 학습에 들어가지 않았고, "
                f"점수에는 가정 배수만 곱합니다: {config.DILUTION_MULT} (보정 {'켜짐' if config.DILUTION_ADJUST else '꺼짐'}).")
 
-    st.markdown("### 3. 라이브 성과 — 스캐너가 기록한 점수 vs 실제 결과")
+    render_sigmodel()
+    st.markdown("### 4. 라이브 성과 — 스캐너가 기록한 점수 vs 실제 결과")
     live = load_live()
     col = winmodel.LABELS[md["label"]][0]
     live = live.dropna(subset=[col]).copy()
