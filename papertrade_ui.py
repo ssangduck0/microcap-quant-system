@@ -11,6 +11,15 @@ import tosslink
 import ui_kit as ui
 
 
+def _wilson(win_pct: float, closed: int) -> str:
+    """승률(%)·청산 수 → 95% 신뢰구간 글자(scoreboard.wilson_text 재사용)."""
+    try:
+        import scoreboard
+        return scoreboard.wilson_text(int(round(win_pct / 100 * closed)), int(closed))
+    except Exception:  # noqa: BLE001
+        return "-"
+
+
 WHEN = {"rank": "내일 아침 갱신 작업부터", "rank6": "내일 아침 갱신 작업부터(⑥ 반영 순위)", "rank_stay": "10위 안에 2거래일 연속 머문 종목이 생기면 아침 갱신 때",
         "pick": "PICK '유력' 종목이 나오면 아침 갱신 때", "close": "장마감 전 BEST·후보가 나오면 스캐너가", "piggy": "저금통 종목이 🟢 저점 구간에 들어오면 아침 갱신 때",
         "after": "애프터 진입 구간 신호가 나면 스캐너가", "master": "📐 눌림 타점 신호가 나면 아침 갱신 때"}
@@ -59,7 +68,8 @@ def render() -> None:
     s = pt.summary(df, last)
     st.caption(f"이번 장부 시작: {b[:10]} · 충분히 쌓이면 '초기화'로 새로 시작하세요(지난 장부는 아래에 남아요).")
     ui.cards([{"t": "청산 수익률(이번 장부)", "v": "-" if s["ret"] is None else f"{s['ret']:+.1f}%", "s": f"실현 손익 ${s['pnl']:+,.0f}", "accent": True},
-              {"t": "승률", "v": "-" if s["win"] is None else f"{s['win']:.0f}%", "s": f"청산 {s['closed']}건"},
+              {"t": "승률", "v": "-" if s["win"] is None else f"{s['win']:.0f}%",
+               "s": f"청산 {s['closed']}건" + ("" if s["win"] is None else f" · 95% 범위 {_wilson(s['win'], s['closed'])}")},   # 2026-10-30: 표본 작을 때 과신 방지
               {"t": "평균 수익률/건", "v": "-" if s["avg"] is None else f"{s['avg']:+.1f}%"},
               {"t": "열린 포지션", "v": f"{s['open']}개", "s": f"평가 손익 ${s['open_pnl']:+,.0f}"}])
     if df.empty:
