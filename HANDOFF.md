@@ -1,5 +1,29 @@
 # 인수인계 노트 (2026-10-29 밤 압축본 · Claude Code 에서 갱신)
 
+> ## 🌙 밤사이 한 일(10/30 새벽, 사용자 취침 중 · 자율 점검) — **아침에 이것부터**
+> | 순서 | 할 일 | 명령·확인 |
+> |---|---|---|
+> | 1 | **배치 1 배포**(커밋 3475340 · 전체 테스트 145파일 통과) | `python deploy/deploy_from_pc.py` → 다음 07:30 부터 공매도 잔고·공시 이력 동기화가 살아남 |
+> | 2 | 07:30 로그 확인 | `ssh root@158.247.250.15 "journalctl -u quant-cases -n 80 --no-pager"` → `🎲 사건 표 버전 없음 → 2`(약 6~7분) · `새로 ≈99,300` · 저금통 6종목 `plan=box` · (배포 뒤 첫 아침) `공시 이력 동기화: 피드에서 N건 추가` · 공매도 잔고 받기 성공 |
+> | 3 | WHLR 보고서 읽기 | `docs/whlr_check_2026-10-30.md` — 공식은 '최저 VWAP' 가 아니라 **10일 종가의 거래량 가중 평균 × 0.55**, 10월 희석의 출처는 어음이 아니라 우선주 교환, 10월엔 '리셋가 지지' 패턴이 깨짐(상환일 종가 40% → 9%) |
+>
+> **고친 것(배치 1, 커밋 3475340)** — 전부 실제 서버 로그·화면 렌더에서 찾은 오류:
+> | # | 어디 | 증상 | 고침 |
+> |---|---|---|---|
+> | 1 | `shortint.py` | **10/27 부터 매일 아침 야후 공매도 잔고 받기 실패**(chartex 가 `src` 열을 넣은 뒤 위치 INSERT 가 열 수 불일치) | 열 이름을 적는 INSERT + `src` 열 보장 |
+> | 2 | `papertrade_ui.py` | 📒 모의매매에서 새 전략(rank6·rank_stay·master) 빈 장부 열면 KeyError(서버 10/29 00:16 traceback) | 전략별 안내 문구 표 + 기본값 |
+> | 3 | `scoreboard_ui.py` | 🏆 '3대 조건별 성적' 이 **항상** "계산하지 못했어요"(정의 안 된 변수) | 표를 넘겨 줌 · 빈 표면 안내 |
+> | 4 | `papertrade.py` | 로거 없이 `log.warning` → NameError 가능 | 로거 추가 |
+> | 5 | `secbackfill.py`·`cases.py` | **`sec_hist` 가 10/15 에서 멈춤**(일회성 백필만 쓰던 표 → 이벤트 수집기·희석 날짜 표시가 굶음) | 아침 작업이 `sec_feed` → `sec_hist` 로 매일 동기화 |
+> | 6 | `pagecache.py` | 'database is locked' 로 화면 캐시 저장 실패 로그 | 4번까지 재시도 |
+> | 7 | `toxic.py` | WHLR 식 "representing a 45% discount" · "less a discount of 45%" 를 못 잡음 | 정규식 2개 추가 |
+> 테스트 5개 갱신·추가, `bash tests/run_all.sh 1..5` **전부 통과(145파일)**. ruff 로 찾은 F821(정의 안 된 이름) 4건이 위 2·3·4 이고, 미사용 import(F401)·변수(F841)는 손대지 않음.
+>
+> **점검했지만 문제 없던 것**: 운영 DB 복사본으로 **모든 화면 렌더 0 예외**(84탭·111표) · 표별 최신일 조사(`squeeze_rank` 는 화면 볼 때만 쓰는 표라 정상 · `cx_borrow/cx_shares` 0 = chartex Tier 1 한계 · news_react/rank_hist/presim v2 는 07:30 작업 뒤 생김) · 서비스 6개 정상.
+>
+> **하다가 멈춘 것(사용량 한도)**: `resetcycle.py`(🔁 리셋 사이클 계산 모듈) — 작성·임시 DB 스모크 통과(상환일 9/5→9/8 달력, 10일 창, 1:6 병합 환산, 시나리오, 과거 3사이클 재측정, 나스닥 2년 규정), **아직 화면에 연결 안 됨·정식 테스트 없음**(어디서도 import 하지 않아 배포돼도 아무 영향 없음). 남은 일: `resetcycle_ui.py`(탭) → `company_ui.render` 에 `reset_config` 행이 있고 방문객이 아닐 때만 '🔁 리셋 사이클' 탭 추가 → `tests/test_resetcycle.py`(+ `tests/apps/rc_app.py`) → 배포. 설정 초기값(WHLR_SEED)은 보고서 숫자이며 첫 ensure() 때 INSERT OR IGNORE 로 한 번만 들어감(관리 모드에서 수정하는 칸은 UI 와 함께 만들 것).
+
+
 **읽는 법**: 이 파일은 '지금 상태 · 남은 일 · 결정 · 교훈 · 기능 색인'만 담는다(약 30KB). 10/29 까지의 긴 작업 기록(배포 확인 표 · 검증 숫자 · 사고 경위 전문)은 **`docs/archive/HANDOFF_2026-10-29_full.md`(99KB 원문 그대로)**, 그 전은 `docs/archive/인수인계서_2026-10-22.md`. 설계·검토 문서는 `docs/`(presim → `TASK_presim.md`, 실매매 → `broker_design_2026-10.md`·`toss_order_api_2026-10.md`, 차트 고수 → `chart_masters.md`, 토스 정책 → `toss_data_policy_audit_2026-10.md`, presim 방법 조사 → `presim_methods_survey_2026-10.md`). 새 기록은 이 파일에 짧게 적고, 길어지면 날짜별 archive 로 옮긴다.
 
 ## ☀️ 지금 상태(10/29 23:50 기준)
