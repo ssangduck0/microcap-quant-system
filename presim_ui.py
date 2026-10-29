@@ -51,8 +51,8 @@ def _bars(t: str) -> pd.DataFrame | None:
         d = presim._load_bars(conn, [t], since).get(t)
     if d is None or len(d) < presim.MIN_BARS:
         try:
-            import market
-            d = market.download_daily([t], period="2y").get(t)
+            import cases, market
+            d = cases.drop_incomplete_last_bar(market.download_daily([t], period="2y").get(t))   # 장중이면 오늘 봉 제외(_load_bars 와 같은 규칙)
         except Exception:  # noqa: BLE001
             d = None
     return d

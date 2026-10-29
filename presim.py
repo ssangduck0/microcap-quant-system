@@ -23,6 +23,8 @@ import config
 import db
 
 H = 40                    # 저장하는 '그 뒤' 봉 수(최대 기간)
+RECENT_REDO = 5           # 최근 H+5 봉 안에 시작한 사건은 n 과 상관없이 매번 다시 씀 — 2026-10-29 22:52 KST(09:52 ET, 장중) 수동 실행 때 진행 중인 오늘 봉이
+                          # 103개 사건의 40번째 봉으로 굳은 것을 보고 추가(장중 봉 제외와 함께 자가 치유 · 자료 정정도 반영). 비용: 아침마다 약 1만 행 재작성(수 초)
 MIN_BARS = 120            # 2겹·오늘 판정에 필요한 최소 일봉
 LOOKBACK = 250            # 2겹 부트스트랩 재료 일수
 N_SIM = 10000
@@ -166,14 +168,20 @@ def _extra_flags(conn) -> dict[tuple[str, str], int]:
     return out
 
 
-def _load_bars(conn, tickers: list[str], since: str) -> dict[str, pd.DataFrame]:
+def _load_bars(conn, tickers: list[str], since: str, now: datetime | None = None) -> dict[str, pd.DataFrame]:
+    """daily_prices 에서 일봉 읽기. 미국 정규장이 끝나기 전(16:20 ET 이전)에 돌리면 스캐너가 쓰는 '오늘' 봉은 진행 중(고가·저가·종가 미확정)이라 뺀다
+    (cases.drop_incomplete_last_bar 와 같은 규칙 · 아침 작업 07:30 KST 는 장 마감 뒤라 영향 없음). 2026-10-29 장중 수동 실행 때 진행 중 봉이 매수가·2겹·사건 표에 섞인 것을 보고 추가."""
     if not tickers:
         return {}
+    import cases
     q = ",".join("?" * len(tickers))
     df = pd.read_sql_query(f"SELECT ticker, date, open, high, low, close, volume FROM daily_prices WHERE date >= ? AND ticker IN ({q}) ORDER BY date", conn, params=[since, *tickers])
     res = {}
     for t, g in df.groupby("ticker"):
-        res[t] = g.set_index(pd.to_datetime(g["date"])).rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"})
+        d = g.set_index(pd.to_datetime(g["date"])).rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"})
+        d = cases.drop_incomplete_last_bar(d, now)
+        if d is not None and len(d):
+            res[t] = d
     return res
 
 
@@ -219,8 +227,8 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                     if not on and not (fl & (F["base"] | F["pick"] | F["rank"])):
                         continue
                     prev_n = have.get((t, day))
-                    if prev_n is not None and prev_n >= H:
-                        continue
+                    if prev_n is not None and prev_n >= H and i < len(d) - (H + RECENT_REDO):
+                        continue        # 오래된 사건은 40봉 다 찼으면 그대로 · 최근 H+5 봉 안의 사건은 매번 다시 씀(RECENT_REDO 주석)
                     hi, lo, cl, m = _paths(d, i)
                     if m == 0:
                         continue

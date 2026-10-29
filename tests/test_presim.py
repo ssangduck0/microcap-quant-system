@@ -106,11 +106,26 @@ with closing(db.connect()) as conn:
     short_n = conn.execute("SELECT COUNT(*) FROM presim_ep WHERE n < 40").fetchone()[0]
     assert short_n > 0
     res2 = presim.build_episodes(conn, bars=bars, out=lambda *_: None, today=today)
-    assert res2["new"] == 0 and res2["updated"] == short_n, (res2, short_n)
+    # 다시 쓰는 행 = n<40 인 행 + 최근 H+RECENT_REDO 봉 안에 시작한 행(자가 치유) — 그 밖의 40봉 다 찬 행은 건너뜀
+    redo_n = sum(conn.execute("SELECT COUNT(*) FROM presim_ep WHERE ticker=? AND (n < 40 OR date >= ?)", (t, df.index[len(df) - (presim.H + presim.RECENT_REDO)].strftime("%Y-%m-%d"))).fetchone()[0] for t, df in bars.items())
+    assert res2["new"] == 0 and res2["updated"] == redo_n and redo_n >= short_n > 0, (res2, short_n, redo_n)
+    assert conn.execute("SELECT COUNT(*) FROM presim_ep WHERE n >= 40").fetchone()[0] > redo_n   # 건너뛴 오래된 행이 대부분
     ex = pd.bdate_range(days[-1] + pd.Timedelta(days=1), periods=10)
     more = {t: pd.concat([df, pd.DataFrame({"Open": df["Close"].iloc[-1], "High": df["Close"].iloc[-1] * 1.01, "Low": df["Close"].iloc[-1] * 0.99, "Close": df["Close"].iloc[-1], "Volume": 200_000.0}, index=ex)]) for t, df in bars.items()}
     res3 = presim.build_episodes(conn, bars=more, out=lambda *_: None, today=ex[-1].date())
     assert res3["new"] >= 0 and conn.execute("SELECT MAX(n) FROM presim_ep WHERE n < 40").fetchone()[0] >= 10
+    # 자가 치유: 마지막 봉이 40번째 봉인 사건(AAA 를 PICK 유력으로 강제)은 마지막 봉 값이 바뀌어 다시 돌리면 경로 값이 새 값으로 바뀜(장중 미완성 봉이 굳지 않음)
+    d_heal = more["AAA"].index[-(presim.H + 1)].strftime("%Y-%m-%d")
+    conn.execute("INSERT INTO pick_hist VALUES (?,?,?,?,?,?,?,?,?,?)", (d_heal, "AAA", 2, "유력", 0, "상장유지", 30, 5, 7, 1.0)); conn.commit()
+    presim.build_episodes(conn, bars=more, out=lambda *_: None, today=ex[-1].date())
+    r0 = conn.execute("SELECT n FROM presim_ep WHERE ticker='AAA' AND date=?", (d_heal,)).fetchone()
+    assert r0 is not None and r0[0] == presim.H, r0
+    fixed = {t: df.copy() for t, df in more.items()}
+    fixed["AAA"].iloc[-1, fixed["AAA"].columns.get_loc("High")] = float(more["AAA"]["High"].iloc[-1]) * 1.5
+    res_h = presim.build_episodes(conn, bars=fixed, out=lambda *_: None, today=ex[-1].date())
+    e_aaa = presim.episodes(conn, "pick"); j = list(e_aaa["meta"]["ticker"]).index("AAA")
+    c0h = float(more["AAA"]["Close"].iloc[-(presim.H + 1)])
+    assert abs(e_aaa["hi"][j, presim.H - 1] - (float(fixed["AAA"]["High"].iloc[-1]) / c0h - 1) * 100) < 1e-2 and res_h["updated"] > 0, (e_aaa["hi"][j, -3:], res_h)
     # 컨닝 검사: 미래 봉을 바꿔도 그 전 날짜 사건의 깃발(onset)과 경로의 앞부분은 그대로
     rows_before = {r[0]: r[1] for r in conn.execute("SELECT date, onset FROM presim_ep WHERE ticker='AAA'")}
     assert rows_before
@@ -151,4 +166,15 @@ with closing(db.connect()) as conn:
     assert set(lm) == {"AAA", "BBB"} and lm["AAA"]["source"] == "rank"
     assert len(presim.log_rows(conn, days=9999)) == 3                                               # AAA(scr) · AAA(rank) · BBB(pick) — 같은 날 같은 종목도 출처가 다르면 따로
     assert presim.morning(conn, out=logs.append, bars={}, build=False)["done"] == 0                      # 봉 없으면 전부 건너뜀(죽지 않음)
+# ------------------------------------------------------------------ 8) 장중 미완성 봉: _load_bars 는 16:20 ET 전에는 '오늘' 봉을 빼고, 장 마감 뒤에는 둔다(아침 작업은 마감 뒤라 영향 없음)
+from zoneinfo import ZoneInfo
+with closing(db.connect()) as conn:
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    ds = [(et_now - pd.Timedelta(days=k)).strftime("%Y-%m-%d") for k in range(4, -1, -1)]      # 4일 전 … 오늘(ET)
+    conn.executemany("INSERT OR REPLACE INTO daily_prices VALUES (?,?,?,?,?,?,?)", [("DDD", d, 1.0, 1.1, 0.9, 1.0, 1000.0) for d in ds])
+    conn.commit()
+    live = presim._load_bars(conn, ["DDD"], ds[0], now=et_now.replace(hour=10, minute=0))["DDD"]
+    done = presim._load_bars(conn, ["DDD"], ds[0], now=et_now.replace(hour=17, minute=0))["DDD"]
+    assert len(live) == 4 and live.index[-1].strftime("%Y-%m-%d") == ds[-2] and len(done) == 5 and done.index[-1].strftime("%Y-%m-%d") == ds[-1], (len(live), len(done))
+    assert presim._load_bars(conn, [], ds[0]) == {}
 print("ALL OK")
