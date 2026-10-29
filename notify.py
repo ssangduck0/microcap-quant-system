@@ -16,6 +16,7 @@ KIND_BY_EMOJI = {"📐": "📐 차트", "🌙": "🌙 애프터", "⏰": "⏰ �
                  "✅": "✅ 테스트", "📡": "📡 숏 데이터", "🕶": "🕶 다크풀", "🔍": "🔍 부검", "🧠": "🧠 모델", "☁️": "☁️ 백업"}
 DDL = "CREATE TABLE IF NOT EXISTS alert_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT, ticker TEXT, text TEXT, ok INTEGER)"
 _TICKER = re.compile(r"(?<![A-Za-z$])\$?([A-Z]{1,5})(?![a-z])")
+_PUMP = re.compile(r"^\[[A-Z][A-Z0-9.\-]{0,5}\]\s*펌핑점수")   # 스캐너 본 신호 형식 "[POM] 펌핑점수 85 | 낙폭 … | 가격 변동"
 _NOT_TICKER = {"KST", "ET", "USD", "SEC", "ATM", "ELOC", "CB", "AI", "PICK", "VIX", "SPY", "HY", "FTD", "RSI", "VWAP", "SAR", "OK", "TOP", "BEST", "NT", "PR", "IPO", "ETF", "EPS", "CEO", "CFO", "FDA", "PDUFA", "NASDAQ", "NYSE", "OTC", "API", "DB", "REG", "SHO", "GC", "MA", "BB", "S", "K", "Q", "F", "M", "B", "A", "C", "D", "I", "II", "III"}
 
 
@@ -28,6 +29,8 @@ def classify(text: str) -> tuple[str, str | None]:
             kind = name
             break
     first = s.split("\n", 1)[0]
+    if kind == "기타" and _PUMP.match(first):   # 2026-10-30: 스캐너 본 신호가 하루 70~100건인데 전부 '기타' 로 세어짐 → 🎯 신호
+        kind = "🎯 신호"
     ticker = None
     for m in _TICKER.finditer(first):
         tk = m.group(1)
