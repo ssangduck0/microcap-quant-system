@@ -91,3 +91,9 @@ def render(ticker: str) -> None:
         st.caption(f"Claude {screener.MODEL} · 이번 카드 ${ai.get('cost_usd', 0):.3f} · 투자 권유가 아니에요")
     elif ai and ai.get("error"):
         st.warning(f"AI 판단 없음: {ai['error']}")
+    # ⑥ 🎲 매매 전 시뮬레이션(2026-10-29): 같은 신호 전체 과거 + 이 종목 최근 250일 — 입력은 관리자만, 방문객은 아침 자동 결과만
+    try:
+        import presim_ui
+        presim_ui.render_section(t, card)
+    except Exception as e:  # noqa: BLE001
+        st.caption(f"🎲 매매 전 시뮬레이션을 못 그렸어요: {e}")

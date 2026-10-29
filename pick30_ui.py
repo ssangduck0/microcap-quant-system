@@ -17,7 +17,7 @@ def _scan():
     return pick30.scan()
 
 
-def grid(rows: list[dict], first: dict | None = None) -> str:
+def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None) -> str:
     """두 줄 칩: 1줄 순위·티커(↑↓) / 2줄 상태·상승률·D-day — 글자가 잘리지 않게."""
     cells = []
     for i, r in enumerate(rows, 1):
@@ -29,7 +29,9 @@ def grid(rows: list[dict], first: dict | None = None) -> str:
         cells.append(f'<div class="qk-pick"><div class="l1"><span class="n">{i}</span><b>{ui.esc(r["ticker"])}</b>{mv}</div>'
                      f'<div class="l2"><span style="color:{STC[r["status"]]};font-weight:700">{r["status"]}</span>'
                      + ('<span class="wk" title="약한 목표: baby shelf 탈출">약</span>' if r.get("weak") else "")
-                     + f' · +{r["pct"]:.0f}%{dd}</div></div>')
+                     + f' · +{r["pct"]:.0f}%{dd}'
+                     + ((lambda b: f' <span title="{ui.esc("🎲 매매 전 시뮬레이션 " + __import__("presim_ui").badge_text(b))}">{b["verdict"]}</span>')(badges[r["ticker"]]) if badges and r["ticker"] in badges else "")
+                     + '</div></div>')
     return ('<style>.qk-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 12px}'
             '.qk-pick{border:1px solid rgba(128,128,128,.28);border-radius:12px;padding:8px 10px;line-height:1.35}'
             '.qk-pick .l1{font-size:1.02rem;white-space:nowrap}.qk-pick .n{opacity:.55;font-size:.8rem;margin-right:6px}'
@@ -187,7 +189,8 @@ def render_pick() -> None:
     if not rows:
         st.info("조건을 통과한 종목이 없어요. 회사 압박·펀드스캔 자료가 쌓이면 채워져요.")
     else:
-        st.markdown(grid(rows, st.session_state[first_key]), unsafe_allow_html=True)
+        import presim_ui
+        st.markdown(grid(rows, st.session_state[first_key], presim_ui.badges([r["ticker"] for r in rows])), unsafe_allow_html=True)
         if show_txt:
             st.code("\n".join(f"{i}. {r['ticker']} {r['status']}{'(약)' if r.get('weak') else ''} +{r['pct']:.0f}% → {r['target_name']} ${r['target']:.4f}" + ("" if r["imm_days"] is None else f" · D-{r['imm_days']} {r['imm_kind']}") + f" · {r.get('why', '')}"
                               for i, r in enumerate(rows, 1)), language=None)

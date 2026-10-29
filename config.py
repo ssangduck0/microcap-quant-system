@@ -118,6 +118,9 @@ TIER_TARGET = float(os.environ.get("TIER_TARGET", "30"))              # 익절 %
 TIER_STOP = float(os.environ.get("TIER_STOP", "-20"))                 # 손절 %
 SEC_DIGEST = os.environ.get("SEC_DIGEST", "1") != "0"                 # 📝 공시 한국어 요약·병합 일정·13D/13G(Haiku, AI 월 예산 안에서)
 NEWS_TRANSLATE = os.environ.get("NEWS_TRANSLATE", "1") != "0"         # 🌐 뉴스 한국어 번역(Haiku 5.5, AI 월 예산 안에서)
+PRESIM_ACCOUNT_KRW = float(os.environ.get("PRESIM_ACCOUNT_KRW", "5000000"))   # 🎲 매매 전 시뮬레이션: 계좌 크기(원) — 수량 계산용(2026-10-29 사용자 기본값)
+PRESIM_MAX_LOSS_KRW = float(os.environ.get("PRESIM_MAX_LOSS_KRW", "50000"))   # 🎲 한 번 매매의 최대 손실(원)
+PRESIM_TOP_N = int(os.environ.get("PRESIM_TOP_N", "10"))                      # 🎲 아침 자동 실행: 종합 순위 상위 몇 개까지(0 = 안 함)
 AI_PICK_ENABLED = os.environ.get("AI_PICK_ENABLED", "1") != "0"       # 🤖 AI PICK(아침 갱신 때 하루 한 번 Claude 판단)
 AI_PICK_MODEL = os.environ.get("AI_PICK_MODEL", "claude-sonnet-5-5").strip()
 AI_MONTHLY_BUDGET_KRW = float(os.environ.get("AI_MONTHLY_BUDGET_KRW", "50000"))  # 월 AI 예산(원) — AI PICK·뉴스 번역·서버 공시분석 합계, 넘으면 실행하지 않음
@@ -194,6 +197,9 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "PIGGY_AUTO_BOUNCES": (int, 0, 6, "숫자", "🐷 저금통 기준: 지지선 반등 횟수 이상"),
     "PIGGY_AUTO_DVOL": (float, 0.0, 10000000.0, "숫자", "🐷 저금통 기준: 20일 평균 거래대금($) 이상"),
     "PIGGY_MAX_KRW": (float, 100.0, 100000.0, "숫자", "🐷 저금통 기준: 주가 이 원화 가격 미만"),
+    "PRESIM_ACCOUNT_KRW": (float, 100000.0, 100000000.0, "숫자", "🎲 매매 전 시뮬레이션: 계좌 크기(원) — 수량 상한 10% 의 기준"),
+    "PRESIM_MAX_LOSS_KRW": (float, 1000.0, 1000000.0, "숫자", "🎲 한 번 매매의 최대 손실(원) — 수량 = 이것 ÷ (매수가 − 손절가)"),
+    "PRESIM_TOP_N": (int, 0, 50, "숫자", "🎲 아침 자동 실행: 종합 순위 상위 몇 개까지(0 = 순위는 안 돌림)"),
     "RANK_W_STRENGTH": (float, 0.3, 1.0, "순위 가중치", "🏁 종합 = 강도 × 이 값 + 임박도 × (1 − 이 값)"),
     "RANK_W_ACC": (float, 0.0, 1.0, "순위 가중치", "강도: 매집 비중"),
     "RANK_W_PR": (float, 0.0, 1.0, "순위 가중치", "강도: 회사 압박 비중"),

@@ -448,6 +448,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         newsfx.update(conn, out=out)
     except Exception as e:  # noqa: BLE001
         log.warning("뉴스 반응 갱신 실패: %s", e)
+    try:  # 🎲 매매 전 시뮬레이션(2026-10-29): 사건 표 이어 쌓기 → 저금통·PICK 유력·순위 상위 N 을 기본 손절·목표로 자동 실행 → presim_log(카드 배지 · 🏆 성과 공표)
+        import presim
+        presim.morning(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("매매 전 시뮬레이션 실패: %s", e)
     try:  # 🔍 부검(2026-10-28): 어제 펌핑(놓침/잡음 + 전날 특징·촉매) · 새로 실패한 신호(원인 태그) — 🏆 성과 공표 판정이 끝난 뒤가 좋지만 어제 것은 이미 판정돼 있음
         import autopsy
         autopsy.morning(out=out)
@@ -530,6 +535,7 @@ def main() -> int:
     u.add_argument("--threshold", type=float, default=THRESHOLD)
     sub.add_parser("status", help="현황")
     sub.add_parser("backfill3d", help="3일 목표(max_up_3d)가 빈 사건을 저장된 일봉으로 보완(인터넷 없음)")
+    sub.add_parser("presim", help="🎲 매매 전 시뮬레이션: 사건 표 갱신 + 오늘 후보 자동 실행(아침 작업에도 포함)")
     sub.add_parser("newsfx", help="📊 뉴스 반응: 종목 있는 뉴스마다 뉴스 뒤 주가를 일봉으로 재서 쌓기(아침 작업에도 포함)")
     sub.add_parser("drysim", help="💵 dry-run 매수 기록에 '그때 1주 샀다면' 결과 붙이기(야후 일봉)")
     args = ap.parse_args()
@@ -547,6 +553,9 @@ def main() -> int:
         elif args.cmd == "newsfx":
             import newsfx
             print(newsfx.update(conn))
+        elif args.cmd == "presim":
+            import presim
+            print(presim.morning(conn))
         elif args.cmd == "build":
             active, delisted = case_universe(not args.no_delisted)
             if not active:

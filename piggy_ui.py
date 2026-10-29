@@ -168,6 +168,9 @@ def render_list(fx: float) -> None:
     tb.insert(2, "토스", tosslink_ui.links(tb["티커"]))
     import rank_ui
     tb.insert(3, "종합 순위", rank_ui.column(tb["티커"]))
+    import presim_ui   # 🎲 매매 전 시뮬레이션(아침 자동 실행 결과 · 2026-10-29)
+    _ps = presim_ui.badges(list(tb["티커"]))
+    tb.insert(4, "🎲 시뮬", [presim_ui.badge_text(_ps.get(x)) for x in tb["티커"]])
     import regsho as _rg
     with closing(db.connect()) as _c:
         _sho = _rg.streaks(_c)
@@ -212,6 +215,8 @@ def render_list(fx: float) -> None:
     lo, hi, src = piggy.box_of(r, m_)
     st.markdown(f"#### 🐷 {t}")
     tosslink_ui.button(t, key="pg")
+    if _ps.get(t):
+        st.markdown(presim_ui.badge_chip(t, _ps), unsafe_allow_html=True)
     warn = []
     if (m_ or {}).get("recent_break"):
         warn.append("최근 10거래일 안에 박스 아래로 이탈한 적이 있습니다")

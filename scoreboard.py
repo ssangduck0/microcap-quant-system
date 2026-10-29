@@ -43,6 +43,10 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "toxic_bottom": ("⚠️ 할인 전환 바닥(계약 뒤 −70%) 반등", 1, 30.0, 20),
     # 📐 스승 관점(2026-10-27, docs/chart_masters.md) — 신호일 = 기록한 날(그날까지 자료만)
     "chart_pullback": ("📐 급등 후 눌림 타점(무릎~허리 지지)", 1, 10.0, 5),
+    # 🎲 매매 전 시뮬레이션(2026-10-29): 판정별로 같은 목표(+30% · 40거래일)를 재서 "🟢 가 정말 더 잘됐나"를 봄. 🔴 는 "못 간다"는 뜻이라 성공률이 낮게 나와야 맞음
+    "presim_g": ("🎲 매매 전 시뮬레이션 🟢 유리", 1, 30.0, 40),
+    "presim_c": ("🎲 매매 전 시뮬레이션 🪙 동전", 1, 30.0, 40),
+    "presim_r": ("🎲 매매 전 시뮬레이션 🔴 불리(낮아야 맞음)", 1, 30.0, 40),
     "chart_h60": ("📐 60분봉 200선 돌파 지지", 1, 20.0, 10),
     "chart_gc": ("📐 일봉 5/20 골든크로스", 1, 20.0, 10),
     "chart_turn": ("📐 연속 하락 뒤 전환(ANO)", 1, 10.0, 5),
@@ -123,6 +127,16 @@ def collect(conn) -> pd.DataFrame:
         add("setup3", r["date"], r["ticker"], r["price"], note=("💰 강한 유입 · " if r["strong"] else "") + (r["note"] or "")[:60])
     for r in _q(conn, "SELECT date, ticker, price, success_pct, n FROM rs_signals"):
         add("rsplit", r["date"], r["ticker"], r["price"], note=f"유사 {r['n']}건 · 성공률 {r['success_pct']:.0f}%")
+    try:  # 🎲 매매 전 시뮬레이션: 같은 날 같은 종목은 출처(저금통>PICK>순위) 하나만 기록되므로 그대로
+        _pv = {"🟢": "presim_g", "🪙": "presim_c", "🔴": "presim_r"}
+        for r in _q(conn, "SELECT day, ticker, entry, verdict, p_tp, p_sl, own_p_tp, own_p_sl, key, source FROM presim_log"):
+            src = _pv.get(r["verdict"])
+            if src:
+                p_tp = r["p_tp"] if r["p_tp"] is not None else r["own_p_tp"]
+                p_sl = r["p_sl"] if r["p_sl"] is not None else r["own_p_sl"]
+                add(src, r["day"], r["ticker"], r["entry"], note=f"{r['source']} · 익절 {p_tp:.0f}% · 손절 {p_sl:.0f}% ({r['key']})" if p_tp is not None else str(r["source"]))
+    except Exception:  # noqa: BLE001  (표가 아직 없음)
+        pass
     return pd.DataFrame(rows)
 
 

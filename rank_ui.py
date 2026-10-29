@@ -104,9 +104,11 @@ def render() -> None:
               {"t": "⏱ 1~2주", "v": f"{(df['urgency'] == 60).sum()}"}, {"t": "조건에 맞는 종목", "v": f"{len(v)}"}, _cov_card])
     cmap = tosslink.codes()
     _s3 = s3_marks(tuple(v.head(60)["ticker"]))
+    import presim_ui   # 🎲 매매 전 시뮬레이션 배지(아침 자동 실행 · 2026-10-29)
+    _ps = presim_ui.badges(list(v.head(60)["ticker"]))
     for r in v.head(60).to_dict("records"):
         t = r["ticker"]
-        parts = _s3.get(t, "") + "".join(ui.chip(f"{k} {p}", "blue") for k, p in r["parts"].items() if p)
+        parts = _s3.get(t, "") + presim_ui.badge_chip(t, _ps) + "".join(ui.chip(f"{k} {p}", "blue") for k, p in r["parts"].items() if p)
         risk = "".join(ui.chip(x, "red") for x in r["risk"])
         if r.get("share_cls") in ("bad", "warn"):   # 🔬 ⑥ 직전 분기 주식수 변동(10/28): 표시만, 본 점수 불변(가상매매로 4주 비교 중)
             risk += ui.chip(f"주식수 {r['share_pct']:+.0f}%(분기)", "red" if r["share_cls"] == "bad" else "orange",
