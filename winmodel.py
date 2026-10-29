@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -339,6 +339,26 @@ def fit_all(test_months: int = 24, out=print) -> list[dict]:
         res.append(md)
         out("  " + summary(md))
     return res
+
+
+REFIT_DAYS = 30   # 2026-10-30 사용자 승인: 토요일 아침 작업에서 모델이 30일 넘게 묵었으면(또는 없으면) 자동 재학습 — 전엔 `winmodel.py fit` 수동뿐(sigmodel.maybe_refit 와 같은 규칙)
+
+
+def maybe_refit(out=print, today: date | None = None, fit=None) -> list[dict] | None:
+    """월 1회(토요일) 또는 모델이 없을 때 fit_all. 돌려주는 것: 학습했으면 모델 목록, 아니면 None. fit 은 테스트용 대체."""
+    today = today or date.today()
+    md = load_model()
+    why = "모델 없음"
+    if md:
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(md["fitted_at"]).replace(tzinfo=timezone.utc)).days
+        except Exception:  # noqa: BLE001
+            age = 999
+        if age < REFIT_DAYS or today.weekday() != 5:
+            return None
+        why = f"{age}일 묵음 · 토요일"
+    out(f"🧪 승률 점수 모델 재학습({why})")
+    return (fit or fit_all)(out=out)
 
 
 def summary(md: dict) -> str:

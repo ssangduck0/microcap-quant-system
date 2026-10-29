@@ -173,9 +173,21 @@ with closing(db.connect()) as conn: conn.execute("DELETE FROM models"); conn.exe
 with closing(db.connect()) as conn: scanner.run_cycle(conn, FS(), None)
 d3 = snap("WINA"); assert d3["win_score"] is None and d3["win_model"] is None and d3["day_change_pct"] is not None
 # is_regular_session 자체
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import importlib; importlib.reload(scanner) if False else None
 real = scanner.__dict__.get("is_regular_session")
 print("scanner integration OK")
+# ---------- 토요일 자동 재학습(2026-10-30): 모델 없음 → 학습 · 새 모델 → 안 함 · 40일 묵음 + 토요일 → 학습 · 40일 묵음 + 평일 → 안 함
+from datetime import date as _date, timedelta as _td
+calls = []
+fake = lambda out=print: calls.append(1) or [{"name": "fake"}]
+with closing(db.connect()) as conn: conn.execute("DELETE FROM models"); conn.commit()
+assert winmodel.maybe_refit(out=lambda *_: None, today=_date(2026, 11, 2), fit=fake) and calls == [1]          # 월요일이라도 모델이 없으면
+db.save_model(config.WIN_MODEL, {"name": config.WIN_MODEL, "fitted_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+assert winmodel.maybe_refit(out=lambda *_: None, today=_date(2026, 11, 7), fit=fake) is None and calls == [1]  # 토요일이지만 새 모델
+db.save_model(config.WIN_MODEL, {"name": config.WIN_MODEL, "fitted_at": (datetime.now(timezone.utc) - _td(days=40)).isoformat(timespec="seconds")})
+assert winmodel.maybe_refit(out=lambda *_: None, today=_date(2026, 11, 6), fit=fake) is None and calls == [1]  # 금요일
+assert winmodel.maybe_refit(out=lambda *_: None, today=_date(2026, 11, 7), fit=fake) and calls == [1, 1]      # 토요일 + 40일 묵음
+print("maybe_refit OK")
 print("ALL OK"); print(os.environ["QUANT_DB"])
