@@ -67,8 +67,16 @@ def _result_block(r: dict, key: str) -> None:
         cols[1].metric("손절 먼저", f"{l1['p_sl']:.0f}%")
         cols[2].metric("결판 안 남", f"{l1['p_none']:.0f}%", help=f"기간 끝 종가 평균 {l1['none_avg'] if l1.get('none_avg') is not None else '-'}%")
         cols[3].metric("기대값(거래당)", f"{l1['ev_pct']:+.1f}%", help=f"낙관 가정이면 {l1['ev_opt']:+.1f}%")
-        st.caption(f"1겹 · {ui.esc(l1['name'])} 사건 {l1['n']:,}건(2년 × 전체 종목, 신호가 처음 켜진 날) · 손절 −{r['sl_pct']:.1f}% · 목표 +{r['tp_pct']:.1f}% · {r['horizon']}거래일"
-                   + (f" · 같은 날 둘 다 닿음 {l1['both_pct']:.0f}%" if l1.get("both_pct") else ""))
+        _plan = (f"사건마다 **그날 박스**(하단×0.95 / 상단)로 — 손절 중앙값 −{l1.get('sl_pct') or 0:.1f}% · 목표 +{l1.get('tp_pct') or 0:.1f}%" if r.get("plan") == "box"
+                 else f"손절 −{r['sl_pct']:.1f}% · 목표 +{r['tp_pct']:.1f}%")
+        st.caption(f"1겹 · {ui.esc(l1['name'])} 사건 {l1['n']:,}건(2년 × 전체 종목, 신호가 처음 켜진 날 · 유효 표본 {l1.get('n_eff') or 0:,.0f}) · {_plan} · {r['horizon']}거래일"
+                   + (f" · 같은 날 둘 다 닿음 {l1['both_pct']:.0f}%" if l1.get("both_pct") else ""), unsafe_allow_html=True)
+        b, rec = r.get("base") or {}, r.get("recent") or {}
+        if b.get("n"):
+            _e = "" if r.get("edge") is None else f" → **기준 대비 {r['edge']:+.1f}%p**(보정 전 {r['edge_raw']:+.1f}%p)"
+            st.caption(f"기준(아무 날 {b['n']:,}건)에 같은 계획: 익절 {b['p_tp']:.0f}% · 손절 {b['p_sl']:.0f}% · 기대값 {b['ev_pct']:+.1f}%{_e} · 동전 던지기라면 익절 {r.get('p0') or 0:.0f}%", unsafe_allow_html=True)
+        if rec.get("n"):
+            st.caption(f"최근 6개월 {rec['n']:,}건만: 익절 {rec['p_tp']:.0f}% · 손절 {rec['p_sl']:.0f}% · 기대값 {rec['ev_pct']:+.1f}%")
     else:
         cols[0].caption("같은 신호의 과거 사건이 아직 부족해요(아침 작업이 사건 표를 쌓아요)")
     if own.get("ok"):

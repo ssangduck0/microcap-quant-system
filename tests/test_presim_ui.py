@@ -67,6 +67,7 @@ assert "**수량**" in md and ("🟢" in md or "🪙" in md or "🔴" in md), md
 assert any("제외된 이유" in e.value for e in at.error)
 caps2 = " ".join(x.value for x in at.caption)
 assert "1겹" in caps2 and "2겹" in caps2 and presim.WARN in caps2, caps2[:800]
+assert "동전 던지기라면 익절" in caps2 and "기준(아무 날" in caps2 and "유효 표본" in caps2, caps2[:1200]   # 2026-10-30 기준 대비 · 기준선 · 유효 표본
 
 # 방문객: 입력칸·버튼 없이 자동 결과만
 def _guest():

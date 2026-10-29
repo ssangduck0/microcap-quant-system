@@ -233,3 +233,19 @@
 
 ### 11-6. 보강(2026-10-30 02:30 · 조사 문서 `docs/presim_methods_survey_2026-10.md` 5절에서)
 11-5 의 ④ 판정을 다음으로 구체화하고 5가지를 더한다 — F 기대값 0 기준선 표시(p₀ = 손절폭/(손절폭+목표폭)) · A 기준 대비 우위 + 소표본 보정(κ=100) · B 최근 120거래일 창 성적 병기 · D 겹침 가중(유효 표본) → 첫 저녁 / C 체제(🚦) 조건부 통계(`presim_ep.regime` ALTER ADD, 10/28 이전은 VIX·SPY 200일선으로 재계산) → 다음 저녁 / E 보정 그래프(🏆 presim 출처 구간별 실제 익절률·Brier) → 자료 쌓인 뒤. 원칙: **presim 은 자동 최적화를 하지 않는다**(키·손절·목표 조합 탐색 금지 — 과적합). 후순위: 유사 사례 층 · sigmodel p30 병기 · 래빗 식 다크풀 Z-점수/은닉 매집 다이버전스 칩(🕶 다크풀 별도 일감).
+
+### 11-7. 구현 결과(2026-10-30 02:50 · 사용자 '승인, 진행해' — 11-5 ①②③④ + 보강 F·A·B·D · **배포 대기**)
+| 부분 | 구현 |
+|---|---|
+| 🐷 저금통 재생 키 | `presim.piggy_flags(d, fx, rules)`: 1,000원 미만인 날마다 `piggy.box_metrics(최근 60봉)` 으로 규칙(안정성·반등·폭 `AUTO_WIDTH`·거래대금·최근 이탈 없음, 관리 모드 값 `piggy.rules()`)과 🟢 저점 구간(박스 아래 20%)을 재생 → 처음 들어온 날이 onset. 키 `piggy`(F 1024) · `piggy_nd`(+희석 없음). `build_episodes` 가 날짜 루프에서 깃발을 더하고 **그날 박스 계획**을 `presim_ep.sl_pct/tp_pct`(ALTER ADD) 에 저장(저점 구간인 날만, 나머지 NULL). ⑥ 주식수는 재생 불가라 뺌 · 환율은 지금 값 |
+| 표 버전 | `EP_VERSION="2"` 를 meta `presim_ep_ver` 에 저장 — 다르면 **다음 아침에 전체를 한 번 다시 씀**(서버 약 4분 + 저금통 재생 약 2분). INSERT 는 열 이름 명시 |
+| 사건별 계획 · 가중 | `outcomes(hi, lo, cl, sl_pct, tp_pct, horizon, bars, w)`: sl/tp 가 숫자 하나 또는 사건별 배열, `w` 겹침 가중(`_overlap_weights`: 같은 종목 ±60일 안 사건 k개 → 1/(1+k)) → 비율·기대값 가중 평균 · `n_eff` · 계획 없는(NaN) 사건 제외 · `p0` = 손절폭/(손절폭+목표폭)(중앙값 계획) |
+| 키 고르기 | 저금통 출처는 `piggy_nd`(오늘 희석 없음일 때) → `piggy` → 조건 키 순. 사용자가 손절·목표를 안 바꿨으면 **사건별 박스 계획**(`plan="box"`), 바꾸면 고정 %(`plan="fixed"`) |
+| 기준 대비 판정 | `run_one` 이 같은 계획(박스 계획이면 그 중앙값)을 `base` 사건에도 적용(`cache["base"]` 공유) → `verdict_edge(ev, ev_base, n_eff)`: edge_raw = 차이, edge = edge_raw × n_eff/(n_eff+100)(`shrink`), 🟢 ≥ +1%p · 🔴 ≤ −1%p(유효 표본 ≥100) · 🪙. `base` 키면 '우위 없음' 🪙(BASE_TEXT). 1겹 표본이 없을 때만 옛 절대 판정(`verdict`, `VERDICT_TEXT_ABS`) |
+| 최근 창 | `recent_slice(ep, day, 180)` → 최근 180일 사건만의 결과 `recent`; 2년 평균과 2%p 넘게 다르면 경고 문장 |
+| 기록 | `presim_log` 에 `edge · edge_raw · ev_base · n_eff · p0 · recent_n · recent_ev · plan` 열 추가(ALTER ADD) · 열 이름 명시 INSERT · detail 에 base/recent 포함 |
+| 저금통 기본값 | `candidates()` 가 `piggy.box_of(row, piggy.metrics_map())` 로 박스(직접 값 없으면 최근 분석의 지지·저항) → 손절 하단×0.95 · 목표 상단(가상매매와 동일) |
+| 화면 | 📇 ⑥ 1겹 캡션에 유효 표본·박스 계획(중앙값) · "기준(아무 날 n건)에 같은 계획: 익절·손절·기대값 → **기준 대비 ±x%p**(보정 전) · 동전 던지기라면 익절 p0%" · "최근 6개월 n건만: …" 캡션. 배지·🏆 출처는 그대로(판정 색만 새 기준) |
+| 가이드 | 🎲 문단 '판정(10/30 부터 기준 대비)' 로 교체 + 저금통 재생 숫자 |
+| 테스트 | test_presim: outcomes 배열·가중·NaN 제외·p0 · verdict_edge/shrink 경계값 · 🐷 piggy_flags(사인파 박스 종목 PIG: onset < zone · 손절 1~30% · $2 종목은 아님) · 사건 표에 piggy/piggy_nd 수·sl/tp 저장·가중<1·버전 meta · pick_key 저금통 순서 · run_one 저금통(plan=box · base · edge · p0 · 기록 열 · 손절 지정 시 fixed) · candidates 박스 = 분석 지지·저항 · 아침 4종목 · latest 의 기본값 = 박스. test_presim_ui: ⑥ 새 캡션 3개. test_presim · test_presim_ui · test_scoreboard · test_piggy_ui · test_pick30 · test_rank · test_screener · test_cases · test_guide · test_piggy_auto · test_papertrade 통과(전체 5부는 02:55 배경 실행 → 결과 아래 행) |
+**배포 뒤 첫 아침 확인**: 로그 `🎲 사건 표 버전 없음 → 2: 전체를 다시 씁니다` → `새로 ≈9.9만` · `ep_counts` 에 piggy 수백 건(복사본 재생 384건과 비슷) · 저금통 6종목 기록의 `plan=box` · 손절이 박스 하단×0.95 · 🏆 presim_g/c/r 분포가 바뀜(🟢 가 생길 수 있음).

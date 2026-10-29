@@ -35,8 +35,15 @@ EP_YEARS = 2.0
 MAX_PRICE, MIN_DV = 20.0, 50_000.0   # 타임머신과 같은 적격 조건(초소형주 · 20일 평균 거래대금 $5만↑)
 N_RECENT, N_PRIOR, OBV_MIN, VOL_UP, RSI_OVS, DIL_DAYS = 10, 20, 0.20, 1.3, 30.0, 90   # setup3 와 같은 기준
 STAY_TOP = 10
-COIN_GAP, COIN_EV = 10.0, 1.0       # 🪙: |익절% − 손절%| < 10%p 이고 |기대값| < 1%
-F = {"ovs": 1, "ovs25": 2, "ovs20": 4, "dil": 8, "strong": 16, "money": 32, "base": 64, "pick": 256, "rank": 512}
+COIN_GAP, COIN_EV = 10.0, 1.0       # (2겹만 있을 때의 옛 판정) 🪙: |익절% − 손절%| < 10%p 이고 |기대값| < 1%
+# 2026-10-30 기준 대비 우위 판정(docs/presim_methods_survey_2026-10.md 5절 A·B·D·F): 같은 계획을 '기준(아무 날)' 사건에도 적용해 기대값 차이(우위)로 판정.
+# 표본이 적으면 우위를 n_eff/(n_eff+SHRINK_K) 만큼 깎음(empirical Bayes 식 수축) · n_eff = 같은 종목의 겹치는 사건(±60일)을 1/(1+k) 로 덜 센 유효 표본.
+SHRINK_K = 100.0          # 수축 가짜 표본 수: n_eff 100 이면 우위의 절반만 인정
+EDGE_MIN = 1.0            # 🟢/🔴 문턱(%p, 보정 뒤) — 유효 표본 MIN_EP 이상일 때만
+RECENT_DAYS = 180         # '최근 창' = 최근 180일(≈120거래일) 사건만의 성적을 따로(쇠퇴 감지, OddsMaker 식)
+OVERLAP_DAYS = 60         # 겹침 가중 창(달력일 ≈ H 거래일)
+EP_VERSION = "2"         # 사건 표 버전 — 바뀌면 다음 아침에 전체를 한 번 다시 씀(v2: 🐷 저금통 재생 키 + sl_pct/tp_pct 열)
+F = {"ovs": 1, "ovs25": 2, "ovs20": 4, "dil": 8, "strong": 16, "money": 32, "base": 64, "pick": 256, "rank": 512, "piggy": 1024}
 # 키: (이름, flags 에 모두 있어야 하는 비트, onset 에 있어야 하는 비트) — onset = 그 신호가 '처음 켜진 날'(같은 구간을 여러 번 세지 않게)
 KEYS = {
     "t1": ("⭐ 1순위 · RSI≤20 + 희석 없음", F["ovs20"] | F["dil"], F["ovs20"]),
@@ -47,23 +54,39 @@ KEYS = {
     "pick": ("🎯 PICK 유력", F["pick"], 0),
     "rank": (f"🏁 종합 순위 {STAY_TOP}위 안", F["rank"], 0),
     "base": ("전체(기준 · 아무 날)", F["base"], 0),
+    # 🐷 저금통 규칙 재생(2026-10-30, docs/TASK_presim.md 11절): 1,000원 미만 · 안정성 ≥60 · 반등 ≥2 · 폭 15~80% · 거래대금 · 최근 이탈 없음 을 그날까지 60봉으로 재생해
+    # 🟢 저점 구간(박스 아래 20%)에 처음 들어온 날. 손절·목표는 사건마다 '그날의 박스'(하단×0.95 / 상단)를 sl_pct·tp_pct 열에 저장 → outcomes 가 사건별로 적용
+    "piggy": ("🐷 저금통 규칙 + 저점 구간 진입(그날 박스 손절·목표)", F["piggy"], F["piggy"]),
+    "piggy_nd": ("🐷 저금통 규칙 + 저점 진입 + 희석 없음", F["piggy"] | F["dil"], F["piggy"]),
 }
+BOX_KEYS = ("piggy_nd", "piggy")   # 사건별 박스 손절·목표를 가진 키(희석 없음 쪽을 먼저)
 COND_ORDER = ("t1", "t2", "t3", "ovs", "strong", "base")
 SOURCE_HORIZON = {"close": 5, "after": 5}   # 그 밖(저금통·PICK·순위·스크리너·직접)은 40
 EP_DDL = """CREATE TABLE IF NOT EXISTS presim_ep (ticker TEXT NOT NULL, date TEXT NOT NULL, px REAL, flags INTEGER, onset INTEGER, n INTEGER,
             hi BLOB, lo BLOB, cl BLOB, PRIMARY KEY (ticker, date))"""
+EP_ADD = (("sl_pct", "REAL"), ("tp_pct", "REAL"))                                                       # v2: 사건별 계획(🐷 키만, 나머지 NULL)
+LOG_ADD = (("edge", "REAL"), ("edge_raw", "REAL"), ("ev_base", "REAL"), ("n_eff", "REAL"), ("p0", "REAL"), ("recent_n", "INTEGER"), ("recent_ev", "REAL"), ("plan", "TEXT"))
 LOG_DDL = """CREATE TABLE IF NOT EXISTS presim_log (day TEXT NOT NULL, ticker TEXT NOT NULL, source TEXT NOT NULL, key TEXT, entry REAL, sl REAL, tp REAL, horizon INTEGER,
              p_tp REAL, p_tp_opt REAL, p_sl REAL, p_none REAL, both_pct REAL, ev_pct REAL, n_ep INTEGER, own_p_tp REAL, own_p_sl REAL, own_ev REAL, own_n INTEGER,
              verdict TEXT, detail TEXT, created_at TEXT, PRIMARY KEY (day, ticker, source))"""
-VERDICT_TEXT = {"🟢": "유리한 편 — 같은 신호의 과거에서 목표가 먼저 닿은 쪽이 뚜렷이 많았어요",
-                "🪙": "거의 동전 던지기 — 안 사는 것도 좋은 매매예요",
-                "🔴": "불리 — 손절·목표를 다시 보거나 패스"}
+VERDICT_TEXT = {"🟢": "기준보다 유리 — 같은 신호의 과거 기대값이 '아무 날'보다 뚜렷이 높았어요",
+                "🪙": "기준과 비슷(동전 던지기) — 안 사는 것도 좋은 매매예요",
+                "🔴": "기준보다 불리 — 손절·목표를 다시 보거나 패스"}
+VERDICT_TEXT_ABS = {"🟢": "유리한 편(이 종목 최근 250일만) — 목표가 먼저 닿은 쪽이 뚜렷이 많았어요",
+                    "🪙": "거의 동전 던지기(이 종목 최근 250일만) — 안 사는 것도 좋은 매매예요",
+                    "🔴": "불리(이 종목 최근 250일만) — 손절·목표를 다시 보거나 패스"}
+BASE_TEXT = "같은 신호 정보 없음 — '아무 날'과 같은 통계라 우위를 잴 수 없어요(기준 숫자만 참고)"
 WARN = "과거 움직임의 통계일 뿐이에요. 증자 공시·병합·실적 같은 사건은 반영 못 해요."
 
 
 def ensure(conn) -> None:
     conn.execute(EP_DDL)
     conn.execute(LOG_DDL)
+    for tbl, cols in (("presim_ep", EP_ADD), ("presim_log", LOG_ADD)):   # 기존 표 보존 — 열만 더함
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
+        for c, t in cols:
+            if c not in have:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {c} {t}")
 
 
 def _settings() -> dict:
@@ -168,6 +191,40 @@ def _extra_flags(conn) -> dict[tuple[str, str], int]:
     return out
 
 
+def piggy_flags(d: pd.DataFrame, fx: float | None = None, rules: dict | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """🐷 저금통 규칙 재생(그날까지 60봉만 → 컨닝 없음): 날짜별 (규칙 통과 + 🟢 저점 구간, 처음 들어온 날, 손절 %, 목표 %).
+    규칙 = piggy.rules()(관리 모드 값: 1,000원 미만 · 안정성 ≥60 · 반등 ≥2 · 폭 AUTO_WIDTH · 거래대금 ≥$2만 · 최근 이탈 없음) — ⑥ 주식수는 과거 재생이 안 돼 뺌.
+    손절 = 박스 하단×0.95 · 목표 = 박스 상단(가상매매 open_piggy 와 같음). 환율은 지금 값(과거 환율 차이는 무시)."""
+    import piggy
+    fx = fx or _fx()
+    r = rules or piggy.rules()
+    n = len(d)
+    zone = np.zeros(n, dtype=bool)
+    sl = np.full(n, np.nan)
+    tp = np.full(n, np.nan)
+    if n < 61:
+        return zone, zone.copy(), sl, tp
+    close = d["Close"].astype(float).to_numpy()
+    cheap = close * fx < r["max_krw"]
+    for i in range(60, n):
+        if not cheap[i]:
+            continue
+        m = piggy.box_metrics(d.iloc[i - 59:i + 1])
+        if not m:
+            continue
+        ok = (m["score"] >= r["score"] and m["bounces"] >= r["bounces"] and piggy.AUTO_WIDTH[0] <= m["width_pct"] <= piggy.AUTO_WIDTH[1]
+              and m["dollar_vol"] >= r["dvol"] and not m["recent_break"])
+        if not ok:
+            continue
+        sup, res = m["support"], m["resistance"]
+        if close[i] >= sup * 0.95 and (close[i] - sup) / (res - sup) <= piggy.BAND:
+            zone[i] = True
+            sl[i] = max(1.0, (1 - sup * 0.95 / close[i]) * 100)
+            tp[i] = (res / close[i] - 1) * 100
+    on = zone & ~np.concatenate([[False], zone[:-1]])
+    return zone, on, sl, tp
+
+
 def _load_bars(conn, tickers: list[str], since: str, now: datetime | None = None) -> dict[str, pd.DataFrame]:
     """daily_prices 에서 일봉 읽기. 미국 정규장이 끝나기 전(16:20 ET 이전)에 돌리면 스캐너가 쓰는 '오늘' 봉은 진행 중(고가·저가·종가 미확정)이라 뺀다
     (cases.drop_incomplete_last_bar 와 같은 규칙 · 아침 작업 07:30 KST 는 장 마감 뒤라 영향 없음). 2026-10-29 장중 수동 실행 때 진행 중 봉이 매수가·2겹·사건 표에 섞인 것을 보고 추가."""
@@ -200,7 +257,17 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
     dil = tm._dil_dates(conn, set(tickers))
     cov = tm._covered(conn)
     extra = _extra_flags(conn)
-    have = {(r[0], r[1]): r[2] for r in conn.execute("SELECT ticker, date, n FROM presim_ep")}
+    ver = (db.get_meta("presim_ep_ver") or {}).get("value")
+    rebuild_all = ver != EP_VERSION   # 표 버전이 바뀌면(키·열 추가) 한 번 전체를 다시 씀
+    if rebuild_all:
+        out(f"🎲 사건 표 버전 {ver or '없음'} → {EP_VERSION}: 전체를 다시 씁니다(한 번, 수 분)")
+    have = {} if rebuild_all else {(r[0], r[1]): r[2] for r in conn.execute("SELECT ticker, date, n FROM presim_ep")}
+    fx_now = _fx()
+    try:
+        import piggy as _pg
+        pg_rules = _pg.rules()
+    except Exception:  # noqa: BLE001
+        pg_rules = None
     res = {"tickers": len(tickers), "new": 0, "updated": 0, "rows": 0}
     for k in range(0, len(tickers), 300):
         part = tickers[k:k + 300]
@@ -214,6 +281,11 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                 ff = flags_frame(d, dil.get(t, []), covered=t in cov)
                 if ff.empty:
                     continue
+                try:
+                    pz, pon, psl, ptp = piggy_flags(d, fx_now, pg_rules)   # 🐷 저금통 규칙 재생(1,000원 미만인 날만 계산)
+                except Exception as e:  # noqa: BLE001
+                    out(f"presim 저금통 재생 실패 {t}: {e}")
+                    pz = pon = np.zeros(len(d), dtype=bool); psl = ptp = np.full(len(d), np.nan)
                 days = [x.strftime("%Y-%m-%d") for x in d.index]
                 base_ctr = 0
                 for i, day in enumerate(days):
@@ -224,6 +296,10 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                     if base_ctr % BASE_EVERY == 0:
                         fl |= F["base"]
                     fl |= extra.get((t, day), 0)
+                    if pz[i]:
+                        fl |= F["piggy"]
+                    if pon[i]:
+                        on |= F["piggy"]
                     if not on and not (fl & (F["base"] | F["pick"] | F["rank"])):
                         continue
                     prev_n = have.get((t, day))
@@ -232,25 +308,48 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                     hi, lo, cl, m = _paths(d, i)
                     if m == 0:
                         continue
-                    rows.append((t, day, float(d["Close"].iloc[i]), fl, on, m, hi.tobytes(), lo.tobytes(), cl.tobytes()))
+                    rows.append((t, day, float(d["Close"].iloc[i]), fl, on, m, hi.tobytes(), lo.tobytes(), cl.tobytes(),
+                                 None if np.isnan(psl[i]) else float(psl[i]), None if np.isnan(ptp[i]) else float(ptp[i])))
                     res["new" if prev_n is None else "updated"] += 1
             except Exception as e:  # noqa: BLE001
                 out(f"presim 사건 만들기 실패 {t}: {e}")
         if rows:
-            conn.executemany("INSERT OR REPLACE INTO presim_ep VALUES (?,?,?,?,?,?,?,?,?)", rows)
+            conn.executemany("INSERT OR REPLACE INTO presim_ep (ticker, date, px, flags, onset, n, hi, lo, cl, sl_pct, tp_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)   # 열 이름 명시(6절 교훈)
             conn.commit()
         if len(tickers) > 300:
             out(f"🎲 사건 표: {min(k + 300, len(tickers))}/{len(tickers)}종목")
     res["rows"] = conn.execute("SELECT COUNT(*) FROM presim_ep").fetchone()[0]
+    try:
+        db.set_meta("presim_ep_ver", EP_VERSION)
+    except Exception:  # noqa: BLE001
+        pass
     out(f"🎲 사건 표(presim_ep): 종목 {res['tickers']} · 새로 {res['new']} · 갱신 {res['updated']} · 전체 {res['rows']:,}건")
     return res
 
 
+def _overlap_weights(tickers, dates) -> np.ndarray:
+    """겹침 가중(보강 D): 같은 종목의 사건이 ±OVERLAP_DAYS 안에 k개 더 있으면 1/(1+k) — 겹치는 40봉 창은 독립 표본이 아니라서(López de Prado 'uniqueness' 의 간단판)."""
+    w = np.ones(len(tickers))
+    if len(tickers) < 2:
+        return w
+    ords = np.array([date.fromisoformat(str(x)[:10]).toordinal() for x in dates])
+    df = pd.DataFrame({"t": list(tickers), "o": ords, "i": np.arange(len(tickers))})
+    for _, g in df.groupby("t"):
+        if len(g) < 2:
+            continue
+        order = np.argsort(g["o"].to_numpy())
+        o = g["o"].to_numpy()[order]
+        idx = g["i"].to_numpy()[order]
+        k = np.searchsorted(o, o + OVERLAP_DAYS, "right") - np.searchsorted(o, o - OVERLAP_DAYS, "left") - 1
+        w[idx] = 1.0 / (1.0 + k)
+    return w
+
+
 def episodes(conn, key: str) -> dict:
-    """키에 맞는 사건들의 경로 배열. {"hi","lo","cl": (E×H), "n": (E,), "meta": DataFrame(ticker, date, px)}"""
+    """키에 맞는 사건들의 경로 배열. {"hi","lo","cl": (E×H), "bars": (E,), "sl","tp": 사건별 계획 %(없으면 NaN), "w": 겹침 가중, "dates", "meta": DataFrame(ticker, date, px)}"""
     ensure(conn)
     name, need, need_on = KEYS[key]
-    sql = "SELECT ticker, date, px, n, hi, lo, cl FROM presim_ep WHERE (flags & ?) = ?" + (" AND (onset & ?) = ?" if need_on else "")
+    sql = "SELECT ticker, date, px, n, hi, lo, cl, sl_pct, tp_pct FROM presim_ep WHERE (flags & ?) = ?" + (" AND (onset & ?) = ?" if need_on else "")
     args = [need, need] + ([need_on, need_on] if need_on else [])
     rows = conn.execute(sql, args).fetchall()
     if not rows:
@@ -259,7 +358,11 @@ def episodes(conn, key: str) -> dict:
     lo = np.stack([np.frombuffer(r[5], dtype=np.float32) for r in rows])
     cl = np.stack([np.frombuffer(r[6], dtype=np.float32) for r in rows])
     meta = pd.DataFrame([(r[0], r[1], r[2]) for r in rows], columns=["ticker", "date", "px"])
-    return {"key": key, "name": name, "n": len(rows), "hi": hi, "lo": lo, "cl": cl, "bars": np.array([r[3] for r in rows]), "meta": meta}
+    sl = np.array([np.nan if r[7] is None else float(r[7]) for r in rows])
+    tp = np.array([np.nan if r[8] is None else float(r[8]) for r in rows])
+    dates = np.array([str(r[1]) for r in rows])
+    return {"key": key, "name": name, "n": len(rows), "hi": hi, "lo": lo, "cl": cl, "bars": np.array([r[3] for r in rows]), "meta": meta,
+            "sl": sl, "tp": tp, "dates": dates, "w": _overlap_weights(meta["ticker"].tolist(), dates)}
 
 
 def ep_counts(conn) -> dict[str, int]:
@@ -275,36 +378,49 @@ def ep_counts(conn) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------- 결과 계산(1겹·2겹 공통)
-def outcomes(hi: np.ndarray, lo: np.ndarray, cl: np.ndarray, sl_pct: float, tp_pct: float, horizon: int, bars: np.ndarray | None = None) -> dict:
+def outcomes(hi: np.ndarray, lo: np.ndarray, cl: np.ndarray, sl_pct, tp_pct, horizon: int, bars: np.ndarray | None = None, w: np.ndarray | None = None) -> dict:
     """경로(E×≥horizon, % 단위)에 손절 −sl_pct% · 목표 +tp_pct% 적용. 같은 날 둘 다면 보수적=손절(p_tp) · 낙관적=익절(p_tp_opt).
-    기간 안에 못 닿고 봉도 모자란 사건(미완)은 뺌."""
-    h = int(max(1, min(horizon, hi.shape[1])))
+    sl_pct·tp_pct 는 숫자 하나(모든 사건 같은 계획) 또는 사건별 배열(🐷 그날 박스). w = 겹침 가중(없으면 1) → 비율·기대값은 가중 평균, n_eff = 가중 합.
+    기간 안에 못 닿고 봉도 모자란 사건(미완)과 계획이 없는(NaN) 사건은 뺌. p0 = 기대값 0 기준 익절 확률 = 손절폭/(손절폭+목표폭)(중앙값 계획 기준)."""
+    E0 = int(hi.shape[0])
+    h = int(max(1, min(horizon, hi.shape[1]))) if E0 else int(max(1, horizon))
+    r = {"n": 0, "n_eff": 0.0, "p_tp": None, "p_tp_opt": None, "p_sl": None, "p_none": None, "both_pct": None, "ev_pct": None, "ev_opt": None, "none_avg": None,
+         "horizon": h, "sl_pct": None, "tp_pct": None, "p0": None}
+    if E0 == 0:
+        return r
+    sl_a = np.abs(np.broadcast_to(np.asarray(sl_pct, dtype=float), (E0,))).astype(float)
+    tp_a = np.abs(np.broadcast_to(np.asarray(tp_pct, dtype=float), (E0,))).astype(float)
+    ww = np.ones(E0) if w is None else np.asarray(w, dtype=float)
     hi_, lo_, cl_ = hi[:, :h], lo[:, :h], cl[:, :h]
-    sl_hit = np.nan_to_num(lo_, nan=np.inf) <= -abs(sl_pct)
-    tp_hit = np.nan_to_num(hi_, nan=-np.inf) >= abs(tp_pct)
+    sl_hit = np.nan_to_num(lo_, nan=np.inf) <= -sl_a[:, None]
+    tp_hit = np.nan_to_num(hi_, nan=-np.inf) >= tp_a[:, None]
     big = h + 1
     i_sl = np.where(sl_hit.any(1), sl_hit.argmax(1), big)
     i_tp = np.where(tp_hit.any(1), tp_hit.argmax(1), big)
     avail = (bars if bars is not None else (~np.isnan(cl_)).sum(1))
     complete = np.asarray(avail) >= h
     none_mask = (i_sl >= big) & (i_tp >= big)
-    counted = ~(none_mask & ~complete)
+    valid = np.isfinite(sl_a) & np.isfinite(tp_a) & (tp_a > 0)
+    counted = ~(none_mask & ~complete) & valid
     E = int(counted.sum())
-    r = {"n": E, "p_tp": None, "p_tp_opt": None, "p_sl": None, "p_none": None, "both_pct": None, "ev_pct": None, "ev_opt": None, "none_avg": None, "horizon": h}
+    r["n"] = E
     if E == 0:
         return r
+    W = float(ww[counted].sum())
     sl_first = (i_sl < i_tp) & counted
     tp_first = (i_tp < i_sl) & counted
     both = (i_sl == i_tp) & (i_sl < big) & counted
     none = none_mask & counted
     last_close = np.nan_to_num(cl_[:, h - 1], nan=0.0)
-    pct = lambda m: round(float(m.sum()) / E * 100, 1)  # noqa: E731
-    r.update(p_tp=pct(tp_first), p_tp_opt=pct(tp_first | both), p_sl=pct(sl_first | both), p_none=pct(none), both_pct=pct(both))
-    out_cons = np.where(tp_first, abs(tp_pct), np.where(sl_first | both, -abs(sl_pct), last_close))
-    out_opt = np.where(tp_first | both, abs(tp_pct), np.where(sl_first, -abs(sl_pct), last_close))
-    r["ev_pct"] = round(float(out_cons[counted].mean()), 2)
-    r["ev_opt"] = round(float(out_opt[counted].mean()), 2)
-    r["none_avg"] = round(float(last_close[none].mean()), 2) if none.any() else None
+    pct = lambda m: round(float(ww[m].sum()) / W * 100, 1)  # noqa: E731
+    r.update(p_tp=pct(tp_first), p_tp_opt=pct(tp_first | both), p_sl=pct(sl_first | both), p_none=pct(none), both_pct=pct(both), n_eff=round(W, 1))
+    out_cons = np.where(tp_first, tp_a, np.where(sl_first | both, -sl_a, last_close))
+    out_opt = np.where(tp_first | both, tp_a, np.where(sl_first, -sl_a, last_close))
+    r["ev_pct"] = round(float((out_cons[counted] * ww[counted]).sum() / W), 2)
+    r["ev_opt"] = round(float((out_opt[counted] * ww[counted]).sum() / W), 2)
+    r["none_avg"] = round(float((last_close[none] * ww[none]).sum() / ww[none].sum()), 2) if none.any() else None
+    sl_med, tp_med = float(np.median(sl_a[counted])), float(np.median(tp_a[counted]))
+    r.update(sl_pct=round(sl_med, 2), tp_pct=round(tp_med, 2), p0=round(sl_med / (sl_med + tp_med) * 100, 1) if sl_med + tp_med > 0 else None)
     return r
 
 
@@ -374,13 +490,45 @@ def size(entry: float, sl: float, account_krw: float, max_loss_krw: float, fx: f
 
 
 def verdict(p_tp, p_sl, ev) -> tuple[str, str]:
+    """옛 절대 판정 — 1겹 표본이 없어 2겹(이 종목 250일)만 있을 때만 씀."""
     if p_tp is None or p_sl is None or ev is None:
         return "❔", "자료 부족"
     if p_tp - p_sl >= COIN_GAP and ev > COIN_EV:
-        return "🟢", VERDICT_TEXT["🟢"]
+        return "🟢", VERDICT_TEXT_ABS["🟢"]
     if p_sl - p_tp >= COIN_GAP and ev < -COIN_EV:
-        return "🔴", VERDICT_TEXT["🔴"]
-    return "🪙", VERDICT_TEXT["🪙"]
+        return "🔴", VERDICT_TEXT_ABS["🔴"]
+    return "🪙", VERDICT_TEXT_ABS["🪙"]
+
+
+def shrink(edge_raw: float, n_eff: float, k: float = SHRINK_K) -> float:
+    """소표본 보정(보강 A): 우위 × n_eff/(n_eff+k). 표본 24건으로 +13.9%p 같은 숫자가 그대로 판정이 되지 않게."""
+    n_eff = max(0.0, float(n_eff or 0))
+    return float(edge_raw) * n_eff / (n_eff + k)
+
+
+def verdict_edge(ev, ev_base, n_eff) -> tuple[str, str, float | None, float | None]:
+    """기준 대비 우위 판정(보강 A): edge_raw = 같은 계획의 기대값 − 기준(아무 날) 기대값 → 보정 edge. 🟢 edge ≥ +EDGE_MIN · 🔴 ≤ −EDGE_MIN(둘 다 유효 표본 ≥ MIN_EP) · 그 밖 🪙.
+    돌려주는 것: (이모지, 설명, 보정 우위, 보정 전 우위)."""
+    if ev is None or ev_base is None or not n_eff:
+        return "❔", "자료 부족", None, None
+    raw = float(ev) - float(ev_base)
+    edge = shrink(raw, n_eff)
+    if n_eff >= MIN_EP and edge >= EDGE_MIN:
+        return "🟢", VERDICT_TEXT["🟢"], round(edge, 2), round(raw, 2)
+    if n_eff >= MIN_EP and edge <= -EDGE_MIN:
+        return "🔴", VERDICT_TEXT["🔴"], round(edge, 2), round(raw, 2)
+    return "🪙", VERDICT_TEXT["🪙"], round(edge, 2), round(raw, 2)
+
+
+def recent_slice(ep: dict, day: str, days: int = RECENT_DAYS) -> dict | None:
+    """최근 창(보강 B): 사건 표에서 day 기준 최근 days 일 안에 시작한 사건만 골라 같은 모양으로 돌려줌(없으면 None)."""
+    if not ep or not ep.get("n"):
+        return None
+    cut = (date.fromisoformat(str(day)[:10]) - timedelta(days=days)).isoformat()
+    m = ep["dates"] >= cut
+    if not m.any():
+        return None
+    return {k: (v[m] if isinstance(v, np.ndarray) and len(v) == len(m) else v) for k, v in ep.items() if k != "meta"} | {"n": int(m.sum())}
 
 
 # ---------------------------------------------------------------- 기본값 · 오늘 판정
@@ -414,11 +562,14 @@ def defaults(df: pd.DataFrame, source: str = "scr", box: tuple[float | None, flo
 
 
 def pick_key(flags_now: int, source: str, counts: dict[str, int]) -> str:
-    """오늘 이 종목의 조건으로 쓸 1겹 키 — 출처 키(pick·rank)가 사건 MIN_EP 이상이면 그것, 아니면 조건 키(⭐1 → 2 → 3 → 과매도 → 강한 유입 → 기준) 중 첫 번째."""
-    order = ([source] if source in ("pick", "rank") else []) + list(COND_ORDER)
+    """오늘 이 종목의 조건으로 쓸 1겹 키 — 저금통 출처면 🐷 재생 키(희석 없음이면 piggy_nd) → 출처 키(pick·rank) → 조건 키(⭐1 → 2 → 3 → 과매도 → 강한 유입 → 기준) 중 사건이 MIN_EP 이상인 첫 번째."""
+    order = (list(BOX_KEYS) if source == "piggy" else []) + ([source] if source in ("pick", "rank") else []) + list(COND_ORDER)
     for k in order:
         name, need, need_on = KEYS[k]
-        has = (k == "base") or (k in ("pick", "rank")) or ((flags_now & need) == need)
+        if k in BOX_KEYS:
+            has = (k == "piggy") or bool(flags_now & F["dil"])
+        else:
+            has = (k == "base") or (k in ("pick", "rank")) or ((flags_now & need) == need)
         if has and counts.get(k, 0) >= MIN_EP:
             return k
     return "base"
@@ -427,11 +578,12 @@ def pick_key(flags_now: int, source: str, counts: dict[str, int]) -> str:
 def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str | None = None, *, entry: float | None = None, sl: float | None = None,
             tp: float | None = None, horizon: int | None = None, box=None, n_sim: int = N_SIM, seed: int | None = None, dil_dates: list[str] | None = None,
             covered: bool = True, counts: dict | None = None, cache: dict | None = None, save: bool = True, now: datetime | None = None) -> dict:
-    """한 종목 한 번: 기본값 채우기 → 1겹(같은 신호 전체 과거) → 2겹(이 종목 250일) → 수량 → 판정 → presim_log."""
+    """한 종목 한 번: 기본값 채우기 → 1겹(같은 신호 전체 과거 · 🐷 키는 사건별 그날 박스) → 기준(아무 날) 같은 계획 → 최근 창 → 2겹(이 종목 250일) → 수량 → 기준 대비 우위 판정 → presim_log."""
     ensure(conn)
     d = _norm(df)
     if len(d) < MIN_BARS:
         return {"ok": False, "ticker": ticker, "why": f"일봉 {len(d)}일 < {MIN_BARS}일 — 자료 부족"}
+    plan_given = sl is not None or tp is not None          # 사용자가 손절·목표를 정했으면 고정 % 계획
     base = defaults(d, source, box)
     entry = float(entry or base["entry"]); sl = float(sl if sl is not None else base["sl"]); tp = float(tp if tp is not None else base["tp"])
     hz = int(horizon or base["horizon"])
@@ -447,14 +599,30 @@ def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str |
     cache = cache if cache is not None else {}
     ep = cache.get(key) or episodes(conn, key)
     cache[key] = ep
-    l1 = outcomes(ep["hi"], ep["lo"], ep["cl"], sl_pct, tp_pct, hz, bars=ep["bars"]) if ep.get("n") else {"n": 0}
-    l1["key"], l1["name"] = key, KEYS[key][0]
+    box_plan = key in BOX_KEYS and not plan_given          # 🐷: 사건마다 그날 박스로(사용자가 손절·목표를 바꾸면 고정 %)
+    if ep.get("n"):
+        l1 = outcomes(ep["hi"], ep["lo"], ep["cl"], ep["sl"] if box_plan else sl_pct, ep["tp"] if box_plan else tp_pct, hz, bars=ep["bars"], w=ep.get("w"))
+    else:
+        l1 = {"n": 0, "n_eff": 0.0}
+    l1["key"], l1["name"], l1["plan"] = key, KEYS[key][0], ("box" if box_plan else "fixed")
+    # 기준(아무 날)에 같은 계획(🐷 박스 계획이면 그 중앙값) 적용 → 우위
+    epb = cache.get("base") or episodes(conn, "base")
+    cache["base"] = epb
+    b_sl, b_tp = (l1.get("sl_pct") or sl_pct, l1.get("tp_pct") or tp_pct) if box_plan else (sl_pct, tp_pct)
+    lb = outcomes(epb["hi"], epb["lo"], epb["cl"], b_sl, b_tp, hz, bars=epb["bars"], w=epb.get("w")) if epb.get("n") else {"n": 0}
+    # 최근 창(최근 180일 사건만)
+    rec_ep = recent_slice(ep, day) if ep.get("n") else None
+    rec = outcomes(rec_ep["hi"], rec_ep["lo"], rec_ep["cl"], rec_ep["sl"] if box_plan else sl_pct, rec_ep["tp"] if box_plan else tp_pct, hz, bars=rec_ep["bars"], w=rec_ep.get("w")) if rec_ep else {"n": 0}
     own = simulate(d, entry, sl, tp, hz, n=n_sim, seed=seed)
     st = _settings()
     sz = size(entry, sl, st["account_krw"], st["max_loss_krw"], _fx(), adv20)
-    if l1.get("n", 0) >= MIN_EP:
-        vd, txt = verdict(l1["p_tp"], l1["p_sl"], l1["ev_pct"])
-        basis = "같은 신호 전체 과거"
+    p0 = l1.get("p0") if l1.get("n") else round(sl_pct / (sl_pct + tp_pct) * 100, 1)
+    edge = edge_raw = None
+    if l1.get("n", 0) >= MIN_EP and key != "base" and lb.get("n"):
+        vd, txt, edge, edge_raw = verdict_edge(l1["ev_pct"], lb["ev_pct"], l1.get("n_eff"))
+        basis = "같은 신호 전체 과거 vs 기준(아무 날) · 같은 계획"
+    elif l1.get("n", 0) >= MIN_EP and key == "base":
+        vd, txt, edge, edge_raw, basis = "🪙", BASE_TEXT, 0.0, 0.0, "기준(아무 날)뿐 — 우위 없음"
     elif own.get("ok"):
         vd, txt = verdict(own["p_tp"], own["p_sl"], own["ev_pct"])
         basis = "이 종목 최근 250일(같은 신호 표본 부족 ⚠️)"
@@ -465,19 +633,23 @@ def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str |
         notes.append(f"⚠️ 이 종목 최근 성격(익절 {own['p_tp']:.0f}%)이 같은 신호 평균(익절 {l1['p_tp']:.0f}%)과 많이 달라요")
     if l1.get("both_pct") and l1["both_pct"] >= 10:
         notes.append(f"같은 날 익절·손절 둘 다 닿은 날이 {l1['both_pct']:.0f}% — 범위(보수 {l1['p_tp']:.0f}% ~ 낙관 {l1['p_tp_opt']:.0f}%)로 보세요")
+    if rec.get("n", 0) >= 20 and l1.get("ev_pct") is not None and rec.get("ev_pct") is not None and abs(rec["ev_pct"] - l1["ev_pct"]) >= 2:
+        notes.append(f"최근 6개월({rec['n']}건)은 기대값 {rec['ev_pct']:+.1f}% 로 2년 평균({l1['ev_pct']:+.1f}%)과 달라요 — 효과가 변하는 중일 수 있어요")
     res = {"ok": True, "ticker": ticker, "source": source, "day": day, "entry": entry, "sl": sl, "tp": tp, "horizon": hz, "sl_pct": round(sl_pct, 2), "tp_pct": round(tp_pct, 2),
-           "key": key, "layer1": l1, "own": own, "size": sz, "verdict": vd, "verdict_text": txt, "basis": basis, "notes": notes, "warn": WARN, "flags_now": flags_now}
+           "key": key, "plan": l1["plan"], "layer1": l1, "base": lb, "recent": rec, "own": own, "size": sz, "verdict": vd, "verdict_text": txt, "basis": basis,
+           "edge": edge, "edge_raw": edge_raw, "p0": p0, "n_eff": l1.get("n_eff"), "notes": notes, "warn": WARN, "flags_now": flags_now}
     if save:
-        detail = json.dumps({"layer1": {k: v for k, v in l1.items() if k not in ("meta",)}, "own": own, "size": sz, "basis": basis, "notes": notes, "sl_pct": res["sl_pct"], "tp_pct": res["tp_pct"]},
-                            ensure_ascii=False, default=float)
-        conn.execute("INSERT OR REPLACE INTO presim_log VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        detail = json.dumps({"layer1": {k: v for k, v in l1.items() if k not in ("meta",)}, "base": lb, "recent": rec, "own": own, "size": sz, "basis": basis, "notes": notes,
+                             "sl_pct": res["sl_pct"], "tp_pct": res["tp_pct"], "plan": l1["plan"], "p0": p0}, ensure_ascii=False, default=float)
+        conn.execute("INSERT OR REPLACE INTO presim_log (day, ticker, source, key, entry, sl, tp, horizon, p_tp, p_tp_opt, p_sl, p_none, both_pct, ev_pct, n_ep, own_p_tp, own_p_sl, own_ev, own_n, "
+                     "verdict, detail, created_at, edge, edge_raw, ev_base, n_eff, p0, recent_n, recent_ev, plan) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (day, ticker, source, key, entry, sl, tp, hz, l1.get("p_tp"), l1.get("p_tp_opt"), l1.get("p_sl"), l1.get("p_none"), l1.get("both_pct"), l1.get("ev_pct"), l1.get("n", 0),
-                      own.get("p_tp"), own.get("p_sl"), own.get("ev_pct"), own.get("n_days"), vd, detail, (now or datetime.now(timezone.utc)).isoformat()))
+                      own.get("p_tp"), own.get("p_sl"), own.get("ev_pct"), own.get("n_days"), vd, detail, (now or datetime.now(timezone.utc)).isoformat(),
+                      edge, edge_raw, lb.get("ev_pct"), l1.get("n_eff"), p0, rec.get("n", 0), rec.get("ev_pct"), l1["plan"]))
         conn.commit()
     return res
 
 
-# ---------------------------------------------------------------- 아침 자동 실행 · 읽기
 def candidates(conn, top_n: int | None = None) -> list[dict]:
     """저금통 전체 + 오늘 PICK 유력(pick_hist 최신 날) + 종합 순위 상위 N(rank_hist 최신 날). 같은 종목은 저금통 > PICK > 순위 순으로 한 번."""
     top_n = _settings()["top_n"] if top_n is None else int(top_n)
@@ -485,8 +657,17 @@ def candidates(conn, top_n: int | None = None) -> list[dict]:
     try:
         import piggy
         it = piggy.items()
+        try:
+            mm = piggy.metrics_map()   # 직접 정한 박스가 없으면 최근 분석의 지지·저항(가상매매 open_piggy 와 같은 piggy.box_of) — 2026-10-30 수정(전엔 빈 칸만 봐서 레벨 맵으로 떨어짐)
+        except Exception:  # noqa: BLE001
+            mm = {}
         for r in it.to_dict("records"):
-            out.setdefault(str(r["ticker"]), {"ticker": str(r["ticker"]), "source": "piggy", "box": (r.get("box_low"), r.get("box_high"))})
+            t = str(r["ticker"])
+            try:
+                lo_b, hi_b, _src = piggy.box_of(r, mm.get(t))
+            except Exception:  # noqa: BLE001
+                lo_b, hi_b = r.get("box_low"), r.get("box_high")
+            out.setdefault(t, {"ticker": t, "source": "piggy", "box": (lo_b, hi_b)})
     except Exception:  # noqa: BLE001
         pass
     try:
