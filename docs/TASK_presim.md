@@ -128,3 +128,38 @@
 - **위험**: 아침 작업이 이미 67분 — presim 은 numpy 로 ≤30초 목표, 실패해도 다음 단계로(try/except) · 후보 70건×1만 번×40일 = 2,800만 셀, 메모리 수백 MB 가 아니라 종목마다 순서대로 · 몬테카를로는 "최근 1년처럼 움직인다면"이라는 가정(카드에 희석 경고 필수)
 - **예상 작업량**: presim.py(엔진·수량·판정·기록) 1저녁 · 아침 자동 실행+배지 4곳+스크리너 ⑥ 1저녁 · 성과 공표 출처+테스트+가이드 반나절 → **2~3저녁**
 - **질문(사용자가 정할 것)**: ① 계좌 크기·최대 손실 기본값 500만 원·5만 원 맞는지 ② 순위 상위 몇 개까지 자동 실행(기본 10) ③ 🟢/🪙/🔴 배지를 방문객 화면에도 보여 줄지(기본: 보여 줌, 입력칸은 숨김)
+
+## 9. 3단계 구현 계획(2026-10-29 저녁 · 2단계 보고서 승인 — 질문 3개는 기본값: 계좌 500만 원 · 최대 손실 5만 원 · 순위 상위 10 · 방문객에게 배지 보임)
+### 9-1. 파일별 변경
+| 파일 | 변경 | 비고 |
+|---|---|---|
+| `presim.py`(새) | **엔진** `simulate(df, entry, sl, tp, horizon, n=10000, block=(3,5), seed=None)` → {p_tp, p_sl, p_none, both_pct, ev_pct, open_avg_pct, n_days, ok} — 최근 250거래일 하루 묶음(갭·고가·저가·종가 %)을 3~5일 블록으로 뽑아 numpy 로 N×horizon 경로, 하루마다 저가≤손절 → 손절(같은 날 둘 다면 손절), 고가≥목표 → 익절, 끝나면 종가. 120일 미만이면 ok=False('자료 부족') | 5분봉도 같은 함수(열 이름만 같으면) — 장중 모드 문 |
+| | **과거 재생** `replay(df, sl_pct, tp_pct, horizon, conn, ticker)` → 지난 250일 각 날짜 종가 매수를 `broker.dry_outcome(max_bars=horizon)` 로 재생 → 익절·손절·무승부 횟수 + `setup3.conditions_at` 로 '같은 신호(과매도 또는 강한 유입) 있던 날' 부분 집계. 미래 봉은 그날 이후 것만 씀(컨닝 없음) | dry_outcome 재사용 |
+| | **수량** `size(entry, sl, account_krw, max_loss_krw, fx, adv20)` → 주식 수 = 최대 손실(달러) ÷ (매수가−손절가), 상한 계좌 10% · 20일 평균 거래량 1%, 걸린 이유 목록 | 나중에 broker 가 씀 |
+| | **판정** `verdict(res)` → 🪙(\|익절%−손절%\|<10%p 이고 기대값 ±1%) · 🟢(익절% ≥ 손절%+10%p 이고 기대값 >+1%) · 🔴(그 반대) + 한 줄 문구 | |
+| | **기본값** `defaults(conn, ticker, df, source)` → 매수가 = 최근 종가 · 손절 = `screener.levels` 지지 하단(저금통은 박스 하단×0.95, 없으면 −10%) · 목표 = 1차 저항(저금통은 박스 상단, 없으면 +30%) · 기간 = 40(저금통·PICK·순위·스크리너) / 5(장마감·애프터) | |
+| | **기록** 표 `presim_log(day, ticker, source, entry, sl, tp, horizon, p_tp, p_sl, p_none, both_pct, ev_pct, n_days, verdict, replay_json, size_json, created_at, PRIMARY KEY(day, ticker, source))` · `run_one(conn, ticker, df, source, day, inputs=None, seed=None)` 가 계산+저장 · `badge(conn, ticker, day=None)` 는 최근 3일 안 기록 한 줄(읽기만) | CREATE IF NOT EXISTS |
+| | **아침** `morning(conn, out, now=None, bars=None)` → 후보 = 저금통 전체(`piggy.items`) + PICK 통과 '유력'(`pick30.scan` 결과는 가상매매가 이미 돌린 것이 없으니 다시 호출 — 1회) + 그날 `rank_hist` 상위 PRESIM_TOP_N(가상매매가 저장한 것 재사용, 없으면 `rank.compute`) → 중복 제거 → `daily_prices` 일봉(없으면 야후 하루 최대 30종목) → run_one. 종목마다 try/except, 전체 ≤30초 목표(초과하면 로그에 시간 표시) | 자리: 가상매매 뒤·뉴스 반응 앞 |
+| `config.py` | `PRESIM_ACCOUNT_KRW`(float, 10만~1억, 기본 5,000,000) · `PRESIM_MAX_LOSS_KRW`(float, 1천~100만, 기본 50,000) · `PRESIM_TOP_N`(int, 0~50, 기본 10) — SETTINGS '숫자' 묶음 + 모듈 기본값 | 관리 모드에서 변경 |
+| `cases.py` | `presim.morning(conn, out=out)` 호출(가상매매 try 뒤) · CLI `presim [--ticker ABCD]` | |
+| `screener_ui.py` | 📇 카드 **⑥ 🎲 매매 전 시뮬레이션**: 입력칸(매수가·손절가·목표가·기간·횟수, 기본값 채움) + "🎲 1만 번 돌려 보기" → 막대 3개(익절·손절·무승부, chartpop) · 기대값·같은 날 둘 다 비율 · 과거 재생 표(전체 / 같은 신호) · 수량 표(상한 이유) · 판정 문구 + 고정 경고 + 카드 제외 사유(희석)가 있으면 빨간 경고 한 번 더. 방문객: 입력칸·버튼 없이 그날 자동 결과만 | 자동 결과가 있으면 먼저 보여 줌 |
+| `presim_ui.py`(새) | 배지 HTML `badge_chip(ticker)`(🟢/🪙/🔴 + 익절%·손절% 툴팁) · ⑥ 칸 그리기 함수(screener_ui 가 부름) — 화면 코드는 한 파일에 | |
+| `piggy_ui.py` · `pick30_ui.py` · `rank_ui.py` | 종목 카드/격자/줄에 배지 칩 한 개(읽기만 · 없으면 빈 문자열) | 셋 다 `presim_ui.badge_chip` |
+| `scoreboard.py` | SOURCES `presim_g`(🎲 🟢 유리, +30%, 40일) · `presim_c`(🪙 동전) · `presim_r`(🔴 불리, 같은 목표 — 🔴 가 정말 못 가는지) + `collect` 에서 presim_log 읽어 add(…, entry=매수가) | 🏆 성과 공표 자동 |
+| `guide_content.py` | 🏢 종목·스크리너 카드 문단 + 🏆 성과 공표 출처 설명 + 🔀 '🎲 는 🕰 타임머신과 다름' 한 줄 | |
+| `HANDOFF.md` | 2절 기능 · 4절 1번 상태 · 🌤 표 | |
+
+### 9-2. 테스트 계획(가짜 데이터 · 인터넷 없음)
+| 파일 | 확인 |
+|---|---|
+| `tests/test_presim.py`(새) | ① 무작위 걷기(드리프트 0 · 대칭 ±10%) → \|익절%−손절%\| ≤ 5%p → 🪙 ② 상승 추세 합성 → 익절% > 손절%+10 → 🟢 · 하락 → 🔴 ③ 하루에 고가·저가가 둘 다 닿는 봉만 있는 자료 → 전부 손절, both_pct 100 ④ 기간 끝 종가(p_none)와 기대값 손 계산 일치(n=200 · seed) ⑤ 120일 미만 → ok False ⑥ replay: 손으로 센 익절·손절 수와 일치 · 미래 봉을 바꿔도 그 전 날짜들 결과 불변(컨닝 검사) · 같은 신호 날 부분 집계 ⑦ size: 기본 계산 · 계좌 10% 상한 · 거래량 1% 상한 · 환율 · 이유 문구 · 손절가 ≥ 매수가면 0주 ⑧ defaults: 레벨 맵·저금통 박스·없을 때 −10%/+30% ⑨ morning: 후보 합치기·중복 제거·presim_log 행·자료 부족 건너뜀·같은 날 재실행 시 덮어씀·한 종목 예외가 전체를 안 죽임 ⑩ badge 최근 3일 |
+| `tests/test_presim_ui.py`(새) | AppTest: 스크리너 카드 ⑥ 기본값 채움 → 버튼 → 결과(막대·표·판정) · 방문객 모드 버튼 없음·자동 결과 표시 · 저금통/PICK/순위 화면에 배지 칩 · 🏆 성과 공표 출처 표에 🎲 3줄 |
+| 기존 테스트 | test_cases(아침 단계 추가) · test_admin(설정 3개) · test_scoreboard(출처 목록) · test_guide · test_screener · test_nav → 전체 5부 |
+
+### 9-3. 순서(4단계) · 예상
+1. A 엔진·재생·수량·판정 + test_presim ①~⑧ (1저녁)
+2. B presim_log · morning · cases hook · CLI · 설정 + ⑨⑩ (반나절)
+3. C 화면: ⑥ 칸 · 배지 4곳 · 방문객 + test_presim_ui (1저녁)
+4. D 🏆 출처 3개 · 가이드 · HANDOFF · 전체 테스트 5부 (반나절)
+5. 배포(사용자) → 서버 확인 → 다음 아침 자동 실행 로그 `🎲 매매 전 시뮬레이션: N종목 · 🟢a 🪙b 🔴c · 자료 부족 d · m초` 확인
+- 위험·대응: 아침 작업 67분 → presim 은 종목마다 try/except + 총 시간 로그 · numpy 메모리는 종목마다 순서대로(10k×40 float = 3MB) · 🔴 출처는 '못 간다'는 예측이라 성과 공표 방향은 그대로 두고 성공률이 낮게 나와야 맞음(해석 주의 문구)
