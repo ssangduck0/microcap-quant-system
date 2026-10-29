@@ -174,7 +174,8 @@ def ingest(items: list[dict], feed: str) -> int:
                 if hit:
                     tk, ex = hit
                     tags = tags + ["🔗이름 연결"]
-            cur = conn.execute("INSERT OR IGNORE INTO news VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            # 열 이름을 꼭 적을 것 — 10/25~29 translate.ensure 가 열 5개(title_ko…)를 더한 뒤 "VALUES 11개" 가 OperationalError 로 실패해 닷새 동안 뉴스가 한 건도 안 들어왔음
+            cur = conn.execute("INSERT OR IGNORE INTO news (id, ticker, exchange, title, summary, published, link, feed, tags, sentiment, fetched) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                (x["id"], tk, ex, x["title"], x["summary"][:1500], x["published"], x["link"], feed, json.dumps(tags, ensure_ascii=False), sent,
                                 datetime.now(timezone.utc).isoformat()))
             n += cur.rowcount

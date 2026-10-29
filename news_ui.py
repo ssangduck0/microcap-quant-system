@@ -70,6 +70,8 @@ def render() -> None:
                     a.markdown(f'<span class="qk-sub">{when}</span> {chips}<br><a href="{ui.esc(r["link"])}" target="_blank" style="font-weight:700">{ui.esc(tko)}</a>'
                                f'<br><span>{ui.esc((sko or "")[:260])}</span><br><span class="qk-sub" style="opacity:.6">원문: {ui.esc(r["title"])}</span>', unsafe_allow_html=True)
                 else:
+                    if ko_on:   # 아직 번역이 안 온 글은 영어 그대로 — 그 이유가 보이게(예전엔 말없이 영어라 '고장'처럼 보였음)
+                        chips += ui.chip("번역 대기", "gray", tip="스캐너가 10분마다 10건씩 번역해요(종목 있는 뉴스 먼저 · 3번 실패하면 영어로 둠)")
                     a.markdown(f'<span class="qk-sub">{when}</span> {chips}<br><a href="{ui.esc(r["link"])}" target="_blank" style="font-weight:700">{ui.esc(r["title"])}</a>'
                                f'<br><span class="qk-sub">{ui.esc(r["summary"][:220])}{"…" if len(r["summary"]) > 220 else ""}</span>', unsafe_allow_html=True)
                 if t:
