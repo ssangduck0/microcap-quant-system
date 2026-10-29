@@ -115,6 +115,8 @@ def label(r: dict | None) -> str:
         return f"추정 현금 소진(재무 {r['cash_asof']} 기준 · 그 뒤 조달 확인)"
     if r["runway_now"] is not None and r["runway_now"] > MAX_FLOOR_MONTHS:
         return "런웨이 50년 넘음(현금 소모 아주 적음)" + tail
+    if r.get("runway_now") is None:   # 10/29: 소모액을 못 구한 종목(흑자·소진·오래됨 아님)에서 None 을 :.1f 로 찍다 TypeError → pick30.scan() 전체가 깨져 🎯 PICK 가상 매수가 매일 실패했음
+        return "런웨이 미확인(소모액 자료 없음)" + tail
     return f"런웨이 {r['runway_now']:.1f}개월" + tail
 
 

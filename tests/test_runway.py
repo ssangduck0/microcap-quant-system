@@ -112,4 +112,6 @@ with contextlib.redirect_stdout(buf):
     diag_pick.main()
 pick30.scan = _orig
 assert "흑자(소모 없음) 1" in buf.getvalue() and "끝." in buf.getvalue(), buf.getvalue()[-600:]
+# 10/29 사고: runway_now 가 None(흑자도 소진도 아닌데 소모액을 못 구함)이면 예전엔 TypeError → pick30.scan() 이 통째로 죽어 PICK 가상 매수 실패
+assert runway.label({"stale": False, "profitable": False, "exhausted": False, "runway_now": None, "cash_asof": "2026-06-30"}).startswith("런웨이 미확인")
 print("ALL OK")
