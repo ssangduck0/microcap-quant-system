@@ -44,6 +44,8 @@ t2 = sb.table(db.connect()); assert t2.set_index(["source", "ticker"]).loc[("sho
 pk = sb.period_key(pd.Series(["2026-10-12", "2026-10-14", "2026-12-31"]), "주간"); assert list(pk) == ["2026-W42", "2026-W42", "2026-W53"]
 assert list(sb.period_key(pd.Series(["2026-10-12"]), "월간")) == ["2026-10"] and list(sb.period_key(pd.Series(["2026-10-12"]), "연간")) == ["2026"]
 sm = sb.summarize(t2).set_index("출처"); print(sm.to_string())
+assert sb.wilson(0, 0) is None and sb.wilson_text(0, 0) == "-" and sb.wilson_text(5, 10) == "24~76%" and sb.wilson_text(50, 100) == "40~60%" and sb.wilson_text(10, 10) == "72~100%"
+assert "성공률 범위(95%)" in sm.columns and all(isinstance(x, str) for x in sm["성공률 범위(95%)"])
 assert abs(sm.loc["🎯 장마감 체크리스트(BEST·후보)", "평균 최고 상승(%)"] - t2[t2.source == "close"]["max_up"].mean()) < 1e-9 and t2[t2.source == "close"]["entry"].notna().all()   # 진입가 없는 신호도 신호일 종가로 계산
 assert sm.loc["🌙 애프터 진입 구간", "성공률(%)"] == 50.0 or sm.loc["🌙 애프터 진입 구간", "대기"] == 1
 # 이미 판정된 예측은 다시 계산하지 않음

@@ -280,4 +280,22 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
     s = pd.DataFrame({"신호": g.size(), "성공": g["status"].apply(lambda x: (x == "성공").sum()), "실패": g["status"].apply(lambda x: (x == "실패").sum()),
                       "대기": g["status"].apply(lambda x: (x == "대기").sum()), "평균 최고 상승(%)": g["max_up"].mean(), "평균 기간 끝 등락(%)": g["close_h"].mean()})
     s["성공률(%)"] = s["성공"] / (s["성공"] + s["실패"]).where(lambda x: x > 0) * 100
+    s["성공률 범위(95%)"] = [wilson_text(int(k), int(k) + int(f)) for k, f in zip(s["성공"], s["실패"])]   # 2026-10-30: 표본이 작으면 성공률이 요동 → 신뢰구간을 옆에
     return s.reset_index()
+
+
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """성공 k / 판정 n 의 성공률 95% 신뢰구간(윌슨, %). n=0 이면 None. 예: 5/10 → 24~76%, 50/100 → 40~60%."""
+    if n <= 0:
+        return None
+    import math
+    p = k / n
+    d = 1 + z * z / n
+    c = p + z * z / (2 * n)
+    r = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return ((c - r) / d * 100, (c + r) / d * 100)
+
+
+def wilson_text(k: int, n: int) -> str:
+    w = wilson(k, n)
+    return "-" if w is None else f"{w[0]:.0f}~{w[1]:.0f}%"

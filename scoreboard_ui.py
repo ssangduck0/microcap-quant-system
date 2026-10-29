@@ -52,7 +52,8 @@ def render() -> None:
     cur = v if per == "전체" else v[v["기간"] == per]
     judged = cur[cur["status"].isin(["성공", "실패"])]
     rate = "-" if judged.empty else f"{(judged['status'] == '성공').mean() * 100:.1f}%"
-    ui.cards([{"t": "성공률", "v": rate, "s": f"판정 {len(judged):,}건 기준", "accent": True},  # 휴대폰: 2열 작은 카드(예전엔 숫자 하나가 한 화면)
+    ci = sb.wilson_text(int((judged["status"] == "성공").sum()), len(judged))   # 2026-10-30: 표본이 작으면 성공률이 요동 → 95% 범위 함께
+    ui.cards([{"t": "성공률", "v": rate, "s": f"판정 {len(judged):,}건 기준 · 95% 범위 {ci}", "accent": True},  # 휴대폰: 2열 작은 카드(예전엔 숫자 하나가 한 화면)
               {"t": "예측", "v": f"{len(cur):,}", "s": per},
               {"t": "✅ 성공", "v": f"{(cur['status'] == '성공').sum():,}"},
               {"t": "❌ 실패", "v": f"{(cur['status'] == '실패').sum():,}"},
