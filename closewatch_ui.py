@@ -175,6 +175,9 @@ def render_targets(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render() -> None:
+    import access
+    if access.guest_block():   # 2026-10-29 토스 데이터 정책 B안(방문객에게 호가·체결강도·1분봉 숨김)
+        return
     t1, t2, t3 = st.tabs(["🎯 오늘 체크리스트", "📈 결과 추적 (반등 성공·실패)", "🚦 거래정지 현황"])
     with t1:
         render_today()

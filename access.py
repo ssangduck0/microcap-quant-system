@@ -13,7 +13,11 @@ import pandas as pd
 
 import db
 
-HIDDEN_PAGES = {"admin", "watch", "piggy", "notes", "events"}
+# 2026-10-29 토스 데이터 정책 B안(docs/toss_data_policy_audit_2026-10.md): 토스 Open API 자료(순위·호가·체결·1분봉)가 그대로 보이는 화면은 방문객에게 숨긴다
+# — FAQ "투자자 본인의 매매 목적에 한해 이용 · 비상업적이라도 제3자 배포 금지". 주인 화면·스캐너는 그대로. movers = 📈 급상승/급하락 · after = 🌙 애프터 스캘핑
+HIDDEN_PAGES = {"admin", "watch", "piggy", "notes", "events", "movers", "after"}
+HIDDEN_TABS = {"accum": {"close"}}   # 화면 안 탭 중 방문객에게 숨기는 것: 🧲 수급 → 🎯 장마감 체크리스트(토스 호가·체결강도·1분봉)
+GUEST_HIDDEN_NOTE = "👥 방문객 화면에서는 이 내용이 보이지 않아요 — 토스증권 Open API 자료(순위·호가·체결·1분봉)는 데이터 이용 정책(본인 매매 목적 · 제3자 배포 금지)에 따라 주인 화면에서만 봅니다."
 DURATIONS = {"1시간": 1, "3시간": 3, "하루": 24, "3일": 72, "7일": 168}
 DDL = """CREATE TABLE IF NOT EXISTS guest_tokens (token TEXT PRIMARY KEY, name TEXT, created_at TEXT, expires_at TEXT, revoked INTEGER DEFAULT 0, last_seen TEXT,
           visits INTEGER DEFAULT 0)"""
@@ -108,6 +112,18 @@ def is_guest() -> bool:
 
 def can_edit() -> bool:
     return not is_guest()
+
+
+def guest_block() -> bool:
+    """토스 자료 화면(B안)의 첫 줄에서 부른다: 방문객이면 안내 한 줄을 그리고 True(화면은 그 자리에서 return), 주인이면 False."""
+    if not is_guest():
+        return False
+    try:
+        import streamlit as st
+        st.caption(GUEST_HIDDEN_NOTE)
+    except Exception:  # noqa: BLE001
+        pass
+    return True
 
 
 # ---------------------------------------------------------------- 접속 기록 · 한 기기 전용

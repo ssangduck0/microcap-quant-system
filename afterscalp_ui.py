@@ -32,6 +32,9 @@ def tip_card() -> None:
 
 
 def render() -> None:
+    import access
+    if access.guest_block():   # 2026-10-29 토스 데이터 정책 B안
+        return
     st.subheader("🌙 애프터마켓 스캘핑 — 스승님 꿀팁")
     sess = (db.get_meta("us_session") or {}).get("value") or "알 수 없음"
     a_end = _meta_dt("us_after_end")

@@ -23,6 +23,9 @@ def _load(kind: str):
 
 
 def render() -> None:
+    import access
+    if access.guest_block():   # 2026-10-29 토스 데이터 정책 B안
+        return
     ui.title("급상승/급하락", "토스 순위 상위 100(세션 상관없이 지금 순위 · ETF·워런트 제외)에 희석 배지·산업·시가총액·최근 뉴스/공시 수를 붙여요. "
              "희석 배지가 붙은 급등주는 회사가 그 틈에 물량을 풀 수 있으니 조심하세요.")
     kind = st.radio("종류", ["📈 급상승", "📉 급하락"], horizontal=True, key="mv_kind", label_visibility="collapsed")

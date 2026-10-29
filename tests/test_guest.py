@@ -28,7 +28,7 @@ at = AppTest.from_file(APP, default_timeout=180).run(); assert at.text_input(key
 # 방문객 링크: 비밀번호 없이 열림 · 개인 화면 없음 · 기본 화면 종합 순위
 at = AppTest.from_file(APP, default_timeout=180); at.query_params["guest"] = tok; at.run(); (lambda b: b and b[0].click().run())([x for x in at.button if x.key == "_guest_agree"]); assert not at.exception, [e.value for e in at.exception]
 labels = [l.label for l in at.get("page_link")]; print(len(labels))
-assert not any(x in labels for x in ("관리 모드", "워치리스트", "저금통", "노트", "일정")) and "종합 순위" in labels
+assert not any(x in labels for x in ("관리 모드", "워치리스트", "저금통", "노트", "일정", "급상승/급하락", "애프터 스캘핑")) and "종합 순위" in labels   # 급상승·애프터 = 토스 자료 화면(2026-10-29 B안)
 assert any("방문객 모드" in i.value and "스터디 민수" in i.value for i in at.info)
 assert not any("trycloudflare" in m.value for m in at.markdown)                                   # 휴대폰 주소 숨김
 assert access.all_links().iloc[0]["visits"] == 1

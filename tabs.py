@@ -13,8 +13,19 @@ from typing import Callable
 import streamlit as st
 
 
+def visible_items(page_key: str, items: list, guest: bool) -> list:
+    """방문객이면 access.HIDDEN_TABS 에 적힌 탭을 뺀다(2026-10-29 토스 데이터 정책 B안). 주인은 그대로."""
+    if not guest:
+        return list(items)
+    import access
+    hide = access.HIDDEN_TABS.get(page_key, set())
+    return [it for it in items if it[0] not in hide]
+
+
 def select(page_key: str, items: list[tuple[str, str, Callable[[], None]]]) -> str:
     """items = [(탭키, 라벨, 그리는 함수)]. 고른 탭을 그리고 그 탭키를 돌려준다."""
+    import access
+    items = visible_items(page_key, items, access.is_guest())   # 숨긴 탭은 주소 ?tab= 으로 와도 첫 탭으로
     keys, labels = [k for k, _, _ in items], [l for _, l, _ in items]
     if os.environ.get("QUANT_TEST_ALL_PAGES") == "1" or not hasattr(st, "segmented_control"):
         for tab, (_k, _l, fn) in zip(st.tabs(labels), items):
