@@ -686,6 +686,11 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # 상폐 종목 경고 도배 방지
+    try:  # 2026-10-30: WARNING 이상을 DB 폴더 scanner.log 에도(서버는 journalctl 뿐이라 ⚙️ 관리 모드 '로그 보기' 가 비어 있었음)
+        import filelog
+        filelog.attach("scanner")
+    except Exception:  # noqa: BLE001
+        pass
 
     client = sec.SecClient(config.require_sec_user_agent())
     tc = toss.TossClient(config.TOSS_CLIENT_ID, config.TOSS_CLIENT_SECRET, config.TOSS_BASE_URL) if config.TOSS_ENABLED else None

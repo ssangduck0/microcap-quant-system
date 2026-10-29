@@ -135,14 +135,17 @@ def render() -> None:
                   {"t": "내부자 매수", "v": _count(conn, "insider_tx", "WHERE code='P'")}, {"t": "Reg SHO 받은 날", "v": _count(conn, "regsho_files", "WHERE status='ok'")},
                   {"t": "종목 리포트", "v": _count(conn, "reports")}, {"t": "예측(성과 공표)", "v": _count(conn, "pred_outcomes")}])
     st.caption(f"DB 파일: {config.DB_PATH}")
-    logs = {"스캐너": "scanner.log", "대시보드": "dashboard.log", "휴대폰 터널": "tunnel.log", "수집기": "collector.log"}
+    import filelog   # 2026-10-30: 서버는 journalctl 뿐이라 예전 파일 목록이 전부 "없습니다" 였음 → 아침 작업·스캐너·수집기가 DB 폴더에 직접 남김
+    warns = filelog.warnings("cases", days=7)
+    with st.expander(f"⚠️ 아침 작업 경고·실패(최근 7일) {len(warns)}건", expanded=bool(warns)):
+        st.code("\n".join(warns) if warns else "(없음 — cases.log 가 생긴 뒤부터 모여요)", language=None)
+    logs = {"스캐너": "scanner", "아침 작업": "cases", "수집기": "collector", "대시보드": "dashboard", "휴대폰 터널": "tunnel"}
     which = st.radio("로그 보기", list(logs), horizontal=True, key="adm_log")
-    lp = Path(config.DB_PATH).with_name(logs[which])
-    if lp.exists():
-        tail = lp.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
-        st.code("\n".join(tail) or "(비어 있음)", language=None)
+    tail = filelog.tail(logs[which], 30)
+    if tail is None:
+        st.caption(f"{filelog.path(logs[which])} 파일이 없습니다(서버에선 아침 작업·스캐너·수집기만 파일로 남겨요 — 나머지는 journalctl).")
     else:
-        st.caption(f"{lp} 파일이 없습니다.")
+        st.code("\n".join(tail) or "(비어 있음)", language=None)
 
 
 def render_papertrade() -> None:

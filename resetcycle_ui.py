@@ -105,6 +105,8 @@ def render(t: str, df: pd.DataFrame | None) -> None:
             "희석이 끝나지 않는 구조(우선주 청산가치 ≫ 시총) — 오래 들고 가면 녹아요. 반등은 짧게, 손절은 갭에 뚫릴 수 있어요(병합·교환 공시 날).",
             "어음 하한은 고정 문구라 병합 뒤 가격에선 의미 없음 = 주식 결제가 계속됨. 12/4 주총(어음 승인 · 월례 병합 권한)이 다음 갈림길."]
     st.markdown(ui.box("⚠️ 위험", [b for b in risk if b], color="#E5484D"), unsafe_allow_html=True)
+    if not [s for s in r["splits"] if s[0] != str(cfg.get("split_date") or "")[:10]]:
+        st.caption("⚠️ 이 종목의 병합 이력(rs_events)이 비어 있어요 — 발표 전환가 환산과 나스닥 규정 판정이 틀릴 수 있어요(아침 작업·🔁 병합 후 레이더가 채우면 맞아져요).")
     _settings(t, cfg)
 
 

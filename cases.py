@@ -556,6 +556,9 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+    import filelog   # 2026-10-30: 진행 줄(INFO)·실패(WARNING)를 DB 폴더 cases.log 에도 → ⚙️ 관리 모드 '⚠️ 아침 작업 경고' 상자·'로그 보기'
+    filelog.attach("cases", level=logging.INFO)
+    _out = filelog.out_logger("cases.out").info
     db.init_db()
     with closing(db.connect()) as conn:
         if args.cmd == "status":
@@ -580,7 +583,7 @@ def main() -> int:
             status(conn)
         else:
             active, delisted = case_universe(False)
-            update(conn, active, delisted, args.days, threshold=args.threshold)
+            update(conn, active, delisted, args.days, threshold=args.threshold, out=_out)
             status(conn)
     return 0
 

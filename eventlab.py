@@ -304,6 +304,11 @@ def main() -> int:
     ap.add_argument("--tickers", default="")
     a = ap.parse_args()
     db.init_db()
+    try:  # 2026-10-30: WARNING 이상을 DB 폴더 collector.log 에도(⚙️ 관리 모드 '로그 보기' 수집기 칸)
+        import filelog
+        filelog.attach("collector")
+    except Exception:  # noqa: BLE001
+        pass
     client = sec.SecClient(config.SEC_USER_AGENT)
     tk = [x.strip().upper() for x in a.tickers.split(",") if x.strip()] or None
     if a.cmd == "collect":

@@ -28,5 +28,7 @@ at.text_area(key="adm_manual").set_value("aaa\n# 주석\n bbb \n"); [b for b in 
 assert open(config.MANUAL_TICKERS_FILE).read() == "AAA\nBBB\n"
 [b for b in at.button if b.key == "adm_tg"][0].click().run(); assert sent and "테스트" in sent[0]
 assert any("공시 알림: 새 공시 3건" in c.value for c in at.code)
+assert any("아침 작업 경고·실패" in (e.label or "") for e in at.expander) and "아침 작업" in at.radio(key="adm_log").options   # 2026-10-30 filelog 경고 상자 · 로그 보기 목록
+at.radio(key="adm_log").set_value("아침 작업").run(); assert not at.exception and any("파일이 없습니다" in c.value for c in at.caption)   # 임시 DB 폴더엔 cases.log 없음
 [b for b in at.button if b.key == "adm_reset"][0].click().run(); assert config.overrides() == {}
 os.environ.pop("QUANT_TEST_PAGE"); print("ALL OK")
