@@ -17,10 +17,21 @@ def _scan():
     return pick30.scan()
 
 
-def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None) -> str:
-    """두 줄 칩: 1줄 순위·티커(↑↓) / 2줄 상태·상승률·D-day — 글자가 잘리지 않게."""
+def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None, guest: bool | None = None) -> str:
+    """두 줄 칩: 1줄 순위·티커(↑↓) / 2줄 상태·상승률·D-day — 글자가 잘리지 않게. 방문객(A안)은 상승률을 전일 종가 기준으로 다시 계산."""
+    import access
+    guest = access.is_guest() if guest is None else guest
+    gp = {}
+    if guest:   # 👥 토스 데이터 정책 A안(2026-10-30): 회사 목표가 대비 % 를 스냅샷의 당일 현재가가 아니라 전일 종가(야후 일봉)로
+        import guestpx
+        gp = guestpx.prev_close([r["ticker"] for r in rows])
     cells = []
     for i, r in enumerate(rows, 1):
+        pct = r["pct"]
+        if guest:
+            px = (gp.get(r["ticker"]) or {}).get("close")
+            tgt = r.get("target") or (None if not r.get("price") or pct is None else float(r["price"]) * (1 + float(pct) / 100))
+            pct = None if not px or not tgt else (float(tgt) / px - 1) * 100
         mv = ""
         if first and r["ticker"] in first and first[r["ticker"]] != i:
             d = first[r["ticker"]] - i
@@ -29,7 +40,7 @@ def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None
         cells.append(f'<div class="qk-pick"><div class="l1"><span class="n">{i}</span><b>{ui.esc(r["ticker"])}</b>{mv}</div>'
                      f'<div class="l2"><span style="color:{STC[r["status"]]};font-weight:700">{r["status"]}</span>'
                      + ('<span class="wk" title="약한 목표: baby shelf 탈출">약</span>' if r.get("weak") else "")
-                     + f' · +{r["pct"]:.0f}%{dd}'
+                     + (f' · +{pct:.0f}%{dd}' if pct is not None else f' · -{dd}')
                      + ((lambda b: f' <span title="{ui.esc("🎲 매매 전 시뮬레이션 " + __import__("presim_ui").badge_text(b))}">{b["verdict"]}</span>')(badges[r["ticker"]]) if badges and r["ticker"] in badges else "")
                      + '</div></div>')
     return ('<style>.qk-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 12px}'
@@ -190,6 +201,10 @@ def render_pick() -> None:
         st.info("조건을 통과한 종목이 없어요. 회사 압박·펀드스캔 자료가 쌓이면 채워져요.")
     else:
         import presim_ui
+        import access
+        if access.is_guest():
+            import guestpx
+            st.caption(guestpx.NOTE)
         st.markdown(grid(rows, st.session_state[first_key], presim_ui.badges([r["ticker"] for r in rows])), unsafe_allow_html=True)
         if show_txt:
             st.code("\n".join(f"{i}. {r['ticker']} {r['status']}{'(약)' if r.get('weak') else ''} +{r['pct']:.0f}% → {r['target_name']} ${r['target']:.4f}" + ("" if r["imm_days"] is None else f" · D-{r['imm_days']} {r['imm_kind']}") + f" · {r.get('why', '')}"

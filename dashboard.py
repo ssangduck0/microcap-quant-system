@@ -545,6 +545,14 @@ def _render_snap() -> None:
         ev_all = load_events_cached()
         view = fill_prev_scores(view, snaps)  # 정규장 전(프리·애프터)에는 오늘 승률 점수가 없으므로 전 거래일 점수를 보여 줌
         view = similar.annotate(view, ev_all, succ_target)
+        _guest = access.is_guest()
+        if _guest:   # 👥 토스 데이터 정책 A안(2026-10-30): 당일 현재가·오늘 등락(토스 1분봉) → 전일 종가(야후 일봉 확정 봉). 당일 값으로 계산한 열은 아래에서 숨김
+            import guestpx
+            _gp = guestpx.prev_close(view["ticker"].unique())
+            view = view.assign(price=pd.to_numeric(view["ticker"].map(lambda x: (_gp.get(x) or {}).get("close")), errors="coerce"),
+                               day_change_pct=pd.to_numeric(view["ticker"].map(lambda x: (_gp.get(x) or {}).get("chg")), errors="coerce"),
+                               _px_date=view["ticker"].map(lambda x: (_gp.get(x) or {}).get("date") or ""))
+            st.caption(guestpx.NOTE)
         f52a, f52b, f52c = st.columns([2, 1, 1])
         only52 = f52a.checkbox("52주 바닥권 + 거래량 급증만 보기", False, key="f52_on", help="1년 일봉 최저가 근처이면서 오늘 거래량이 평소보다 크게 터진 종목")
         near52 = f52b.slider("52주 저점 +% 이내", 5, 50, 15, key="f52_near", disabled=not only52)
@@ -590,11 +598,18 @@ def _render_snap() -> None:
         _fx = forensic.latest_dates()
         t.insert(list(t.columns).index("워치") + 1, "공시분석", [_fx.get(x, "") for x in view["ticker"]])
         t.insert(list(t.columns).index("티커") + 1, "토스", tosslink_ui.links(view["ticker"]))
+        if _guest:   # 👥 A안: 열 이름을 '전일 종가'로, 당일 값으로 계산한 열(guestpx.HIDE_COLS)은 뺌
+            t = t.rename(columns={"현재가($)": "전일 종가($)", "현재가(원)": "전일 종가(원)", "오늘 등락(%)": "전일 등락(%)"})
+            t.insert(list(t.columns).index("전일 종가(원)") + 1, "종가 기준일", view["_px_date"].values)
+            t = t.drop(columns=[c for c in guestpx.HIDE_COLS if c in t.columns])
         _ids = list(view["ticker"]) if view["ticker"].is_unique else [f"{a}|{b}" for a, b in zip(view["ticker"], view["date"])]
         _pick = pick.clickable(t, _ids, "snap_table", hide_index=True, width="stretch", column_config={**intel_ui.COLUMN_CONFIG, "토스": tosslink_ui.COLUMN,
             "공시분석": st.column_config.TextColumn(help="공시 분석 프로젝트(덕구 스캔) 보고서를 저장한 날짜. 행을 누르면 아래 종목 상세에서 볼 수 있음"),
             "현재가($)": st.column_config.NumberColumn(format="%.4f"),
             "현재가(원)": st.column_config.NumberColumn(format="%d"),
+            "전일 종가($)": st.column_config.NumberColumn(format="%.4f", help="방문객 화면: 야후 일봉 마지막 확정 봉의 종가"),
+            "전일 종가(원)": st.column_config.NumberColumn(format="%d"),
+            "전일 등락(%)": st.column_config.NumberColumn(format="%.1f", help="전일 종가의 그 전날 종가 대비"),
             "낙폭(%)": st.column_config.NumberColumn(format="%.1f", help="20일 고점 대비"),
             "오늘 등락(%)": st.column_config.NumberColumn(format="%.1f", help="전일 종가 대비"),
             "유사 사례 수": st.column_config.NumberColumn(format="%d", help="오늘 등락률 ±5%p, 거래량 배수 ×/÷2 이내인 과거 급락 사건 수(오늘 등락률이 -10% 이하일 때만 계산)"),

@@ -29,11 +29,11 @@ def split_chain(t: str) -> dict:
     return {"items": [{"date": d, "text": f"1:{round(1 / r):g}"} for d, r in items], "count": len(items), "cum": cum, "n3y": sum(1 for d, _ in items if d >= y3)}
 
 
-def ladder(t: str, price: float | None, pr: dict | None, oh_rows: list[dict], df=None) -> list[dict]:
-    """가격 사다리: 위에서 아래로(높은 가격 먼저). 현재가는 ★."""
+def ladder(t: str, price: float | None, pr: dict | None, oh_rows: list[dict], df=None, now_label: str = "★ 현재가") -> list[dict]:
+    """가격 사다리: 위에서 아래로(높은 가격 먼저). 현재가는 ★(방문객은 '★ 전일 종가')."""
     lv = []
     if price:
-        lv.append({"price": price, "label": "★ 현재가", "note": "", "kind": "now"})
+        lv.append({"price": price, "label": now_label, "note": "", "kind": "now"})
     for n, v, _p in (pr or {}).get("targets") or []:
         lv.append({"price": v, "label": n, "note": {"$1 상장 유지": "나스닥 최저 호가 기준", "baby shelf 탈출": "공개유통시총 $75M — 선반 발행 한도 해제",
                                                      "시가총액 기준 회복": "상장증권 시가총액 기준 충족"}.get(n, ""), "kind": "target"})
@@ -155,7 +155,7 @@ def build(t: str, df=None) -> dict:
             ck = {}
     for e in ev:
         e["dday"] = (date.fromisoformat(e["date"]) - date.today()).days
-    return {**g, "chain": split_chain(t), "ladder": sorted(ladder(t, g["price"], pr, oh, df) + list(ck.get("levels") or []), key=lambda x: -x["price"]), "clock": ck, "overhang": oh, "runway": rwy,
+    return {**g, "chain": split_chain(t), "ladder": sorted(ladder(t, g["price"], pr, oh, df, now_label="★ " + (g.get("price_label") or "현재가")) + list(ck.get("levels") or []), key=lambda x: -x["price"]), "clock": ck, "overhang": oh, "runway": rwy,
             "purposes": purposes(t, g["price"], pr, oh, rwy, ln, ev), "events_ahead": ev, "holders": holders(t), "timeline": events_brief.build(t, days=365, ahead=0)}
 
 

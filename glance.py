@@ -11,8 +11,8 @@ from datetime import date, timedelta
 import db
 
 
-def build(t: str, df=None) -> dict:
-    """df: 6개월 일봉(있으면 3개월 수익률·60일 고점 격차·52주 저점 근처 계산)."""
+def build(t: str, df=None, guest: bool | None = None) -> dict:
+    """df: 6개월 일봉(있으면 3개월 수익률·60일 고점 격차·52주 저점 근처 계산). guest: 방문객이면 price 를 전일 종가로(토스 데이터 정책 A안, 2026-10-30) — None 이면 화면 상태로 판단."""
     import events_brief
     import multisignal
     import shares
@@ -20,6 +20,14 @@ def build(t: str, df=None) -> dict:
     with closing(db.connect()) as conn:
         s = conn.execute("SELECT price, float_shares, dilution_status, volume_mult FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
         s = dict(s) if s else {}
+        import access
+        guest = access.is_guest() if guest is None else guest
+        price_label = "현재가"
+        if guest:   # 👥 A안: 스냅샷의 당일 현재가(토스 1분봉) 대신 전일 종가(야후 일봉 확정 봉) — 헤더·한 장 요약·가격 사다리 % 가 같이 바뀜
+            import guestpx
+            gp = guestpx.one(t, conn=conn)
+            s["price"] = gp["close"] if gp else None
+            price_label = guestpx.LABEL
 
         def q1(sql, p):
             try:
@@ -108,7 +116,7 @@ def build(t: str, df=None) -> dict:
         risk.append("최근 2주 악재·주의 공시")
     ev = events_brief.build(t, days=120)
     return {"ticker": t, "name": meta[0] if meta else "", "sector": (meta[1] if meta else "") or "", "themes": json.loads(meta[2]) if meta and meta[2] else [],
-            "price": price, "shares": sh, "shares_tag": sh_tag, "mcap": mcap, "turnover": to, "ok": ok, "risk": risk, "events": ev[:10], "pressure": pr}
+            "price": price, "price_label": price_label, "shares": sh, "shares_tag": sh_tag, "mcap": mcap, "turnover": to, "ok": ok, "risk": risk, "events": ev[:10], "pressure": pr}
 
 
 def render(t: str) -> None:
@@ -120,7 +128,7 @@ def render(t: str) -> None:
     import watch_ui
     df = watch_ui.prices((t.upper(),)).get(t.upper())
     g = build(t, df)
-    rows = [("가격", "-" if not g["price"] else f"${g['price']:.4f}"), ("시가총액(추정)", "-" if not g["mcap"] else f"약 ${g['mcap'] / 1e6:,.1f}M"),
+    rows = [("가격" if g.get("price_label", "현재가") == "현재가" else g["price_label"], "-" if not g["price"] else f"${g['price']:.4f}"), ("시가총액(추정)", "-" if not g["mcap"] else f"약 ${g['mcap'] / 1e6:,.1f}M"),
             ("주식 수(추정)", "-" if not g["shares"] else f"약 {g['shares'] / 1e6:,.2f}M주"), ("회전율", "-" if not g["turnover"] else f"{g['turnover']['pct']:.0f}%"),
             ("업종 · 테마", (g["sector"] or "-") + ("" if not g["themes"] else " · " + ", ".join(g["themes"][:3])))]
     st.markdown(ui.kv(rows), unsafe_allow_html=True)

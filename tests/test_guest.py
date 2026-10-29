@@ -12,6 +12,9 @@ with closing(db.connect()) as conn:
     db.upsert_snapshot(conn, {"date": date.today().isoformat(), "ticker": "MINE", "exchange": "NASDAQ", "first_seen": now, "last_seen": now, "price": 1.0, "high_20d": 2.0, "low_20d": 0.9,
         "drawdown_pct": -40.0, "day_change_pct": -5.0, "volume_mult": 2.0, "buy_pressure": 55.0, "float_shares": 3e6, "atr14": 0.01, "quant_score": 50.0, "quant_detail": "{}",
         "pump_score": 40.0, "pump_detail": '{"checks":[]}', "dilution_status": "CLEAN", "excluded": 0})
+    _d1, _d2 = (date.today() - timedelta(days=1)).isoformat(), (date.today() - timedelta(days=2)).isoformat()   # 방문객 전일 종가(A안) 검증용 야후 일봉
+    conn.executemany("INSERT OR REPLACE INTO daily_prices VALUES (?,?,?,?,?,?,?)", [("MINE", _d2, 0.5, 0.6, 0.4, 0.5, 1000.0), ("MINE", _d1, 0.8, 0.9, 0.7, 0.8, 1000.0)])
+    conn.commit()
 watch.add("MINE", "보유"); piggy.add("PIGX", "기타")
 db.set_meta("tunnel_url", "https://abc.trycloudflare.com")
 tok = access.create("스터디 민수", 24)
@@ -40,6 +43,10 @@ assert not any("관리 모드" in m.value for m in at.markdown if "qk-title" in 
 os.environ["QUANT_TEST_PAGE"] = "snap"
 at = AppTest.from_file(APP, default_timeout=180); at.query_params["guest"] = tok; at.run(); (lambda b: b and b[0].click().run())([x for x in at.button if x.key == "_guest_agree"]); assert not at.exception
 snap = [d.value for d in at.dataframe if "퀀트점수" in d.value.columns][0]; assert (snap["워치"].fillna("") == "").all()   # ⭐ 표시 없음
+import guestpx
+_exp = guestpx.one("MINE")   # 토스 데이터 정책 A안: 방문객은 전일 종가(야후 일봉) · 당일 값으로 계산한 열 없음 · 스냅샷 price 1.0 은 안 보임
+assert "전일 종가($)" in snap.columns and "전일 등락(%)" in snap.columns and "종가 기준일" in snap.columns and "현재가($)" not in snap.columns and not any(c in snap.columns for c in guestpx.HIDE_COLS), list(snap.columns)
+assert _exp and float(snap["전일 종가($)"].iloc[0]) == _exp["close"] and _exp["close"] in (0.8, 0.5) and any("전일 종가" in c.value for c in at.caption), (_exp, snap["전일 종가($)"].tolist())
 os.environ.pop("QUANT_TEST_PAGE")
 # 취소 · 만료
 access.revoke(tok)

@@ -173,7 +173,7 @@ def render(t: str, c: dict, df=None) -> None:
         if nd.get("date"):
             st.markdown(ui.chip(f"다음 기한 {nd['date']} {_dday(nd['date'])} · {nd.get('what') or ''}", "orange"), unsafe_allow_html=True)
     with b:   # 🎯 가격대·시나리오
-        st.markdown("**🎯 주요 가격대·시나리오** — ★ 현재가 기준")
+        st.markdown(f"**🎯 주요 가격대·시나리오** — ★ {c.get('price_label') or '현재가'} 기준")
         sc = s.get("scenarios") or {}
         lv = [{"price": _num(x.get("price")), "label": x.get("label") or "", "note": x.get("why") or "", "kind": "ai", "color": ""} for x in (s.get("levels") or []) if isinstance(x, dict) and _num(x.get("price"))]
         for k, nm, col in SCEN:
@@ -181,7 +181,7 @@ def render(t: str, c: dict, df=None) -> None:
             if _num(x.get("target")):
                 lv.append({"price": _num(x["target"]), "label": f"{nm} 시나리오 목표", "note": str(x.get("trigger") or "")[:60], "kind": k, "color": col})
         if price:
-            lv.append({"price": price, "label": "★ 현재가", "note": "", "kind": "now", "color": ""})
+            lv.append({"price": price, "label": "★ " + (c.get("price_label") or "현재가"), "note": "", "kind": "now", "color": ""})
         for x in sorted(lv, key=lambda v: -v["price"]):
             now = x["kind"] == "now"
             pct = None if not price or now else (x["price"] / price - 1) * 100

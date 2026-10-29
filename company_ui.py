@@ -129,7 +129,7 @@ def render(t: str) -> None:
     with tabs[0]:
         a, b = st.columns([2, 1])
         with a:
-            st.markdown(ui.kv([("현재가", "-" if not c["price"] else f"${c['price']:.4f}"), ("시가총액(추정)", "-" if not c["mcap"] else f"약 ${c['mcap'] / 1e6:,.2f}M"),
+            st.markdown(ui.kv([(c.get("price_label") or "현재가", "-" if not c["price"] else f"${c['price']:.4f}"), ("시가총액(추정)", "-" if not c["mcap"] else f"약 ${c['mcap'] / 1e6:,.2f}M"),
                                ("주식 수(추정)", "-" if not c["shares"] else f"약 {c['shares'] / 1e6:,.2f}M주"), ("회전율", "-" if not c["turnover"] else f"{c['turnover']['pct']:.0f}%")]),
                         unsafe_allow_html=True)
             st.caption(f"주식 수 출처: {c['shares_tag']}")
@@ -158,7 +158,7 @@ def render(t: str) -> None:
         if s.get("한줄요약"):
             st.info(str(s["한줄요약"]))
     with tabs[1]:
-        st.markdown("**가격 사다리** — 위로 갈수록 회사·물량이 노리는 가격, ★ 현재가")
+        st.markdown(f"**가격 사다리** — 위로 갈수록 회사·물량이 노리는 가격, ★ {c.get('price_label') or '현재가'}")
         for x in c["ladder"]:
             now = x["kind"] == "now"
             st.markdown(f'<div style="display:flex;gap:14px;padding:7px 10px;border-radius:8px;{"background:rgba(54,120,246,.12);font-weight:800" if now else ""}">'
