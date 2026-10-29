@@ -52,12 +52,22 @@
 | 일 | 결과 |
 |---|---|
 | ① 💵 dry-run 결과 — 그때 1주 샀다면 | 커밋 babeea5 — `broker.dry_outcome/simulate_dry/dry_summary` + 표 `live_dry_results`(CREATE IF NOT EXISTS). dry 매수 기록(막히지 않은 것)마다 야후 일봉으로 되감아 결과를 붙임: 매수 **다음 봉부터** 손절 → 익절 → 보유일 → 30거래일 평가 마감(같은 날 둘 다 닿으면 손절 · 체결가는 지정가 가정). 아침 작업(`cases.update`) 끝에 자동 + `python cases.py drysim`. 💵 구역에 '기록 · 익절 비율 · 끝난 것 손익 합 · 진행 중 평가' 4칸 + 한글 열 표(기록 없으면 안내 글). 테스트: test_broker 14절(익절·손절·동시·보유일·진행·봉 없음·재실행·오늘 봉 제외) · test_broker_ui(안내 글 → 요약·표) · test_cases/test_admin/test_pagecache/test_aicost/test_guide 통과 |
-| 배포 | Claude 가 07:05 `deploy_from_pc.py` 시도 → 앱 안전장치 'Production Deploy' 가 막음(채팅 허락으로는 안 풀림, 네 번째) → **저녁에 사용자가 배포**(아래 '저녁에 할 일' 1번). 서버는 아직 85d2779(06:27 배포본) |
+| 배포 | Claude 가 07:05 `deploy_from_pc.py` 시도 → 앱 안전장치 'Production Deploy' 가 막음(채팅 허락으로는 안 풀림, 네 번째) → ✅ **사용자가 14:42 배포(a2c36fc)** · Claude 확인 결과는 아래 ✅ 표 |
 | 기존 dry 기록 | 서버 live_orders 의 dry 매수 중 신호인 것은 10/28 FAMI·MRNO 2건(probe POM 은 1주 왕복 테스트라 제외 — 6f2df0a · INEO·INTZ 는 안전장치에 막힌 기록이라 제외). 10/29 미국장 봉이 생기는 **10/30 07:30 아침 작업부터** 결과가 붙음(그 전엔 '진행 · 지난 봉 0') |
 | 전체 테스트(5부, 배경) | 140 files OK, 0 failed (06:57-07:05, after babeea5) |
+**✅ 10/29 14:42 배포(사용자) — Claude 확인(14:45~, 서버는 읽기만 함)**
+| 확인 | 결과 |
+|---|---|
+| 코드 | broker.py · cases.py · broker_ui.py · guide_content.py 의 MD5 가 PC HEAD a2c36fc 와 똑같음 · tests 폴더(143개 파일)도 같이 올라감 |
+| 서비스 | scanner · dashboard(8501) · guest(8502) · collector · 터널 2개 모두 active, 14:42:18~20 재시작 · 재시작 뒤 대시보드·방문객 로그에 오류 없음 · 페이지 캐시 warm 정상(14:43, 53초) |
+| 스캐너 | 토스 Open API 사용 · 실매매 동기화 스레드(60초) 시작 · 감시 대상 3,304개 · 재시작 뒤 첫 사이클 완료 14:54:02(145종목 저장, 11분 40초) · 재시작 이후 로그 168줄에 Traceback/ERROR 없음 |
+| 새 표 | `live_dry_results` 만들어짐(0건 — 정상: 10/29 미국장 봉이 아직 없음) · dry 매수 기록 5건 그대로(FAMI·MRNO 신호 2 · INEO·INTZ 막힘 · POM probe) |
+| 서버에서 테스트 | 배포된 코드로 `tests/test_broker.py` · `tests/test_broker_ui.py` 를 임시 DB(오프라인)로 실행 → 둘 다 ALL OK(💵 구역 '아직 없음' 안내 → 요약·표까지 화면 테스트 통과) |
+| 스위치 | LIVE_TRADING 꺼짐(`is_live()` False) · kill 스위치 비어 있음 · `dry_summary` 읽기: 기록 0 · 실제 체결은 probe 3건(−1.4센트)뿐 |
+| 못 한 것 | 💵 화면을 눈으로 보는 것 — 대시보드 비밀번호 입력은 Claude 가 하지 않음(Cloudflare 는 크롬에 로그인돼 있었음) → **사용자가 ⚙️ 관리 모드 › 💵 실매매 맨 아래 '아직 없음' 한 줄만 확인** |
 
 **저녁에 할 일**
-1. 배포: `python deploy/deploy_from_pc.py` → ⚙️ 관리 모드 💵 실매매 맨 아래에 'dry-run 결과(그때 1주 샀다면): 아직 없음' 안내가 보이면 반영된 것. 결과는 다음 아침 07:30 작업부터 쌓임(바로 보려면 서버에서 `sudo -u quant venv/bin/python -X utf8 cases.py drysim` — 지금까지의 dry 기록 5건에도 붙음).
+1. ~~배포~~ ✅ 14:42 배포됨 · Claude 확인 끝(위 ✅ 표) → 남은 건 ⚙️ 관리 모드 💵 실매매 맨 아래 'dry-run 결과(그때 1주 샀다면): 아직 없음' 안내 **눈으로 10초 확인**. 결과는 **10/30 07:30 아침 작업부터** 쌓임(지금 서버에서 `cases.py drysim` 을 돌려도 10/29 미국장 봉이 없어 '진행 · 지난 봉 0'만 나옴).
 2. (선택) 3일 목표 10년 재수집 — 위 결정 목록 3번째 명령.
 
 
@@ -148,7 +158,7 @@
 
 ## 5. 사용자가 할 일(확인 필요)
 - **10/29 아침**: ✅ 배포·서버 2줄 완료(06:27, Claude 확인 06:41) → 남은 것: ⚙️ 관리 모드 💵 실매매 화면 눈으로 확인 + 결정 3개(맨 위 ☀️ · 1주 모드는 'dry-run 유지'로 결정)
-- **10/29 저녁**: 배포(`python deploy/deploy_from_pc.py`) → 💵 실매매 맨 아래 'dry-run 결과' 안내 확인(맨 위 🌤 '저녁에 할 일')
+- **10/29 저녁**: ✅ 배포 완료(14:42, Claude 확인 14:45~ · 맨 위 ✅ 표) → 남은 것: 💵 실매매 맨 아래 'dry-run 결과: 아직 없음' 안내 눈으로 확인 + (선택) 3일 목표 10년 재수집
 - Vultr 콘솔 → 서버 → Backups 탭에서 자동 백업이 켜져 있는지 확인(설치 문서엔 '선택'으로 적혀 있음). R2 사본이 있어 필수는 아님
 - ~~10/28 밤 폴더 정리~~ ✅ 10/28 저녁 확인(`files/`·`files/quant_system/` 아래 옛 복사본 없음, zip·첨부·토큰 폴더만 남음): 옛 코드 복사본(`클로드\files` · `files\quant_system` 바로 아래)·설치 파일·PC 로그는 휴지통으로, 옛 코드 98개는 `클로드\옛코드_보관_2026-10.zip`, 옛 인수인계서는 `docs/archive/`
 - 텔레그램 토큰 재발급 여부(예전 채팅 노출) → 재발급 시 서버 `.env` 의 TELEGRAM_TOKEN 수정 후 `systemctl restart 'quant-*'`
