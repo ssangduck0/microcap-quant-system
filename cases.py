@@ -285,6 +285,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             out(f"병합 후 레이더: 최근 병합 {r['current']}종목 · 오늘 예측 {n}건 기록")
     except Exception as e:  # noqa: BLE001
         log.warning("병합 후 레이더 갱신 실패: %s", e)
+    try:  # 🩹 병합 환산 수리(2026-10-30): 병합 종목의 저장 일봉을 야후 2년치로 다시 써서 옛 기준 봉(병합일 ×비율 점프)을 없앰 — presim·선별·모델이 가짜 급등을 보지 않게
+        import pricefix
+        pricefix.morning(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("병합 환산 수리 실패: %s", e)
     try:
         import config as _cfg0
         _cfg0.apply_overrides()  # ⚙️ 관리 모드 설정
