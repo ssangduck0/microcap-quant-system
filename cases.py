@@ -480,6 +480,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         winmodel.maybe_refit(out=out)
     except Exception as e:  # noqa: BLE001
         log.warning("승률 점수 모델 재학습 실패: %s", e)
+    try:  # 🔁 리셋 사이클(2026-10-30): reset_config 종목(WHLR)의 다음 상환일 기준가·전환가 시나리오 한 줄 로그 · D-3 안이면 텔레그램(주인 전용)
+        import resetcycle
+        resetcycle.morning(out=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("리셋 사이클 아침 메모 실패: %s", e)
     try:  # 🧨 공매도 잔고(Yahoo, FINRA 격주): 스퀴즈 후보 700종목(C단계: Reg SHO·고수수료·안 받은 종목 먼저 — 예전 '점수 상위 400'은 잔고 없는 종목을 영영 못 받았음)
         import shortint
         shortint.refresh(shortint.priority(700), max_n=700, out=out)

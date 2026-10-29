@@ -122,8 +122,16 @@ def render(t: str) -> None:
         import shortpanel_ui
         darkpool_ui.card(t, key="co")
         shortpanel_ui.render(t)
-    tabs_all = st.tabs(["📰 한 장 요약", "1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"])   # 📰 BRAI식 한 장 요약(B단계 2026-10-28)
-    tabs = tabs_all[1:]
+    names = ["📰 한 장 요약", "1 회사", "2 진입 판단", "3 희석·런웨이", "4 목적", "5 일정·보유자", "6 타임라인·메모"]   # 📰 BRAI식 한 장 요약(B단계 2026-10-28)
+    try:   # 🔁 리셋 사이클(2026-10-30): reset_config 에 행이 있는 종목만, 주인에게만 탭 추가(메뉴 수는 안 늘림 — docs/HANDOFF_whlr.md 검토 메모 6)
+        import resetcycle
+        rc_on = (not access.is_guest()) and resetcycle.has(t)
+    except Exception:  # noqa: BLE001
+        rc_on = False
+    if rc_on:
+        names.append("🔁 리셋 사이클")
+    tabs_all = st.tabs(names)
+    tabs = tabs_all[1:7]
     with tabs_all[0]:
         summary_ui.render(t, c, df)
     with tabs[0]:
@@ -224,3 +232,7 @@ def render(t: str) -> None:
             if st.button("메모 저장", key=f"memo_save_{t}"):
                 company.memo_set(t, memo)
                 st.success("저장했어요.")
+    if rc_on:
+        with tabs_all[7]:
+            import resetcycle_ui
+            resetcycle_ui.render(t, df)

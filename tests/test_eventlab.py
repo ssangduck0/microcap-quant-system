@@ -46,6 +46,17 @@ dfx = pd.DataFrame({"Open": c, "High": c * 1.1, "Low": c * 0.9, "Close": c, "Vol
 with closing(db.connect()) as conn:
     conn.execute("UPDATE ev_docs SET accepted=?, filed=?", (acc, idx[48].strftime("%Y-%m-%d"))); conn.commit()
 assert ev.label(download=lambda ts: {t: (iwm if t == "IWM" else dfx) for t in ts}, out=lambda *_: None) == 1
+# 한 종목의 이상한 일봉(Close 열 없음)이 40개 묶음 전체를 날리지 않는다(2026-10-30): 그 종목만 'error', 나머지는 라벨됨
+with closing(db.connect()) as conn:
+    for t_ in ("BAD", "GOOD"):
+        conn.execute("INSERT INTO ev_docs VALUES (?,?,?,?,?,?,?,?,?,?,?,1)", (f"x{t_}", t_, "8-K", "8.01", idx[48].strftime("%Y-%m-%d"), acc, "Update", "", '["기타"]', "중립", "2026-03-11T00:00:00"))
+    conn.commit()
+msgs = []
+assert ev.label(download=lambda ts: {t: (iwm if t == "IWM" else dfx.drop(columns=["Close"]) if t == "BAD" else dfx) for t in ts}, out=msgs.append) == 1
+assert any("이벤트 라벨 실패 BAD" in m for m in msgs), msgs
+with closing(db.connect()) as conn:
+    assert conn.execute("SELECT status FROM ev_label_try WHERE ticker='BAD'").fetchone()[0] == "error" and conn.execute("SELECT COUNT(*) FROM ev_labels WHERE ticker='GOOD'").fetchone()[0] == 1
+    conn.execute("DELETE FROM ev_docs WHERE ticker IN ('BAD','GOOD')"); conn.execute("DELETE FROM ev_labels WHERE ticker='GOOD'"); conn.execute("DELETE FROM ev_label_try WHERE ticker IN ('BAD','GOOD')"); conn.commit()
 tb = ev.table(); s = ev.stats(tb, min_n=1); print(s.to_string()); assert s.iloc[0]["type"] == "FDA·임상" and s.iloc[0]["+20% 이상 확률(%)"] == 100
 big = pd.DataFrame({"sentiment": ["호재"] * 40 + ["중립"] * 60, "abn5": [-5.0] * 40 + [2.0] * 60, "up5": [5.0] * 40 + [25.0] * 60})
 sg = ev.suggest(big); assert sg[0]["key"] == "RANK_W_NEWS" and sg[0]["new"] == 0.05 and "낮춤" in sg[0]["why"]

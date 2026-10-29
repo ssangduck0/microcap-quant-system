@@ -223,7 +223,12 @@ def label(limit_tickers: int = 300, download=None, out=print) -> int:
                 if data.get(t) is None or getattr(data.get(t), "empty", False):
                     conn.execute("INSERT OR REPLACE INTO ev_label_try VALUES (?,?,?,?)", (t, now, "no_data", len(by[t])))
                     continue
-                rows = label_one(by[t], data[t], iwm)
+                try:
+                    rows = label_one(by[t], data[t], iwm)
+                except Exception as e:  # noqa: BLE001  (2026-10-30: 한 종목의 이상한 일봉이 40개 묶음 전체와 커밋을 날리지 않게 — HANDOFF 할 일 7)
+                    out(f"이벤트 라벨 실패 {t}: {e}")
+                    conn.execute("INSERT OR REPLACE INTO ev_label_try VALUES (?,?,?,?)", (t, now, "error", len(by[t])))
+                    continue
                 conn.executemany("INSERT OR REPLACE INTO ev_labels VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
                 conn.execute("INSERT OR REPLACE INTO ev_label_try VALUES (?,?,?,?)", (t, now, "ok" if rows else "no_rows", len(by[t]) - len(rows)))
                 n += len(rows)

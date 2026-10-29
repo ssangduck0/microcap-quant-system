@@ -207,8 +207,8 @@ def trading_days_between(a: date, b: date, hol: set[date]) -> list[date]:
 
 # ---------------------------------------------------------------- 봉 정리 · 병합 환산
 def _frame(df: pd.DataFrame | None) -> pd.DataFrame:
-    if df is None or len(df) == 0:
-        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    if df is None or len(df) == 0:   # 빈 표도 날짜 인덱스로(안 그러면 `index < 날짜` 비교가 예외 → '일봉 없음' 대신 '계산 실패' 가 됨)
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex([]), dtype=float)
     d = df.copy()
     idx = pd.DatetimeIndex(pd.to_datetime(d.index))
     if idx.tz is not None:
@@ -332,8 +332,10 @@ def split_rule(sp: list[tuple[str, float]], today: date) -> dict:
             "last": s2[-1][0] if s2 else None, "pending": [d for d, _ in sp if d > today.isoformat()]}
 
 
-def compute(t: str, df: pd.DataFrame | None, cfg: dict | None = None, today: date | None = None, assume_vol: float | None = None, pcts=PCTS) -> dict | None:
-    """탭 하나에 필요한 모든 숫자. df = 야후 일봉(Open/High/Low/Close/Volume, 날짜 index) — 현재 주식 기준으로 환산해서 쓴다."""
+def compute(t: str, df: pd.DataFrame | None, cfg: dict | None = None, today: date | None = None, assume_vol: float | None = None, pcts=PCTS,
+            now_et: pd.Timestamp | None = None) -> dict | None:
+    """탭 하나에 필요한 모든 숫자. df = 야후 일봉(Open/High/Low/Close/Volume, 날짜 index) — 현재 주식 기준으로 환산해서 쓴다.
+    today 를 안 주면 미국 동부 지금 날짜. 정규장 마감(16:00 ET) 전이면 오늘 봉은 '진행 중'(live) 표시 — 사용자가 보는 한국 저녁이 미국 장중이라서."""
     t = t.upper()
     with closing(db.connect()) as conn:
         cfg = cfg or config(t, conn)
@@ -341,13 +343,18 @@ def compute(t: str, df: pd.DataFrame | None, cfg: dict | None = None, today: dat
             return None
         sp = splits(t, cfg, conn)
         cyc = cycles(t, conn)
-    today = today or pd.Timestamp.now(tz="America/New_York").date()
+    if today is None:
+        now_et = now_et if now_et is not None else pd.Timestamp.now(tz="America/New_York")
+        today = now_et.date()
+    live_day = now_et.date() if (now_et is not None and now_et.hour < 16) else None
     hol = holidays(today.year - 2, today.year + 1)
     d, adj_notes = to_current(df, sp)
     n = int(cfg.get("window_days") or 10)
     disc = float(cfg.get("discount_pct") or 45) / 100.0
     redeem = next_redeem(today, cfg, hol)
     rows = window_rows(d, redeem, n, hol)
+    for w in rows:
+        w["live"] = bool(live_day and w["known"] and w["date"] == live_day)
     known = [r for r in rows if r["known"]]
     last_close = float(d["Close"].iloc[-1]) if not d.empty else None
     last_date = d.index.max().date() if not d.empty else None
@@ -365,6 +372,52 @@ def compute(t: str, df: pd.DataFrame | None, cfg: dict | None = None, today: dat
             "note": note_shares(cfg, last_close), "pref_usd": pref_usd, "mcap": mcap, "pref_over_mcap": (pref_usd / mcap) if (mcap and pref_usd) else None,
             "pref_shares_0": sc0["pref_shares"] if sc0 else None, "replay": replay(d, cyc, sp, n, disc, hol), "split_rule": split_rule(sp, today),
             "adjust_notes": adj_notes, "splits": sp, "bars": d}
+
+
+ALERT_DDAYS = 3   # 상환일 D-3 안이면 아침 작업이 텔레그램으로 한 줄(화~토 07:30 KST 에만 도니 D-3 이 월요일이면 D-2 부터)
+
+
+def summary_line(r: dict) -> str:
+    t, dd, rd = r["ticker"], r["dday"], r["redeem"].isoformat()
+    if r["last_close"] is None:
+        return f"🔁 {t} 리셋 사이클 D-{dd}({rd}) · 일봉 없음"
+    convs = [s["conv"] for s in r["scenarios"] if s["conv"]]
+    sc0 = next((s for s in r["scenarios"] if s["pct"] == 0), None)
+    base = f"${r['base_known']:.2f}" if r["base_known"] else "-"
+    line = f"🔁 {t} 리셋 사이클 D-{dd}({rd}) · 기준가 {base}({r['known_n']}/{r['n']}일)"
+    if convs:
+        line += f" · 전환가 시나리오 ${min(convs):.2f}~${max(convs):.2f}"
+    if sc0 and sc0.get("cur_over_conv"):
+        line += f" · 현재가÷전환가 {sc0['cur_over_conv'] * 100:.0f}%"
+    if r.get("note"):
+        line += " · 어음 가동 중" if r["note"]["active"] else " · 어음 미가동"
+    return line + f" · 마지막 종가 ${r['last_close']:.2f}({r['last_date']})"
+
+
+def morning(out=print, today: date | None = None, download=None, send=None) -> list[str]:
+    """아침 작업(cases.update): 설정 종목마다 한 줄 로그, 상환일 D-3 안이면 텔레그램(주인 전용 정보 — 방문객 화면엔 안 나감). 보낸 줄을 돌려줌."""
+    import market
+    import notify
+    dl = download or (lambda tk: market.download_daily([tk], period="6mo").get(tk))
+    snd = send or notify.send_telegram
+    sent: list[str] = []
+    for t in tickers():
+        try:
+            r = compute(t, dl(t), today=today)
+        except Exception as e:  # noqa: BLE001
+            out(f"🔁 {t} 리셋 사이클 계산 실패: {e}")
+            continue
+        if not r:
+            continue
+        line = summary_line(r)
+        out(line)
+        if r["dday"] <= ALERT_DDAYS and r["last_close"] is not None:
+            try:
+                snd(line)
+                sent.append(line)
+            except Exception as e:  # noqa: BLE001
+                out(f"🔁 {t} 텔레그램 실패: {e}")
+    return sent
 
 
 def kst_note(redeem: date) -> str:
