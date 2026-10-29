@@ -35,4 +35,18 @@ a20 = ev[(ev.ticker == "AAA") & (ev.date == "2020-03-10")].iloc[0]; a23 = ev[(ev
 assert a20["notice"] and a20["charter"] and not a20["offering"] and a20["quiet"]                 # 3.01·5.03(2020-01-15)은 90일·180일 안, 급락일 근처 공시는 없음
 assert a23["offering"] and a23["news"] and not a23["quiet"] and not a23["notice"]               # 424B5(-2일)·8-K(-1일)
 assert ev[ev.ticker == "BBB"].iloc[0]["quiet"] and pd.isna(ev[ev.ticker == "OLD"].iloc[0]["offering"])   # CIK 없는 종목은 판정 불가
+# sync_from_feed(2026-10-30): 스캐너 피드 → 공시 이력. 종목 없는 행은 빼고, 두 번째는 0건
+import secfeed as _sf
+from contextlib import closing as _cl
+with _cl(db.connect()) as _c:
+    _c.execute(_sf.DDL)
+    _c.executemany("INSERT OR REPLACE INTO sec_feed (accession, ticker, cik, form, company, filed, updated, items, url, tags, score, sentiment, enriched, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   [("0009-01", "aaa", 1, "8-K", "A", "2026-10-28", "2026-10-28T12:00:00", "1.01,3.02", "u", "[]", 0, "중립", 1, "x"),
+                    ("0009-02", "BBB", 2, "424B5", "B", None, "2026-10-29T12:00:00", None, "u", "[]", 0, "중립", 1, "x"),
+                    ("0009-03", None, 3, "8-K", "C", "2026-10-29", "2026-10-29T12:00:00", "", "u", "[]", 0, "중립", 1, "x")])
+    _c.commit()
+    assert sb.sync_from_feed(_c) == 2
+    _rows = {r[0]: tuple(r) for r in _c.execute("SELECT accession, ticker, form, filed, items FROM sec_hist WHERE accession LIKE '0009-%'")}
+    assert _rows["0009-01"] == ("0009-01", "AAA", "8-K", "2026-10-28", "1.01,3.02") and _rows["0009-02"] == ("0009-02", "BBB", "424B5", "2026-10-29", "") and "0009-03" not in _rows, _rows
+    assert sb.sync_from_feed(_c) == 0
 print("ALL OK")

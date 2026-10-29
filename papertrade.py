@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -24,6 +25,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import db
+
+log = logging.getLogger(__name__)   # 2026-10-30: 실매매 매수 요청 실패 경로가 정의 안 된 log 를 써서 NameError 가 나던 것
 
 ET = ZoneInfo("America/New_York")
 DDL = """CREATE TABLE IF NOT EXISTS pt_trades (id INTEGER PRIMARY KEY AUTOINCREMENT, book TEXT, day TEXT, ticker TEXT, rank INTEGER, score REAL, parts TEXT,

@@ -28,6 +28,22 @@ with closing(db.connect()) as conn:
     conn.execute("UPDATE page_cache SET built_at=? WHERE name='k1'", ((datetime.now(timezone.utc) - timedelta(minutes=120)).isoformat(),)); conn.commit()
 assert pagecache.get("k1", 60) is None and pagecache.get("k1") == {"a": 1} and 119 < pagecache.age_min("k1") < 122
 pagecache.put("k1", pd.DataFrame({"x": [1, 2]})); assert len(pagecache.get("k1", 5)) == 2
+# 'database is locked' 재시도(2026-10-30): 처음 두 번 잠김 → 세 번째 성공
+import sqlite3 as _sq
+class _Flaky:
+    def __init__(self, c): self.c, self.n = c, 0
+    def execute(self, *a, **k):
+        self.n += 1
+        if self.n <= 2:
+            raise _sq.OperationalError("database is locked")
+        return self.c.execute(*a, **k)
+    def commit(self): return self.c.commit()
+    def __getattr__(self, name): return getattr(self.c, name)
+with closing(db.connect()) as _c:
+    _f = _Flaky(_c); pagecache.put("flaky", {"z": 1}, conn=_f); assert _f.n >= 3
+assert pagecache.get("flaky") == {"z": 1}
+with closing(db.connect()) as _c:
+    _c.execute("DELETE FROM page_cache WHERE name='flaky'"); _c.commit()   # 아래 status() 검사는 정식 항목만 봄
 pagecache.invalidate("k1"); assert pagecache.get("k1") is None and pagecache.age_min("k1") is None
 with closing(db.connect()) as conn:
     conn.execute("INSERT INTO page_cache VALUES ('bad', ?, 1.0, X'00FF')", (db.utcnow_iso(),)); conn.commit()

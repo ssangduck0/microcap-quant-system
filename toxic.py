@@ -29,6 +29,9 @@ PATS = [
     ("전환사채", re.compile(r"conversion\s+price[^.]{0,220}?discount\s+of\s+(\d{2,3})\s*%", re.I), "discount"),
     # prepaid advance / prepaid forward / prepaid stock purchase (보통 큰 할인 + 선지급)
     ("선급주식매입", re.compile(r"pre-?paid\s+(?:advance|forward|equity\s+forward|share\s+purchase|stock\s+purchase|purchase)\s+(?:agreement|transaction|contract)?", re.I), "flag"),
+    # 2026-10-30 WHLR 식: '전환가 … 재조정 … representing a 45% discount to $4.96' · 10-Q 각주 'volume weighted average … less a discount of 45 %'(기준어 없이 달러 값에 할인)
+    ("전환사채", re.compile(r"conversion\s+price.{0,300}?representing\s+an?\s+(\d{2,3})\s*%\s+discount", re.I | re.S), "discount"),
+    ("전환사채", re.compile(r"(?:volume[- ]weighted|vwap)[^.]{0,220}?less\s+a\s+discount\s+of\s+(\d{2,3})\s*%", re.I), "discount"),
     # 일반 할인 발행(ELOC 의 'purchase price = 95% of the lowest VWAP' 등) — 할인이 작으면 '기록'만
     ("할인 발행", re.compile(r"(\d{2,3})\s*%\s+of\s+(?:the\s+)?(?:\w+\s+){0,3}?" + _REF, re.I), "pct_of"),
 ]

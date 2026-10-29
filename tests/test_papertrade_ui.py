@@ -20,6 +20,10 @@ with closing(db.connect()) as conn:
     conn.execute("UPDATE pt_trades SET status='closed', exit=1.2, exit_day='2026-10-21', reason='익절 +20% (프리장)' WHERE ticker='RK1'")
     conn.commit()
 from streamlit.testing.v1 import AppTest
+import papertrade, papertrade_ui as _pu
+for _k in list(papertrade.STRATEGIES) + ["unknown"]:   # 2026-10-30: 비어 있는 장부 안내문이 모든 전략 키에서 글자를 돌려줌(rank6 KeyError 재발 방지)
+    assert isinstance(_pu.when_text(_k), str) and _pu.when_text(_k)
+assert set(papertrade.STRATEGIES) <= set(_pu.WHEN), set(papertrade.STRATEGIES) - set(_pu.WHEN)
 APP = os.path.join(os.environ["QS_ROOT"], "dashboard.py")
 os.environ["QUANT_TEST_PAGE"] = "papertrade"            # 옛 주소 → 🏆 검증의 가상매매 탭
 at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception, [e.value for e in at.exception]

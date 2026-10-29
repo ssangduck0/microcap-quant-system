@@ -41,11 +41,21 @@ def put(name: str, obj, secs: float | None = None, conn=None) -> None:
         ensure(c)
         c.execute("INSERT OR REPLACE INTO page_cache (name, built_at, secs, blob) VALUES (?,?,?,?)", (name, db.utcnow_iso(), secs, blob))
         c.commit()
-    if conn is not None:
-        _w(conn)
-    else:
-        with closing(db.connect()) as c:
-            _w(c)
+    import sqlite3
+    import time
+    for i in range(4):   # 2026-10-30: 아침 작업이 스캐너와 겹칠 때 'database is locked' 로 px 캐시가 빠지던 것 → 0.5·1·1.5초 쉬고 다시
+        try:
+            if conn is not None:
+                _w(conn)
+            else:
+                with closing(db.connect()) as c:
+                    _w(c)
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < 3:
+                time.sleep(0.5 * (i + 1))
+                continue
+            raise
 
 
 def _row(name: str, conn=None, blob: bool = True):

@@ -17,6 +17,8 @@ DDL = """CREATE TABLE IF NOT EXISTS short_interest (ticker TEXT NOT NULL, date T
 
 def ensure_tables(conn) -> None:
     conn.execute(DDL)
+    if "src" not in {r[1] for r in conn.execute("PRAGMA table_info(short_interest)")}:   # chartex 가 더하는 출처 열 — 여기서도 보장(없으면 아래 INSERT 가 깨짐)
+        conn.execute("ALTER TABLE short_interest ADD COLUMN src TEXT")
     conn.commit()
 
 
@@ -41,7 +43,9 @@ def refresh(tickers: list[str], max_n: int = 400, out=print, getter=None) -> int
                 r = parse_info(get(t) or {})
             except Exception:  # noqa: BLE001
                 continue
-            conn.execute("INSERT OR REPLACE INTO short_interest VALUES (?,?,?,?,?,?,?,?)", (t, day, r["shares_short"], r["prior"], r["si_pct"], r["dtc"], r["si_date"], r["float_sh"]))
+            # 2026-10-30: 열 이름 명시 — chartex(10/27)가 src 열을 더한 뒤 위치 기반 INSERT 가 'has 9 columns but 8 values' 로 아침마다 실패해 야후 공매도 잔고가 사흘 끊겼음(6절 교훈)
+            conn.execute("INSERT OR REPLACE INTO short_interest (ticker, date, shares_short, prior, si_pct, dtc, si_date, float_sh, src) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (t, day, r["shares_short"], r["prior"], r["si_pct"], r["dtc"], r["si_date"], r["float_sh"], "yahoo"))
             n += 1
             if getter is None:
                 time.sleep(0.3)

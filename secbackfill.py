@@ -42,6 +42,20 @@ def ensure_tables(conn) -> None:
     conn.commit()
 
 
+def sync_from_feed(conn) -> int:
+    """스캐너 실시간 공시 피드(sec_feed)를 공시 이력(sec_hist)에 합침(INSERT OR IGNORE) — 백필은 1회성이라 그 뒤 공시는 피드로만 들어옴.
+    2026-10-30 발견: sec_hist 가 10/15 에서 멈춰 수집기(eventlab)·presim/타임머신 희석 깃발·📚 공시 플래그가 그 뒤 공시를 못 봤음. 아침 작업 맨 앞에서 매일."""
+    ensure_tables(conn)
+    try:
+        cur = conn.execute("INSERT OR IGNORE INTO sec_hist (accession, ticker, form, filed, items) "
+                           "SELECT accession, UPPER(ticker), form, COALESCE(filed, substr(updated, 1, 10)), COALESCE(items, '') FROM sec_feed "
+                           "WHERE accession IS NOT NULL AND ticker IS NOT NULL AND ticker <> ''")
+    except Exception:  # noqa: BLE001 — sec_feed 표가 없는 DB(PC 초기)
+        return 0
+    conn.commit()
+    return max(0, cur.rowcount or 0)
+
+
 def _rows(block: dict, ticker: str) -> list[tuple]:
     n = len(block.get("accessionNumber", []))
     items = block.get("items") or [""] * n

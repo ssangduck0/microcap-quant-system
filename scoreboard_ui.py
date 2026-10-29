@@ -32,7 +32,7 @@ def render() -> None:
         df = sb.table(conn)
     if df.empty:
         st.info("아직 기록된 예측이 없습니다. 스캐너와 매일 아침 갱신 작업이 신호를 쌓으면 여기에 모입니다.")
-        _bottom(crit)
+        _bottom(crit, df)
         return
     c = st.columns([2, 2, 3])
     units = ["일간", "주간", "월간", "연간"]
@@ -94,10 +94,10 @@ def render() -> None:
             part = show if key is None else show[show["결과"] == key]
             st.dataframe(part, hide_index=True, width="stretch", column_config=cfg) if not part.empty else st.caption("없음")
     st.download_button("⬇️ 예측·결과 CSV (엑셀용)", show.to_csv(index=False).encode("utf-8-sig"), file_name=f"scoreboard_{unit}_{per}.csv", mime="text/csv")
-    _bottom(crit)
+    _bottom(crit, df)
 
 
-def _bottom(crit: pd.DataFrame) -> None:
+def _bottom(crit: pd.DataFrame, df: pd.DataFrame | None = None) -> None:
     with st.expander("판정 기준 · 결과 갱신"):  # 자주 안 쓰는 것은 맨 아래로
         st.dataframe(crit, hide_index=True, width="stretch")
         st.caption("진입가 = 신호 때 기록된 가격(없으면 신호일 종가). 일봉 기준이라 체결 비용·호가 간격은 반영되지 않습니다. 매일 아침 갱신 작업이 결과를 채웁니다. "
@@ -110,10 +110,10 @@ def _bottom(crit: pd.DataFrame) -> None:
                     r = sb.update(conn, out=lambda *_: None)
             st.session_state["_sb_done"], st.session_state["_sb_msg"] = True, f"{r['rows']:,}건 갱신했어요."
             st.rerun()
-    _vault()
+    _vault(df)
 
 
-def _vault() -> None:
+def _vault(df: pd.DataFrame | None = None) -> None:
     """🗄 주가 보관소 상태 — 신호 낸 종목의 일봉 보관 · 끊긴 종목."""
     import pricevault as pv
     with st.expander("✅ 3대 조건별 성적 — 신호 난 날 조건을 갖췄을 때 vs 안 갖췄을 때"):
@@ -122,6 +122,9 @@ def _vault() -> None:
                    "신호가 수십 건 쌓이기 전에는 우연일 수 있어요.")
         try:
             import setup3
+            if df is None or df.empty or "status" not in df:   # 2026-10-30: 예전엔 정의 안 된 df 를 써서 늘 '계산하지 못했어요'
+                st.info("판정이 끝난 신호가 아직 없어요.")
+                raise StopIteration
             with closing(db.connect()) as _c:
                 _j = df[df["status"].isin(["성공", "실패"])]
                 _cd = setup3.conditions_at(_c, list(zip(_j["ticker"], _j["date"])))
@@ -130,6 +133,8 @@ def _vault() -> None:
                 st.info("판정이 끝난 신호가 아직 없어요.")
             else:
                 st.dataframe(ui.tidy(_rep), hide_index=True, width="stretch")
+        except StopIteration:
+            pass
         except Exception as _e:  # noqa: BLE001
             st.caption(f"계산하지 못했어요: {_e}")
     with st.expander("🗄 주가 보관소 · 주가가 끊긴 종목"):

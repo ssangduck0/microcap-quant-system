@@ -54,4 +54,12 @@ with closing(db.connect()) as conn:   # 🔬 ⑥ 헤더 칩(2026-10-28): 직전 
                                                                                  ("HDR6", (_d.today() - _td(days=80)).isoformat(), "f", "10-Q", s1)]); conn.commit()
         hf = company_ui.header_facts("HDR6"); chip = company_ui.share_chip(hf)
         assert hf["share_chg"]["cls"] == cls and f"주식수 {txt}(분기)" in chip and color in chip and "SEC 표지" in chip, (s1, hf["share_chg"], chip)
+# WHLR 식 문구(2026-10-30): 기준어 없이 달러 값에 '45% discount' · 10-Q 각주 'less a discount of 45 %'
+_w1 = ("pursuant to section 14.02 (optional conversion) of the indenture governing the company's 7.00% subordinated convertible notes due 2031, "
+       "the conversion price for the notes was further adjusted to approximately $2.73 per share of common stock, representing a 45% discount to $4.96.")
+_d1 = toxic.detect(_w1, "8-K")
+assert _d1 and _d1["kind"] == "전환사채" and _d1["discount_pct"] == 45 and _d1["level"] == "악성", _d1
+_w2 = "(1) represents the volume weighted average of the company's closing common stock price for the 10 trading days preceding the valuation, less a discount of 45 %."
+_d2 = toxic.detect(_w2, "10-Q")
+assert _d2 and _d2["discount_pct"] == 45 and _d2["level"] == "악성", _d2
 print("ALL OK")

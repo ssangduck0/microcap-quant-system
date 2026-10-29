@@ -234,6 +234,11 @@ def build(conn, active: list[str], delisted: list[str], years: int = 10, thresho
 # ---------------------------------------------------------------- 매일 갱신
 def update(conn, active: list[str], delisted: list[str], days: int = 60, years: int = 10, threshold: float = THRESHOLD,
            chunk: int = 50, pause: float = 1.0, out=print) -> dict:
+    try:  # 2026-10-30: 공시 이력(sec_hist)이 10/15 백필에서 멈춰 있던 것 → 스캐너 피드(sec_feed)를 매일 합침(수집기·presim/타임머신 희석 깃발·📚 플래그가 새 공시를 보게)
+        import secbackfill
+        out(f"공시 이력 동기화: 피드에서 {secbackfill.sync_from_feed(conn):,}건 추가")
+    except Exception as e:  # noqa: BLE001
+        log.warning("공시 이력 동기화 실패: %s", e)
     since = (date.today() - timedelta(days=days)).isoformat()
     tickers = [r["ticker"] for r in conn.execute("SELECT ticker FROM case_progress WHERE status='done'")]
     out(f"최근 {days}일 사건 갱신: {len(tickers):,}종목")

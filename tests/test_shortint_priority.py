@@ -22,9 +22,9 @@ with closing(db.connect()) as conn:
     conn.execute("INSERT INTO toss_rank VALUES (?,?,?,?,?,?,?,?)", (today, "up", 1, "MOVER", 1.0, 50.0, "정규장", now))
     conn.execute("INSERT INTO finra_shvol VALUES (?,?,?,?,?)", (today, "SV60", 700000, 0, 1000000))
     conn.execute("INSERT INTO finra_shvol VALUES (?,?,?,?,?)", (today, "SV40", 400000, 0, 1000000))
-    conn.execute("INSERT INTO short_interest VALUES ('HOTOLD', ?, 1, 1, 10, 1, ?, 1e6)", (old, old))
-    conn.execute("INSERT INTO short_interest VALUES ('HOTNEW', ?, 1, 1, 10, 1, ?, 1e6)", (today, today))
-    conn.execute("INSERT INTO short_interest VALUES ('SNAPB', ?, 1, 1, 10, 1, ?, 1e6)", (old, old))
+    conn.execute("INSERT INTO short_interest (ticker, date, shares_short, prior, si_pct, dtc, si_date, float_sh) VALUES ('HOTOLD', ?, 1, 1, 10, 1, ?, 1e6)", (old, old))
+    conn.execute("INSERT INTO short_interest (ticker, date, shares_short, prior, si_pct, dtc, si_date, float_sh) VALUES ('HOTNEW', ?, 1, 1, 10, 1, ?, 1e6)", (today, today))
+    conn.execute("INSERT INTO short_interest (ticker, date, shares_short, prior, si_pct, dtc, si_date, float_sh) VALUES ('SNAPB', ?, 1, 1, 10, 1, ?, 1e6)", (old, old))
     conn.commit()
     uni = set(squeeze.universe(conn))
     assert {"SNAPA", "SNAPB", "HOTOLD", "HOTNEW", "FEE", "MOVER", "SV60"} <= uni and "SV40" not in uni, uni     # 수수료 20%↑·급등락·장외 공매도 60%↑ 포함
@@ -35,4 +35,14 @@ assert len(shortint.priority(max_n=3)) == 3
 # refresh 는 가짜 getter 로 — 이미 오늘 받은 HOTNEW 는 건너뜀
 n = shortint.refresh(order, max_n=100, out=lambda *_: None, getter=lambda t: {"shortPercentOfFloat": 0.2, "dateShortInterest": 1760000000, "sharesShort": 100, "sharesShortPriorMonth": 90, "shortRatio": 2.0, "floatShares": 1e6})
 assert n == len(order) - 1, (n, len(order))
+# refresh: 열 이름 명시 + src 열 보장(2026-10-30 — chartex 가 src 열을 더한 뒤 위치 기반 INSERT 가 'has 9 columns but 8 values' 로 아침마다 실패)
+from contextlib import closing as _cl
+import shortint as _si
+with _cl(db.connect()) as _c:
+    _si.ensure_tables(_c)
+    assert "src" in {r[1] for r in _c.execute("PRAGMA table_info(short_interest)")}
+_n = _si.refresh(["ZZZ"], getter=lambda t: {"sharesShort": 1000, "sharesShortPriorMonth": 800, "shortPercentOfFloat": 0.12, "shortRatio": 2.5, "dateShortInterest": 1760000000, "floatShares": 5e6}, out=lambda *_: None)
+with _cl(db.connect()) as _c:
+    _row = _c.execute("SELECT ticker, shares_short, si_pct, src FROM short_interest WHERE ticker='ZZZ'").fetchone()
+assert _n == 1 and _row and _row[1] == 1000 and abs(_row[2] - 12.0) < 1e-9 and _row[3] == "yahoo", (_n, _row and tuple(_row))
 print("ALL OK")

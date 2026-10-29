@@ -11,6 +11,16 @@ import tosslink
 import ui_kit as ui
 
 
+WHEN = {"rank": "내일 아침 갱신 작업부터", "rank6": "내일 아침 갱신 작업부터(⑥ 반영 순위)", "rank_stay": "10위 안에 2거래일 연속 머문 종목이 생기면 아침 갱신 때",
+        "pick": "PICK '유력' 종목이 나오면 아침 갱신 때", "close": "장마감 전 BEST·후보가 나오면 스캐너가", "piggy": "저금통 종목이 🟢 저점 구간에 들어오면 아침 갱신 때",
+        "after": "애프터 진입 구간 신호가 나면 스캐너가", "master": "📐 눌림 타점 신호가 나면 아침 갱신 때"}
+
+
+def when_text(k: str) -> str:
+    """비어 있는 장부의 안내문 — 모르는 전략 키도 죽지 않게(2026-10-29 서버에서 'rank6' KeyError 로 🧪 탭 전체가 죽었음)."""
+    return WHEN.get(k, "조건이 맞는 날 아침 갱신 때")
+
+
 def _last() -> dict:
     try:
         m = db.read_df("SELECT ticker, price FROM daily_move WHERE date=(SELECT MAX(date) FROM daily_move)")
@@ -53,9 +63,7 @@ def render() -> None:
               {"t": "평균 수익률/건", "v": "-" if s["avg"] is None else f"{s['avg']:+.1f}%"},
               {"t": "열린 포지션", "v": f"{s['open']}개", "s": f"평가 손익 ${s['open_pnl']:+,.0f}"}])
     if df.empty:
-        when = {"rank": "내일 아침 갱신 작업부터", "pick": "PICK '유력' 종목이 나오면 아침 갱신 때", "close": "장마감 전 BEST·후보가 나오면 스캐너가",
-                "piggy": "저금통 종목이 🟢 저점 구간에 들어오면 아침 갱신 때", "after": "애프터 진입 구간 신호가 나면 스캐너가"}[k]
-        st.info(f"아직 이 전략의 기록이 없어요. {when} 매수를 시작해요.")
+        st.info(f"아직 이 전략의 기록이 없어요. {when_text(k)} 매수를 시작해요.")
     else:
         op = df[df["status"] == "open"].copy()
         if not op.empty:
