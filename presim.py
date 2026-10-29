@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import zlib
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
@@ -39,7 +40,8 @@ COIN_GAP, COIN_EV = 10.0, 1.0       # (2겹만 있을 때의 옛 판정) 🪙: |
 # 2026-10-30 기준 대비 우위 판정(docs/presim_methods_survey_2026-10.md 5절 A·B·D·F): 같은 계획을 '기준(아무 날)' 사건에도 적용해 기대값 차이(우위)로 판정.
 # 표본이 적으면 우위를 n_eff/(n_eff+SHRINK_K) 만큼 깎음(empirical Bayes 식 수축) · n_eff = 같은 종목의 겹치는 사건(±60일)을 1/(1+k) 로 덜 센 유효 표본.
 SHRINK_K = 100.0          # 수축 가짜 표본 수: n_eff 100 이면 우위의 절반만 인정
-EDGE_MIN = 1.0            # 🟢/🔴 문턱(%p, 보정 뒤) — 유효 표본 MIN_EP 이상일 때만
+EDGE_MIN = 1.0            # 🟢/🔴 문턱(%p, 보정 뒤)
+EFF_MIN = 50.0            # 판정에 필요한 최소 유효 표본(수축이 이미 표본 크기를 벌하므로 MIN_EP 의 절반 — 10/30 복사본 시험에서 저금통+희석 없음 134건·유효 73이 우위 +2.4 인데 🪙 로 막힌 것을 보고)
 RECENT_DAYS = 180         # '최근 창' = 최근 180일(≈120거래일) 사건만의 성적을 따로(쇠퇴 감지, OddsMaker 식)
 OVERLAP_DAYS = 60         # 겹침 가중 창(달력일 ≈ H 거래일)
 EP_VERSION = "2"         # 사건 표 버전 — 바뀌면 다음 아침에 전체를 한 번 다시 씀(v2: 🐷 저금통 재생 키 + sl_pct/tp_pct 열)
@@ -261,6 +263,9 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
     rebuild_all = ver != EP_VERSION   # 표 버전이 바뀌면(키·열 추가) 한 번 전체를 다시 씀
     if rebuild_all:
         out(f"🎲 사건 표 버전 {ver or '없음'} → {EP_VERSION}: 전체를 다시 씁니다(한 번, 수 분)")
+    if rebuild_all:   # 파생 표(일봉에서 언제든 다시 만듦)라 옛 행을 비우고 새로 씀 — 안 비우면 기준 표본 날짜가 바뀐 옛 행이 남아 두 배로 셈
+        conn.execute("DELETE FROM presim_ep")
+        conn.commit()
     have = {} if rebuild_all else {(r[0], r[1]): r[2] for r in conn.execute("SELECT ticker, date, n FROM presim_ep")}
     fx_now = _fx()
     try:
@@ -287,13 +292,12 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                     out(f"presim 저금통 재생 실패 {t}: {e}")
                     pz = pon = np.zeros(len(d), dtype=bool); psl = ptp = np.full(len(d), np.nan)
                 days = [x.strftime("%Y-%m-%d") for x in d.index]
-                base_ctr = 0
+                t_hash = zlib.crc32(t.encode()) % BASE_EVERY   # 기준 표본 날짜를 종목·날짜로 고정(시작일 카운터면 시작일이 하루 밀릴 때마다 표본이 전부 바뀜 — 10/30 발견)
                 for i, day in enumerate(days):
                     if day < start or i + 1 >= len(d) or not bool(ff["elig"].iloc[i]):
                         continue
                     fl, on = int(ff["flags"].iloc[i]), int(ff["onset"].iloc[i])
-                    base_ctr += 1
-                    if base_ctr % BASE_EVERY == 0:
+                    if (date.fromisoformat(day).toordinal() + t_hash) % BASE_EVERY == 0:
                         fl |= F["base"]
                     fl |= extra.get((t, day), 0)
                     if pz[i]:
@@ -507,15 +511,15 @@ def shrink(edge_raw: float, n_eff: float, k: float = SHRINK_K) -> float:
 
 
 def verdict_edge(ev, ev_base, n_eff) -> tuple[str, str, float | None, float | None]:
-    """기준 대비 우위 판정(보강 A): edge_raw = 같은 계획의 기대값 − 기준(아무 날) 기대값 → 보정 edge. 🟢 edge ≥ +EDGE_MIN · 🔴 ≤ −EDGE_MIN(둘 다 유효 표본 ≥ MIN_EP) · 그 밖 🪙.
+    """기준 대비 우위 판정(보강 A): edge_raw = 같은 계획의 기대값 − 기준(아무 날) 기대값 → 보정 edge. 🟢 edge ≥ +EDGE_MIN · 🔴 ≤ −EDGE_MIN(둘 다 유효 표본 ≥ EFF_MIN) · 그 밖 🪙.
     돌려주는 것: (이모지, 설명, 보정 우위, 보정 전 우위)."""
     if ev is None or ev_base is None or not n_eff:
         return "❔", "자료 부족", None, None
     raw = float(ev) - float(ev_base)
     edge = shrink(raw, n_eff)
-    if n_eff >= MIN_EP and edge >= EDGE_MIN:
+    if n_eff >= EFF_MIN and edge >= EDGE_MIN:
         return "🟢", VERDICT_TEXT["🟢"], round(edge, 2), round(raw, 2)
-    if n_eff >= MIN_EP and edge <= -EDGE_MIN:
+    if n_eff >= EFF_MIN and edge <= -EDGE_MIN:
         return "🔴", VERDICT_TEXT["🔴"], round(edge, 2), round(raw, 2)
     return "🪙", VERDICT_TEXT["🪙"], round(edge, 2), round(raw, 2)
 

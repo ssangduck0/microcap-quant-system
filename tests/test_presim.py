@@ -73,7 +73,7 @@ assert presim.verdict(60, 40, 0.5)[0] == "🪙" and presim.verdict(None, 1, 1)[0
 # 기준 대비 우위 판정 + 소표본 보정: 우위 +2.5 · 유효 표본 1000 → 보정 2.27 🟢 · 표본 30 → 🪙(MIN_EP 미만) · −2.5 · 500 → −2.08 🔴 · 작은 우위는 🪙
 v = presim.verdict_edge(3.0, 0.5, 1000)
 assert v[0] == "🟢" and abs(v[3] - 2.5) < 1e-9 and 2.2 < v[2] < 2.3, v
-assert presim.verdict_edge(3.0, 0.5, 30)[0] == "🪙" and presim.verdict_edge(0.0, 2.5, 500)[0] == "🔴" and presim.verdict_edge(1.0, 0.8, 5000)[0] == "🪙" and presim.verdict_edge(None, 1, 10)[0] == "❔"
+assert presim.verdict_edge(3.0, 0.5, 30)[0] == "🪙" and presim.verdict_edge(4.0, 0.5, 60)[0] == "🟢" and presim.verdict_edge(3.0, 0.5, 60)[0] == "🪙" and presim.verdict_edge(0.0, 2.5, 500)[0] == "🔴" and presim.verdict_edge(1.0, 0.8, 5000)[0] == "🪙" and presim.verdict_edge(None, 1, 10)[0] == "❔"
 assert abs(presim.shrink(10.0, 100) - 5.0) < 1e-9 and presim.shrink(10.0, 0) == 0.0
 
 # ------------------------------------------------------------------ 4) 깃발: 과매도 onset 은 구간마다 한 번 · 희석 서류(그날 전 90일) · 자료 없는 종목은 희석 '없음' 아님
