@@ -65,7 +65,7 @@ def check(conn, frames: dict, pct: float = 10.0, send=None, now: datetime | None
     sess = _session(pd.Timestamp(now))
     if sess == "reg":
         return []
-    tgt = interest(conn)
+    tgt = interest(conn, today=pd.Timestamp(now).tz_convert(ET).date())   # 관심 종목은 알림 시각(now) 기준으로 — 벽시계 기준이면 테스트의 고정 날짜가 며칠 지나 비어 버림(2026-10-30 발견)
     if not tgt:
         return []
     et_now = pd.Timestamp(now).tz_convert(ET)
