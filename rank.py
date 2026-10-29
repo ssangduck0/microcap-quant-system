@@ -204,3 +204,41 @@ def compute(today: date | None = None) -> pd.DataFrame:
     df["rank6"] = 0
     df.loc[df.sort_values(["score6", "urgency"], ascending=False).index, "rank6"] = range(1, len(df) + 1)   # ⑥ 반영 순위(가상매매 비교용)
     return df
+
+
+# ---------------------------------------------------------------- 순위 이력(2026-10-29) — 🧪 가상매매 '🏁 순위 연속' 전략 + "상위권이 며칠 머무나" 검증 자료
+HIST_DDL = "CREATE TABLE IF NOT EXISTS rank_hist (date TEXT NOT NULL, ticker TEXT NOT NULL, rank INTEGER, score REAL, rank6 INTEGER, PRIMARY KEY (date, ticker))"
+HIST_TOP = 50
+
+
+def save_hist(conn, df: pd.DataFrame | None, day: str, top: int = HIST_TOP) -> int:
+    """그날 종합 순위 상위 top 개를 rank_hist 에 저장(같은 날 다시 저장하면 덮어씀). 저장한 행 수."""
+    conn.execute(HIST_DDL)
+    if df is None or df.empty or "ticker" not in df.columns:
+        return 0
+    d = df.sort_values("rank").head(int(top)) if "rank" in df.columns else df.head(int(top)).assign(rank=lambda x: range(1, len(x) + 1))
+    def _num(v, f):
+        try:
+            return None if v is None or pd.isna(v) else f(v)
+        except (TypeError, ValueError):
+            return None
+    rows = [(day, str(r["ticker"]), int(r["rank"]), _num(r.get("score"), float), _num(r.get("rank6"), int)) for r in d.to_dict("records")]
+    conn.executemany("INSERT OR REPLACE INTO rank_hist VALUES (?,?,?,?,?)", rows)
+    return len(rows)
+
+
+def stay_tickers(conn, day: str, top: int = 10, days: int = 2) -> list[str]:
+    """day 와 그 직전 (days-1)개 기록일 모두 top 위 안이었던 종목(오늘 순위 순). 기록일이 모자라면 []."""
+    conn.execute(HIST_DDL)
+    today = [r[0] for r in conn.execute("SELECT ticker FROM rank_hist WHERE date=? AND rank<=? ORDER BY rank", (day, int(top)))]
+    if not today:
+        return []
+    need = max(int(days) - 1, 0)
+    prev_days = [r[0] for r in conn.execute("SELECT DISTINCT date FROM rank_hist WHERE date<? ORDER BY date DESC LIMIT ?", (day, need))]
+    if len(prev_days) < need:
+        return []
+    keep = today
+    for pday in prev_days:
+        s = {r[0] for r in conn.execute("SELECT ticker FROM rank_hist WHERE date=? AND rank<=?", (pday, int(top)))}
+        keep = [t for t in keep if t in s]
+    return keep

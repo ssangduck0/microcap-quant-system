@@ -35,6 +35,8 @@ STRATEGIES: dict[str, dict] = {
     "rank": {"name": "🏁 종합 순위", "desc": "매일 아침 종합 순위 1~N위를 직전 종가로 매수", "tp": 20.0, "sl": 10.0, "hold": 3, "usd": 1000.0, "n": 3, "on": True},
     "rank6": {"name": "🏁 순위(⑥ 반영)", "desc": "종합 순위에 ⑥ 직전 분기 주식수 변동 감점(+20% 초과 −10 · 10~20% −5, 희석 감점이 이미 있으면 절반)을 적용한 순위 1~N위를 직전 종가로 매수 — 2026-10-28 부터 4주간 🏁 종합 순위와 비교해 감점 여부 결정",
               "tp": 20.0, "sl": 10.0, "hold": 3, "usd": 1000.0, "n": 3, "on": True},
+    "rank_stay": {"name": "🏁 순위 연속(10위 안 2일)", "desc": "종합 순위 10위 안에 2거래일 연속 머문 종목을 둘째 날 아침 직전 종가로 매수(같은 종목 5일에 한 번) — 하루짜리 들락날락을 거르면 나은지 🏁 종합 순위와 같은 규칙으로 비교(2026-10-29 사용자 제안 · rank_hist 이력 필요, 첫날은 안 삼)",
+                  "tp": 20.0, "sl": 10.0, "hold": 3, "usd": 1000.0, "n": 3, "on": True},
     "pick": {"name": "🎯 PICK +30%", "desc": "PICK 통과 '유력' 종목을 그날 가격으로 매수(같은 종목은 30일에 한 번)", "tp": 30.0, "sl": 15.0, "hold": 20, "usd": 1000.0, "n": 3, "on": True},
     "close": {"name": "🎯 장마감 체크리스트", "desc": "장마감 전 BEST·후보 판정 순간 가격으로 매수 → 시간외 포함, 다음 거래일 종가까지", "tp": 10.0, "sl": 5.0, "hold": 1, "usd": 1000.0, "n": 5, "on": True},
     "piggy": {"name": "🐷 저금통", "desc": "저금통 종목이 🟢 저점 구간에 들어오면 매수. 익절 0 = 박스 상단 · 손절 0 = 박스 이탈 · 보유 0 = 제한 없음 · 저금통 기준 이탈 시 정리",
@@ -46,7 +48,8 @@ STRATEGIES: dict[str, dict] = {
 }
 FIELDS = ("on", "tp", "sl", "hold", "usd", "n")
 LIMITS = {"tp": (0.0, 200.0), "sl": (0.0, 90.0), "hold": (0, 60), "usd": (10.0, 100000.0), "n": (1, 20)}
-COOLDOWN_DAYS = {"pick": 30, "piggy": 5, "master": 10}      # 같은 전략·같은 종목을 다시 사기까지(달력일)
+COOLDOWN_DAYS = {"pick": 30, "piggy": 5, "master": 10, "rank_stay": 5}      # 같은 전략·같은 종목을 다시 사기까지(달력일)
+STAY_TOP, STAY_DAYS = 10, 2        # 🏁 순위 연속: 10위 안 · 2거래일 연속(2026-10-29)
 SESS = ("night", "pre", "reg", "post")
 SESS_KO = {"night": "데이마켓", "pre": "프리장", "reg": "정규장", "post": "애프터"}
 _SESS_START = {"night": (20, 0), "pre": (4, 0), "reg": (9, 30), "post": (16, 0)}
@@ -501,6 +504,29 @@ def open_new(rank_df: pd.DataFrame, last_close: dict, day: str | None = None, st
     return bought
 
 
+def open_stay(rank_df: pd.DataFrame, last_close: dict, day: str | None = None) -> list[str]:
+    """🏁 순위 연속(2026-10-29 사용자 제안): 오늘과 직전 기록일 모두 STAY_TOP 위 안이었던 종목을 직전 종가로(오늘 순위 순 · 하루 n 개 · 같은 종목 5일에 한 번).
+    rank_hist 에 오늘 기록이 있어야 하므로 daily() 가 rank.save_hist 뒤에 부른다. 첫날(기록이 하루뿐)은 아무것도 안 산다."""
+    import rank as _rank
+    c = cfg("rank_stay")
+    day = day or date.today().isoformat()
+    if rank_df is None or rank_df.empty:
+        return []
+    info = {str(r["ticker"]): r for r in rank_df.to_dict("records")}
+    bought = []
+    with closing(db.connect()) as conn:
+        ensure(conn)
+        if conn.execute("SELECT 1 FROM pt_trades WHERE strategy=? AND day=? AND book=? LIMIT 1", ("rank_stay", day, book("rank_stay"))).fetchone():
+            return []
+        for t in _rank.stay_tickers(conn, day, top=STAY_TOP, days=STAY_DAYS):
+            r = info.get(t) or {}
+            if open_trade(conn, "rank_stay", day, t, last_close.get(t), rank=(int(r["rank"]) if r.get("rank") is not None else None),
+                          score=(float(r["score"]) if r.get("score") is not None else None), parts=r.get("parts") or {}, note=f"{STAY_TOP}위 안 {STAY_DAYS}일 연속", c=c):
+                bought.append(t)
+        conn.commit()
+    return bought
+
+
 def open_pick(scan: dict | None, day: str, now: datetime | None = None) -> list[str]:
     """🎯 PICK 통과 '유력'(약한 목표 제외) 종목을 그날 가격으로. 같은 종목은 30일에 한 번."""
     if not scan or not scan.get("pass"):
@@ -697,7 +723,8 @@ def daily(out=print) -> dict:
         except Exception as e:  # noqa: BLE001
             out(f"가상매매: 스승 눌림목 후보 확인 실패({e})")
     rk6_tk = [] if (rk.empty or "score6" not in rk.columns or not st.get("rank6", {}).get("on")) else list(rk.sort_values(["score6", "urgency"], ascending=False)["ticker"].head(int(st["rank6"]["n"])))
-    tick = list(dict.fromkeys(held + ([] if rk.empty else list(rk["ticker"].head(int(st["rank"]["n"])))) + rk6_tk + piggy_tk + master_tk))
+    stay_pool = [] if (rk.empty or not st.get("rank_stay", {}).get("on")) else list(rk["ticker"].head(STAY_TOP))   # 🏁 순위 연속 후보(10위 안) 가격도 받아 둠
+    tick = list(dict.fromkeys(held + ([] if rk.empty else list(rk["ticker"].head(int(st["rank"]["n"])))) + rk6_tk + stay_pool + piggy_tk + master_tk))
     bars = market.download_daily(tick, period="3mo") if tick else {}  # 3개월: 병합 보정·보관소 겹침 확인에 충분
     closed = update(bars, piggy_out=breakers)
     last = {t: float(df["Close"].dropna().iloc[-1]) for t, df in bars.items() if df is not None and not df.dropna(subset=["Close"]).empty}
@@ -708,6 +735,18 @@ def daily(out=print) -> dict:
             bought["rank6"] = open_new(rk, last, lastday, "rank6")
         except Exception as e:  # noqa: BLE001
             out(f"가상매매: 순위(⑥ 반영) 매수 실패({e})")
+    if not rk.empty:
+        try:  # 🏁 순위 이력(2026-10-29): 그날 상위 50 을 rank_hist 에 — '순위 연속' 전략과 "상위권이 며칠 머무나" 검증 자료
+            with closing(db.connect()) as conn:
+                rank.save_hist(conn, rk, lastday)
+                conn.commit()
+        except Exception as e:  # noqa: BLE001
+            out(f"가상매매: 순위 이력 저장 실패({e})")
+    if st.get("rank_stay", {}).get("on") and not rk.empty:
+        try:
+            bought["rank_stay"] = open_stay(rk, last, lastday)
+        except Exception as e:  # noqa: BLE001
+            out(f"가상매매: 순위 연속 매수 실패({e})")
     if st["pick"]["on"]:
         try:
             import pick30

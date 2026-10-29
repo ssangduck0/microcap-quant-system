@@ -36,7 +36,7 @@ def row(t):
 
 # ------------------------------------------------------------------ 1) 설정: 기본값 · 저장 · 범위 제한 · 전략별 켜고 끄기
 s0 = pt.settings()
-assert set(s0) == {"rank", "rank6", "pick", "close", "piggy", "after", "master"} and s0["rank"]["tp"] == 20.0 and s0["close"]["hold"] == 1 and s0["piggy"]["tp"] == 0.0 and s0["after"]["on"] is True
+assert set(s0) == {"rank", "rank6", "rank_stay", "pick", "close", "piggy", "after", "master"} and s0["rank"]["tp"] == 20.0 and s0["close"]["hold"] == 1 and s0["piggy"]["tp"] == 0.0 and s0["after"]["on"] is True
 s1 = pt.save_settings({"rank": {"tp": 10, "sl": 5}, "piggy": {"on": False}, "pick": {"tp": 999, "n": 0}, "nope": {"tp": 1}})
 assert s1["rank"]["tp"] == 10.0 and s1["rank"]["sl"] == 5.0 and s1["rank"]["hold"] == 3 and s1["piggy"]["on"] is False and s1["pick"]["tp"] == 200.0 and s1["pick"]["n"] == 1
 assert "박스 상단" in pt.rule_text(s1["piggy"], "piggy") and "당일 마감" in pt.rule_text(s1["after"], "after") and pt.rule_text(s1["rank"], "rank") == "익절 +10% · 손절 −5% · 3거래일"
@@ -143,6 +143,24 @@ rk6 = rk.assign(score6=[10.0, 20.0, 30.0, 40.0, 50.0])   # 🏁 순위(⑥ 반�
 assert pt.open_new(rk6, {f"R{i}": 1.0 for i in range(1, 6)}, D2, "rank6") == ["R5", "R4", "R3"] and pt.open_new(rk6, {f"R{i}": 1.0 for i in range(1, 6)}, D2, "rank6") == []
 r5 = row("R5"); assert r5["strategy"] == "rank6" and r5["rank"] == 1 and r5["score"] == 50.0 and r5["book"] == pt.book("rank6") and pt.open_new(rk, {"R1": 1.0}, D2, "rank6") == []   # score6 없는 표면 안 삼
 assert {"R1", "R2", "R3"} <= set(pt.trades(strategy="rank")["ticker"]) and set(pt.trades(strategy="rank6")["ticker"]) == {"R5", "R4", "R3"}
+# 🏁 순위 연속(10위 안 2일) — 2026-10-29: 순위 이력(rank_hist)이 있어야 함 · 첫날은 이력이 하루뿐이라 안 삼 · 둘째 날 두 날 모두 10위 안인 종목만(오늘 순위 순) · 같은 종목 5일 쿨다운
+import rank as _rank
+with closing(db.connect()) as c:
+    assert _rank.stay_tickers(c, D1) == []                                                   # 이력 없음
+    assert _rank.save_hist(c, rk, D1) == 5; c.commit()
+    assert _rank.stay_tickers(c, D1) == [] and _rank.stay_tickers(c, D1, days=1) == ["R1", "R2", "R3", "R4", "R5"]   # 하루치뿐(연속 1일이면 오늘 10위 안 전부)
+assert pt.open_stay(rk, {f"R{i}": 1.0 for i in range(1, 6)}, D1) == []
+rk_b = pd.DataFrame([{"ticker": t, "rank": i, "score": 90 - i, "parts": {}} for i, t in enumerate(["R2", "R9", "R1", "R7", "R3"], start=1)])   # 둘째 날: R9·R7 새로 진입, R5·R4 빠짐
+with closing(db.connect()) as c:
+    _rank.save_hist(c, rk_b, D2); c.commit()
+    assert _rank.stay_tickers(c, D2) == ["R2", "R1", "R3"], _rank.stay_tickers(c, D2)       # 두 날 모두 10위 안(오늘 순위 순)
+    assert _rank.stay_tickers(c, D2, top=2) == ["R2"] and _rank.stay_tickers(c, D2, days=3) == []   # 3일 연속은 기록일이 모자람
+    assert [r[0] for r in c.execute("SELECT ticker FROM rank_hist WHERE date=? ORDER BY rank", (D2,))] == ["R2", "R9", "R1", "R7", "R3"]
+assert pt.open_stay(rk_b, {"R2": 1.0, "R1": 1.0, "R3": 1.0, "R9": 1.0}, D2) == ["R2", "R1", "R3"] and pt.open_stay(rk_b, {"R2": 1.0}, D2) == []
+rs = row("R2"); assert rs["strategy"] == "rank_stay" and rs["rank"] == 1 and rs["book"] == pt.book("rank_stay") and "연속" in (rs["note"] or "") and rs["tp"] == 20.0
+with closing(db.connect()) as c:
+    _rank.save_hist(c, rk_b, D3); c.commit()
+assert pt.open_stay(rk_b, {"R2": 1.0, "R1": 1.0, "R3": 1.0}, D3) == []                        # 이미 보유 + 5일 쿨다운 → 다시 안 삼
 scan = {"pass": [{"ticker": "PK1", "status": "유력", "weak": 0, "price": 2.0, "imm_days": 3, "pressure": 7, "target_name": "상장 유지", "target": 2.6, "pct": 30},
                  {"ticker": "PK2", "status": "유력", "weak": 0, "price": 1.0, "imm_days": 5, "pressure": 6, "target_name": "워런트", "target": 1.3, "pct": 30},
                  {"ticker": "PK3", "status": "가능", "weak": 0, "price": 1.0, "imm_days": 30, "pressure": 3, "target_name": "시총", "target": 1.3, "pct": 30},
@@ -179,7 +197,7 @@ assert set(pt.open_tickers()) >= {"R1", "PK2", "PQ", "CW3", "AFX"} and "GA" not 
 
 # ------------------------------------------------------------------ 7) 비교표 · 전략별 장부·초기화
 cmp_df = pt.compare({"R1": 1.1})
-assert list(cmp_df["key"]) == ["rank", "rank6", "pick", "close", "piggy", "after", "master"] and cmp_df.set_index("key").loc["rank", "거래"] >= 8
+assert list(cmp_df["key"]) == ["rank", "rank6", "rank_stay", "pick", "close", "piggy", "after", "master"] and cmp_df.set_index("key").loc["rank", "거래"] >= 8
 assert cmp_df.set_index("key").loc["after", "청산"] == 5 and cmp_df.set_index("key").loc["piggy", "열린"] == 1
 b_rank, b_pick = pt.book("rank"), pt.book("pick")
 pt.reset("pick")
