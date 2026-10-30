@@ -63,6 +63,7 @@ def ensure(conn) -> None:
     for d in DDL:
         conn.execute(d)
     seed(conn)
+    conn.commit()   # INSERT OR IGNORE 가 트랜잭션을 열어 두므로 닫기 전에 확정(안 하면 연결이 닫힐 때 되돌아가 매번 다시 심음)
 
 
 def seed(conn) -> None:
@@ -77,12 +78,11 @@ def config(t: str, conn=None) -> dict | None:
         with closing(db.connect()) as c:
             return config(t, c)
     ensure(conn)
-    conn.row_factory = None
     cur = conn.execute("SELECT * FROM reset_config WHERE ticker=?", (t,))
     row = cur.fetchone()
     if not row:
         return None
-    return dict(zip([d[0] for d in cur.description], row))
+    return dict(zip([d[0] for d in cur.description], tuple(row)))   # Row 든 tuple 이든(연결의 row_factory 를 건드리지 않음)
 
 
 def has(t: str) -> bool:
