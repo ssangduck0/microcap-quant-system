@@ -103,10 +103,12 @@ def render() -> None:
 
 @st.cache_data(ttl=600, show_spinner=False)
 @st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def _dp_flags() -> dict:
+    """🕶 다크풀 동반 표시 — 🔥 화면 캐시 'dp_flags'(10분마다)에서(2026-10-30: 예전엔 화면 기억도 없이 열 때마다 3.3초)."""
     try:
-        import darkpool
-        return darkpool.flag_map()
+        import pagecache
+        return pagecache.get_or_build("dp_flags")
     except Exception:  # noqa: BLE001
         return {}
 

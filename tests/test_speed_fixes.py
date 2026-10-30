@@ -73,4 +73,16 @@ assert pagecache.get("pick30", 25)["rows"][0]["ticker"] == "AAA"                
 pick30_ui._scan.clear()
 assert pick30_ui._scan()["at"] == "x" and calls == [1]                            # 이번엔 캐시에서(다시 계산 안 함)
 assert pagecache._build_pick30()["at"] == "x" and calls == [1, 1]                 # 데우기 작업은 pick30.scan 을 부름
+
+# ---- 4) 💰 펀드스캔 · 🧲 다크풀 표시도 화면 캐시에서(get_or_build)
+import fundscan, darkpool
+assert {"fundscan", "dp_flags"} <= set(pagecache.ENTRIES)
+fs_calls, dp_calls = [], []
+fundscan.scan = lambda: fs_calls.append(1) or [{"ticker": "FFF", "score": 9}]
+darkpool.flag_map = lambda conn=None: dp_calls.append(1) or {"DDD": "DP 62% (+14p)"}
+assert pagecache.get_or_build("fundscan")[0]["ticker"] == "FFF" and pagecache.get_or_build("fundscan")[0]["ticker"] == "FFF" and fs_calls == [1]   # 두 번째는 캐시
+assert pagecache.get_or_build("dp_flags") == {"DDD": "DP 62% (+14p)"} and dp_calls == [1]
+import fundscan_ui, accum_ui
+fundscan_ui._scan.clear(); accum_ui._dp_flags.clear()
+assert fundscan_ui._scan()[0]["ticker"] == "FFF" and accum_ui._dp_flags() == {"DDD": "DP 62% (+14p)"} and fs_calls == [1] and dp_calls == [1]
 print("ALL OK")

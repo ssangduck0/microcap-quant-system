@@ -28,9 +28,11 @@ def money(v, cur: str, fx: float, unit_price: bool = False) -> str:
     return f"${v:,.4f}" if unit_price else f"${v / 1e6:,.2f}M"
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def _scan():
-    return fs.scan()
+    """🔥 화면 캐시 'fundscan'(quant-warm 10분마다)에서 꺼냄 — 없거나 오래됐으면 직접 계산해 넣어 둠(2026-10-30: 첫 화면 3.9초 → 즉시)."""
+    import pagecache
+    return pagecache.get_or_build("fundscan")
 
 
 

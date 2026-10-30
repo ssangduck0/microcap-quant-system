@@ -16,14 +16,7 @@ STC = {"유력": "#E5484D", "가능": "#F76B15", "대기": "#B58A00"}
 def _scan():
     """🔥 화면 캐시(pagecache 'pick30', quant-warm 10분마다)에서 꺼내고, 없거나 25분 넘게 오래됐으면 직접 계산해 넣어 둠(2026-10-30: 첫 화면 12초 → 즉시)."""
     import pagecache
-    s = pagecache.get("pick30", pagecache.ENTRIES["pick30"][2])
-    if s is None:
-        s = pick30.scan()
-        try:
-            pagecache.put("pick30", s)
-        except Exception:  # noqa: BLE001
-            pass
-    return s
+    return pagecache.get_or_build("pick30")
 
 
 def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None, guest: bool | None = None) -> str:

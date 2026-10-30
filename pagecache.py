@@ -106,6 +106,18 @@ def get(name: str, max_age_min: float | None = None, conn=None):
         return None
 
 
+def get_or_build(name: str):
+    """화면용: 캐시가 믿을 만하면(ENTRIES 의 최대 나이 안) 꺼내고, 없거나 오래됐으면 직접 만들어 넣어 두고 돌려줌(캐시가 없어도 화면은 똑같이 동작)."""
+    obj = get(name, ENTRIES[name][2])
+    if obj is None:
+        obj = ENTRIES[name][3]()
+        try:
+            put(name, obj)
+        except Exception:  # noqa: BLE001
+            pass
+    return obj
+
+
 def invalidate(name: str) -> None:
     with closing(db.connect()) as c:
         ensure(c)
@@ -189,6 +201,16 @@ def _build_pick30():
     return pick30.scan()
 
 
+def _build_fundscan():
+    import fundscan
+    return fundscan.scan()
+
+
+def _build_dp_flags():
+    import darkpool
+    return darkpool.flag_map()
+
+
 # 이름: (설명, 다시 만드는 주기(분), 화면이 믿고 쓰는 최대 나이(분), 만드는 함수) — 순서대로 만든다(px·rank_s3 는 rank 를 쓴다)
 ENTRIES = {
     "rank": ("🏁 종합 순위 표(🎯 장마감 체크리스트의 '종합 N위' 열도 같이 씀)", 10, 25, _build_rank),
@@ -197,6 +219,9 @@ ENTRIES = {
     "secflags": ("📚 과거 사건 전체의 급락일 전후 공시 플래그", 12 * 60, 36 * 60, _build_secflags),
     # 2026-10-30: 🎯 PICK 스캔이 1,800종목 압력·펀드 분석으로 12초(10분 캐시가 끝날 때마다 첫 화면이 기다림) → 미리 만들어 둠
     "pick30": ("🎯 PICK +30% 후보 스캔(압력·펀드 분석)", 10, 25, _build_pick30),
+    # 2026-10-30 화면 속도 2차: 💰 펀드스캔 표 3.9초(430종목 분석 · 리포트 5,400번 읽기) · 🧲 매집의 🕶 다크풀 표시 3.3초(화면 기억도 없이 매번)
+    "fundscan": ("💰 펀드스캔 표(공시 해석 종목 분석)", 10, 25, _build_fundscan),
+    "dp_flags": ("🧲 매집 의심의 🕶 다크풀 동반 표시", 10, 25, _build_dp_flags),
 }
 
 
