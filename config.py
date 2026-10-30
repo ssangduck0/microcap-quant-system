@@ -77,6 +77,7 @@ DILUTION_REFRESH_HOURS = 6        # SEC 희석 판별 재검사 주기
 DILUTION_RETRY_HOURS = 0.5        # '확인 불가'였던 종목 재시도 주기
 FUNDAMENTALS_REFRESH_HOURS = 24   # float/거래소 정보 갱신 주기
 SIGNAL_MIN_MOVE_PCT = 5.0         # 직전 신호 대비 이 이상 움직여야 신호 로그를 추가
+SIGNAL_ALERT_MAX_PER_DAY = int(os.environ.get("SIGNAL_ALERT_MAX_PER_DAY", "3"))   # 🎯 같은 종목 '가격 변동' 재알림 24시간 최대(0 = 제한 없음) — 2026-10-31: 하루 15번 오는 종목이 있어 중요한 알림이 묻힘
 ALERT_MIN_PUMP_SCORE = 70.0       # 텔레그램 알림 최소 점수
 
 
@@ -201,6 +202,7 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "PRESIM_ACCOUNT_KRW": (float, 100000.0, 100000000.0, "숫자", "🎲 매매 전 시뮬레이션: 계좌 크기(원) — 수량 상한 10% 의 기준"),
     "PRESIM_MAX_LOSS_KRW": (float, 1000.0, 1000000.0, "숫자", "🎲 한 번 매매의 최대 손실(원) — 수량 = 이것 ÷ (매수가 − 손절가)"),
     "PRESIM_TOP_N": (int, 0, 50, "숫자", "🎲 아침 자동 실행: 종합 순위 상위 몇 개까지(0 = 순위는 안 돌림)"),
+    "SIGNAL_ALERT_MAX_PER_DAY": (int, 0, 20, "알림", "🎯 같은 종목 '가격 변동' 재알림 24시간 최대(0 = 제한 없음 · 첫 포착·희석 변경은 항상 보냄 · 신호 기록은 그대로)"),
     "PRESIM_REGIME_VERDICT": (bool, None, None, "기능", "🎲 대표 판정에 장세 반영(켜면 '2년 전체'와 '오늘과 같은 장세 날만' 중 더 조심스러운 판정을 배지·목록에 씀)"),
     "RANK_W_STRENGTH": (float, 0.3, 1.0, "순위 가중치", "🏁 종합 = 강도 × 이 값 + 임박도 × (1 − 이 값)"),
     "RANK_W_ACC": (float, 0.0, 1.0, "순위 가중치", "강도: 매집 비중"),

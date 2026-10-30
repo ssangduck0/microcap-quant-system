@@ -69,6 +69,21 @@ def send_telegram(text: str) -> bool:
     return ok
 
 
+def repeat_ok(conn, ticker: str, reason: str, cap: int | None = None, now=None) -> bool:
+    """🎯 펌핑 신호 재알림을 보낼지(2026-10-31): '가격 변동' 재알림만 같은 종목 최근 24시간 cap 번까지(신규·첫 포착·희석 변경은 항상).
+    10/28~30 펌핑 신호 알림 262건 중 '가격 변동' 210건(80%) · 같은 종목 하루 최대 15번(SGLY) → 중요한 알림이 묻힘."""
+    from datetime import datetime, timedelta, timezone
+    cap = int(getattr(config, "SIGNAL_ALERT_MAX_PER_DAY", 3)) if cap is None else int(cap)
+    if cap <= 0 or not str(reason or "").startswith("가격 변동"):
+        return True
+    since = ((now or datetime.now(timezone.utc)) - timedelta(hours=24)).isoformat(timespec="seconds")
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM alert_log WHERE ticker=? AND at >= ? AND text LIKE ?", (ticker, since, f"[{ticker}] 펌핑점수%")).fetchone()[0]
+    except Exception:  # noqa: BLE001  (알림 기록 표가 아직 없음)
+        return True
+    return n < cap
+
+
 def recent(conn, days: int = 7, kind: str | None = None, ticker: str | None = None, limit: int = 500):
     """최근 days 일 보낸 알림(최신순) → DataFrame[시각(KST), 종류, 종목, 내용, 보냄]."""
     import pandas as pd

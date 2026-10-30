@@ -442,7 +442,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
                 db.insert_signal(conn, {"date": m["trade_date"], "ticker": ticker, "price": m["price"],
                                         "drawdown_pct": m["drawdown_pct"], "quant_score": q_score,
                                         "pump_score": p_score, "dilution_status": status, "reason": reason})
-                if not excluded and p_score >= config.ALERT_MIN_PUMP_SCORE:
+                if not excluded and p_score >= config.ALERT_MIN_PUMP_SCORE and notify.repeat_ok(conn, ticker, reason):   # '가격 변동' 재알림은 하루 상한(관리 모드)
                     notify.send_telegram(
                         f"[{ticker}] 펌핑점수 {p_score} | 낙폭 {m['drawdown_pct']:.1f}% | "
                         f"{scoring.STATUS_LABEL.get(status, status)} | {reason}")
