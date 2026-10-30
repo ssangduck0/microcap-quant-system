@@ -1,4 +1,5 @@
 """🏁 종합 순위 화면 + 다른 화면에 붙는 '종합 N위 · ⏱' 칩/열."""
+import pandas as pd
 import streamlit as st
 
 import rank as rk
@@ -22,9 +23,20 @@ def table():
     return df
 
 
+@st.cache_resource(max_entries=2, show_spinner=False)
+def _lookup_by(sig: tuple, _df) -> dict:
+    return {r["ticker"]: r for r in _df.to_dict("records")}
+
+
 def lookup() -> dict:
+    """{티커: 순위 행} — 읽기 전용으로 쓸 것(여러 화면이 같은 사전을 나눠 씀).
+    2026-10-30: 예전엔 칩 하나마다 순위 표 전체(2,200행)를 사전으로 바꿔 🗂 테마 화면이 칩 60개에 3초 → 표 내용이 같으면 한 번 만든 사전을 재사용."""
     df = table()
-    return {} if df.empty else {r["ticker"]: r for r in df.to_dict("records")}
+    if df is None or df.empty:
+        return {}
+    sc = pd.to_numeric(df["score"], errors="coerce").sum() if "score" in df else 0.0
+    sig = (len(df), tuple(df["ticker"].head(5)), round(float(sc), 4))
+    return _lookup_by(sig, df)
 
 
 def chip(t: str, m: dict | None = None) -> str:

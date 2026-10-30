@@ -309,16 +309,50 @@ def expect(rows: pd.DataFrame, price: float, target: float = 20.0) -> dict:
             "start_price": price * (1 + lo / 100), "exp_high": price * (1 + float(q.loc[0.5]) / 100), "exp_high_q75": price * (1 + float(q.loc[0.75]) / 100)}
 
 
+def _expect_arr(fmax: np.ndarray, fmin: np.ndarray, fcl: np.ndarray, dmax: np.ndarray, codes: np.ndarray, price: float, target: float) -> dict:
+    """expect() 와 같은 결과를 넘파이 배열로(판다스 quantile·median 처럼 빈 값은 빼고, 성공률은 전체 행 기준)."""
+    n = len(fmax)
+    if n == 0:
+        return {"n": 0}
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        q25, q50, q75 = (float(x) for x in np.nanpercentile(fmax, [25, 50, 75]))
+        lo = float(np.nanmedian(fmin))
+        close_med = float(np.nanmedian(fcl))
+        days_med = float(np.nanmedian(dmax))
+    succ = float(np.mean(np.nan_to_num(fmax, nan=-np.inf) >= target) * 100)
+    return {"n": int(n), "events": int(np.unique(codes).size), "success": succ, "max_q25": q25, "max_med": q50, "max_q75": q75,
+            "min_med": lo, "close_med": close_med, "days_med": days_med,
+            "start_price": price * (1 + lo / 100), "exp_high": price * (1 + q50 / 100), "exp_high_q75": price * (1 + q75 / 100)}
+
+
 def radar(conn, target: float = 20.0, band_k: int = 10, band_dd: float = 10.0) -> pd.DataFrame:
-    """최근 병합 종목마다 유사 과거 사례 기대치."""
+    """최근 병합 종목마다 유사 과거 사례 기대치.
+    2026-10-30: 예전엔 최근 병합 419종목마다 경로 20만 줄 전체를 판다스로 다시 훑어(문자열 비교 포함) 화면이 볼 때마다 9초 →
+    경로를 '병합 후 거래일(k)' 순으로 정렬해 두고 종목마다 k 구간만 잘라 넘파이로 계산(결과는 similar()+expect() 와 같음 — tests/test_speed_fixes.py)."""
     ensure_tables(conn)
     cur = db.read_df("SELECT * FROM rs_current")
     if cur.empty:
         return cur
-    paths = db.read_df("SELECT * FROM rs_paths")
+    P = db.read_df("SELECT ticker, split_date, k, dd, fwd_max, fwd_min, fwd_close, days_to_max FROM rs_paths")
+    if P.empty:
+        return pd.DataFrame([{**r, "n": 0} for r in cur.to_dict("records")])
+    P = P.sort_values("k", kind="stable").reset_index(drop=True)
+    kk = P["k"].to_numpy(dtype=float)
+    dd = P["dd"].to_numpy(dtype=float)
+    codes, uniq = pd.factorize(P["ticker"].astype(str) + "\x00" + P["split_date"].astype(str))
+    pos = {u: i for i, u in enumerate(uniq)}
+    cols = [P[c].to_numpy(dtype=float) for c in ("fwd_max", "fwd_min", "fwd_close", "days_to_max")]
     rows = []
     for r in cur.to_dict("records"):
-        e = expect(similar(paths, int(r["k"]), float(r["dd"]), band_k, band_dd, exclude=(r["ticker"], r["split_date"])), float(r["price"]), target)
+        k0, d0 = int(r["k"]), float(r["dd"])
+        a, b = np.searchsorted(kk, k0 - band_k, "left"), np.searchsorted(kk, k0 + band_k, "right")
+        m = (dd[a:b] >= d0 - band_dd) & (dd[a:b] <= d0 + band_dd)
+        ex = pos.get(f"{r['ticker']}\x00{r['split_date']}")
+        if ex is not None:
+            m &= codes[a:b] != ex
+        e = _expect_arr(*(c[a:b][m] for c in cols), codes[a:b][m], float(r["price"]), target)
         rows.append({**r, **e})
     return pd.DataFrame(rows)
 

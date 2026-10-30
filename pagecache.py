@@ -184,12 +184,19 @@ def _build_secflags():
     return fl
 
 
+def _build_pick30():
+    import pick30
+    return pick30.scan()
+
+
 # 이름: (설명, 다시 만드는 주기(분), 화면이 믿고 쓰는 최대 나이(분), 만드는 함수) — 순서대로 만든다(px·rank_s3 는 rank 를 쓴다)
 ENTRIES = {
     "rank": ("🏁 종합 순위 표(🎯 장마감 체크리스트의 '종합 N위' 열도 같이 씀)", 10, 25, _build_rank),
     "px": (f"⚡ EFFECT {EFFECT_DAYS}일 종목 + 순위 상위 {TOP_N} 의 6개월 일봉(야후)", 20, 45, _build_px),
     "rank_s3": (f"🏁 순위 상위 {TOP_N} 의 ✅ 3대 조건 판정", 10, 30, _build_rank_s3),
     "secflags": ("📚 과거 사건 전체의 급락일 전후 공시 플래그", 12 * 60, 36 * 60, _build_secflags),
+    # 2026-10-30: 🎯 PICK 스캔이 1,800종목 압력·펀드 분석으로 12초(10분 캐시가 끝날 때마다 첫 화면이 기다림) → 미리 만들어 둠
+    "pick30": ("🎯 PICK +30% 후보 스캔(압력·펀드 분석)", 10, 25, _build_pick30),
 }
 
 

@@ -20,6 +20,13 @@ def _fx() -> float:
         return 1350.0
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _radar(target: float, band_k: int, band_dd: float):
+    """경로·최근 병합 표는 아침 작업 때만 바뀜 → 같은 조건이면 5분 동안 재사용(2026-10-30 화면 속도 점검: 9.4초 → 1.2초 → 다시 볼 때 즉시)."""
+    with closing(db.connect()) as conn:
+        return rs.radar(conn, target, band_k, band_dd)
+
+
 def render() -> None:
     st.subheader("🔁 병합(역분할) 후 반등 레이더")
     st.caption("최근 1년 안에 역분할한 종목이 지금 '병합 후 N거래일째, 병합일 대비 이만큼' 와 있을 때, 과거 10년 동안 같은 시점·비슷한 낙폭이었던 역분할 종목들이 "
@@ -38,8 +45,7 @@ def render() -> None:
     band_k = c[1].slider("병합 후 거래일 허용 ±", 3, 30, 10, key="rs_bk")
     band_dd = c[2].slider("병합일 대비 등락 허용 ±%p", 3, 30, 10, key="rs_bd")
     min_n = c[3].slider("유사 사례 최소", 5, 200, 20, key="rs_n")
-    with closing(db.connect()) as conn:
-        rd = rs.radar(conn, float(target), int(band_k), float(band_dd))
+    rd = _radar(float(target), int(band_k), float(band_dd))
     st.caption(f"과거 역분할 {n_ev:,}건 · 병합 후 경로 {n_path:,}개 · 최근 병합 종목 {len(rd)}개")
     if rd.empty:
         st.info("최근 1년 안에 역분할한 종목이 없습니다(매일 아침 갱신).")

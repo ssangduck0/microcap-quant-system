@@ -84,6 +84,8 @@ import rank_ui, watch_ui
 up = pd.DataFrame({"Open": 1.0, "High": 1.02, "Low": 0.98, "Close": np.r_[np.full(30, 1.0), np.linspace(1.0, 1.3, 10)],
                    "Volume": np.r_[np.full(30, 1e5), np.full(10, 3e5)]}, index=pd.bdate_range(start=pd.Timestamp(T) - pd.Timedelta(days=70), periods=40))
 watch_ui.prices = lambda tks: {"OK": up}
+import pagecache as _pc
+_pc.prices = lambda tks: {"OK": up}   # 2026-10-30: s3_marks 는 10/28 부터 pagecache.prices 를 씀(이 테스트는 그 뒤 계속 실패했는데 종목명 "OK" 때문에 run_all 이 통과로 셈)
 mk = rank_ui.s3_marks.__wrapped__(("OK",)) if hasattr(rank_ui.s3_marks, "__wrapped__") else rank_ui.s3_marks(("OK",))
 assert "①💰" in mk["OK"], mk
 # --- 🌙 최근 60일 시간외 분봉 채우기 · 정규장만 vs 시간외 포함 비교

@@ -8,7 +8,11 @@ cp apps/*_app.py "$TMPD"/ 2>/dev/null
 ALL=$(ls test_*.py | sort)
 N=$(echo "$ALL" | wc -l); PART=${1:-1}; SIZE=$(( (N + 4) / 5 ))
 for t in $(echo "$ALL" | sed -n "$(( (PART-1)*SIZE+1 )),$(( PART*SIZE ))p"); do
-  r=$(timeout 100 python "$t" 2>&1 | grep -E "ALL OK|UI OK|REPORT OK|CHART OK|Error:|assert|Traceback" | grep -v "조회 실패\|전환\|DNSError\|ALL OK 2" | tail -1)
-  case "$r" in *"OK"*) ;; *) echo "$t: $r";; esac
+  # 2026-10-30: 통과 = 종료 코드 0 + 성공 표시(ALL/UI/REPORT/CHART OK) 한 줄. 예전엔 마지막 줄에 "OK" 글자만 있으면 통과로 쳐서
+  #             가짜 종목명이 "OK" 인 test_shortterm 의 `KeyError: 'OK'` 가 10/28 부터 통과로 숨어 있었음.
+  out=$(timeout 100 python "$t" 2>&1); rc=$?
+  r=$(echo "$out" | grep -E "ALL OK|UI OK|REPORT OK|CHART OK|Error:|assert|Traceback" | grep -v "조회 실패\|전환\|DNSError\|ALL OK 2" | tail -1)
+  ok=$(echo "$out" | grep -cE "(^|[^A-Za-z])(ALL|UI|REPORT|CHART) OK")
+  if [ "$rc" -ne 0 ] || [ "$ok" -eq 0 ]; then echo "$t: [종료 $rc] $r"; fi
 done
 echo "--- part $PART done ($SIZE files)"
