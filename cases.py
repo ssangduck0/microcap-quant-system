@@ -561,6 +561,11 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+    db.TIMEOUT = 120.0   # 2026-10-30: 다른 프로그램이 잠금을 잠깐 쥐어도 30초 만에 포기하지 않게(아침 작업은 급하지 않음)
+    try:
+        sys.stdout.reconfigure(line_buffering=True)   # journalctl 에 줄마다 바로(예전엔 끝날 때 한꺼번에 나와 모든 줄이 09:03:38 로 찍혔음)
+    except Exception:  # noqa: BLE001
+        pass
     import filelog   # 2026-10-30: 진행 줄(INFO)·실패(WARNING)를 DB 폴더 cases.log 에도 → ⚙️ 관리 모드 '⚠️ 아침 작업 경고' 상자·'로그 보기'
     filelog.attach("cases", level=logging.INFO)
     _out = filelog.out_logger("cases.out").info

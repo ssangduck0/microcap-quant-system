@@ -99,10 +99,26 @@ def is_fresh(iso: str | None, hours: float) -> bool:
     return datetime.now(timezone.utc) - t < timedelta(hours=hours)
 
 
+TIMEOUT = 30.0   # 다른 프로그램이 쓰기 잠금을 쥐고 있을 때 기다리는 초. 화면은 30초, 아침 작업·수집기는 main 에서 120초로 올림(2026-10-30)
+
+
+def retry_locked(fn, *a, tries: int = 6, wait: float = 2.0, **kw):
+    """'database is locked' 면 2·4·6·8·10초 쉬고 다시(각 시도도 TIMEOUT 만큼 기다림). 다른 오류·마지막 실패는 그대로 올림.
+    2026-10-30: 아침 작업 중 수집기·공매도 잔고가 잠금을 길게 쥐어 🎲 사건 표 재작성·시뮬레이션 17종목·병합 레이더가 '잠김' 으로 실패한 뒤 추가."""
+    import time
+    for i in range(tries):
+        try:
+            return fn(*a, **kw)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or i == tries - 1:
+                raise
+            time.sleep(wait * (i + 1))
+
+
 def connect() -> sqlite3.Connection:
     # 2026-10-28: 예전엔 연결마다 PRAGMA journal_mode=WAL 을 실행했는데, 서버에서 재 보니 그 한 줄이 연결 비용의 96%(0.04ms → 0.98ms)였다.
     # WAL 은 DB 파일에 한 번 설정하면 계속 유지되므로 init_db() 에서 한 번만 켠다(🏁 순위 계산처럼 연결을 1만 번 여는 곳이 두 배 빨라짐).
-    conn = sqlite3.connect(config.DB_PATH, timeout=30)
+    conn = sqlite3.connect(config.DB_PATH, timeout=TIMEOUT)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -54,6 +54,7 @@ def repair(conn, tickers: list[str], download=None, period: str = "2y", chunk: i
     import market
     dl = download or (lambda ts: market.download_daily(ts, period=period, chunk=chunk))
     n_t = n_rows = 0
+    changed: list[str] = []
     for i in range(0, len(tickers), chunk):
         part = tickers[i:i + chunk]
         data = dl(part) or {}
@@ -61,19 +62,51 @@ def repair(conn, tickers: list[str], download=None, period: str = "2y", chunk: i
             df = cases.drop_incomplete_last_bar(data.get(t))
             if df is None or len(df) < 20:
                 continue
-            n_rows += db.upsert_daily_prices(conn, t, df)
+            if _differs(conn, t, df):
+                changed.append(t)
+            n_rows += db.retry_locked(db.upsert_daily_prices, conn, t, df)
             n_t += 1
-    return {"tickers": n_t, "rows": n_rows}
+    dropped = _drop_presim(conn, changed)
+    return {"tickers": n_t, "rows": n_rows, "changed": changed, "presim_dropped": dropped}
+
+
+def _differs(conn, t: str, df, tol: float = 0.02) -> bool:
+    """저장된 종가와 새 종가가 같은 날짜에서 2% 넘게 다른 날이 있으면 True(= 옛 기준 봉이 있었음)."""
+    import pandas as pd
+    old = dict(conn.execute("SELECT date, close FROM daily_prices WHERE ticker=? AND close > 0", (t,)).fetchall())
+    if not old:
+        return False
+    for ts, c in df["Close"].dropna().items():
+        o = old.get(pd.Timestamp(ts).strftime("%Y-%m-%d"))
+        if o and c and abs(float(c) / float(o) - 1) > tol:
+            return True
+    return False
+
+
+def _drop_presim(conn, tickers: list[str]) -> int:
+    """일봉이 바뀐 종목의 🎲 사건(presim_ep)을 지움 → 같은 아침 presim.build_episodes 가 고친 일봉으로 다시 만듦(표 전체 재작성 없이)."""
+    if not tickers:
+        return 0
+    try:
+        q = ",".join("?" * len(tickers))
+        def _d():
+            cur = conn.execute(f"DELETE FROM presim_ep WHERE ticker IN ({q})", tickers)
+            conn.commit()
+            return max(0, cur.rowcount or 0)
+        return db.retry_locked(_d)
+    except Exception:  # noqa: BLE001  (presim 표가 아직 없는 DB)
+        return 0
 
 
 def morning(conn, out=print, download=None, today: date | None = None) -> dict:
     today = today or date.today()
     first = db.get_meta(META_KEY) is None
     tickers = split_tickers(conn, today=today) if first else sorted(set(recent_split_tickers(conn, today=today)) | set(boundary_tickers(conn, today=today)))
-    res = repair(conn, tickers, download=download) if tickers else {"tickers": 0, "rows": 0}
+    res = repair(conn, tickers, download=download) if tickers else {"tickers": 0, "rows": 0, "changed": [], "presim_dropped": 0}
     left = boundary_tickers(conn, today=today)
     if first:
         db.set_meta(META_KEY, today.isoformat())
-    out(f"병합 환산 수리: 대상 {len(tickers)}종목 → {res['tickers']}종목 {res['rows']:,}봉 다시 씀" + (" (처음 한 번: 2년 안 병합 종목 전부)" if first else "")
+    out(f"병합 환산 수리: 대상 {len(tickers)}종목 → {res['tickers']}종목 {res['rows']:,}봉 다시 씀 · 실제로 바뀐 종목 {len(res.get('changed', []))}개(🎲 사건 {res.get('presim_dropped', 0):,}건 다시 만들 예정)"
+        + (" (처음 한 번: 2년 안 병합 종목 전부)" if first else "")
         + (f" · 아직 경계 점프 남음 {len(left)}종목({', '.join(left[:8])})" if left else ""))
     return {**res, "first": first, "asked": len(tickers), "left": left}

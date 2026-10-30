@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sqlite3
 import sys
 import time
 from contextlib import closing
@@ -111,8 +112,21 @@ def targets(conn, years: int = 3, tickers: list[str] | None = None) -> list[dict
     return rows
 
 
+def _flush(conn, buf: list) -> None:
+    """모아 둔 문서를 한 번에 쓰고 바로 확정(잠금은 쓰는 순간만). 2026-10-30: 예전엔 첫 INSERT 부터 50번째 SEC 다운로드까지(수십 초) 쓰기 잠금을 쥐어
+    아침 작업의 🎲 사건 표·병합 레이더가 '잠김' 으로 실패했음(공시 이력 동기화로 10/15 뒤 공시 2,578건을 한꺼번에 받던 날)."""
+    if not buf:
+        return
+    def _w():
+        conn.executemany("INSERT OR REPLACE INTO ev_docs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", buf)
+        conn.commit()
+    db.retry_locked(_w)
+    buf.clear()
+
+
 def collect(client, years: int = 3, limit: int = 0, tickers: list[str] | None = None, out=print) -> int:
     n = 0
+    buf: list = []
     with closing(db.connect()) as conn:
         todo = targets(conn, years, tickers)
         db.set_meta("ev_progress", json.dumps({"left": len(todo), "at": db.utcnow_iso()}))
@@ -131,14 +145,13 @@ def collect(client, years: int = 3, limit: int = 0, tickers: list[str] | None = 
             except Exception:  # noqa: BLE001
                 ok = 0
             types, sent = classify(r["items"], f"{title} {lead} {text[:6000]}")
-            conn.execute("INSERT OR REPLACE INTO ev_docs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (r["accession"], r["ticker"], r["form"], r["items"], r["filed"], acc_t, title, lead,
-                                                                                          json.dumps(types, ensure_ascii=False), sent, db.utcnow_iso(), ok))
+            buf.append((r["accession"], r["ticker"], r["form"], r["items"], r["filed"], acc_t, title, lead, json.dumps(types, ensure_ascii=False), sent, db.utcnow_iso(), ok))
             n += 1
             if n % 50 == 0:
-                conn.commit()
-                db.set_meta("ev_progress", json.dumps({"left": len(todo) - n, "at": db.utcnow_iso()}))
+                _flush(conn, buf)
+                db.retry_locked(db.set_meta, "ev_progress", json.dumps({"left": len(todo) - n, "at": db.utcnow_iso()}))
                 out(f"  수집 {n:,}/{len(todo):,}")
-        conn.commit()
+        _flush(conn, buf)
     db.set_meta("ev_progress", json.dumps({"left": max(0, len(todo) - n), "at": db.utcnow_iso()}))
     out(f"이벤트 수집: {n:,}건")
     return n
@@ -303,6 +316,11 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--tickers", default="")
     a = ap.parse_args()
+    db.TIMEOUT = 120.0   # 2026-10-30: 아침 작업과 겹칠 때 30초 만에 포기하지 않게(수집기는 급하지 않음)
+    try:
+        sys.stdout.reconfigure(line_buffering=True)   # journalctl 에 줄마다 바로(예전엔 프로세스가 끝날 때 한꺼번에 나와 시각을 알 수 없었음)
+    except Exception:  # noqa: BLE001
+        pass
     db.init_db()
     try:  # 2026-10-30: WARNING 이상을 DB 폴더 collector.log 에도(⚙️ 관리 모드 '로그 보기' 수집기 칸)
         import filelog
@@ -317,8 +335,15 @@ def main() -> int:
         label()
     else:
         while True:  # 하루 종일: 수집(한 번에 2,000건) → 라벨 → 남은 게 없으면 1시간 쉬기
-            n = collect(client, a.years, 2000, tk)
-            label()
+            try:
+                n = collect(client, a.years, 2000, tk)
+                label()
+            except sqlite3.OperationalError as e:   # 2026-10-30: 잠김 한 번에 프로세스가 죽어 30초마다 재시작(10/30 08:52~09:00 18번) → 1분 쉬고 계속
+                if "locked" not in str(e):
+                    raise
+                print(f"DB 잠김 — 1분 쉬고 다시: {e}", flush=True)
+                time.sleep(60)
+                continue
             if n == 0:
                 time.sleep(3600)
     return 0

@@ -46,6 +46,7 @@ def refresh(tickers: list[str], max_n: int = 400, out=print, getter=None) -> int
             # 2026-10-30: 열 이름 명시 — chartex(10/27)가 src 열을 더한 뒤 위치 기반 INSERT 가 'has 9 columns but 8 values' 로 아침마다 실패해 야후 공매도 잔고가 사흘 끊겼음(6절 교훈)
             conn.execute("INSERT OR REPLACE INTO short_interest (ticker, date, shares_short, prior, si_pct, dtc, si_date, float_sh, src) VALUES (?,?,?,?,?,?,?,?,?)",
                          (t, day, r["shares_short"], r["prior"], r["si_pct"], r["dtc"], r["si_date"], r["float_sh"], "yahoo"))
+            conn.commit()   # 2026-10-30: 종목마다 확정 — 예전엔 700종목(약 9분)을 받는 내내 쓰기 잠금을 쥐어 스캐너·수집기·화면 저장이 '잠김' 으로 실패
             n += 1
             if getter is None:
                 time.sleep(0.3)

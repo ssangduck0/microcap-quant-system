@@ -44,7 +44,7 @@ EDGE_MIN = 1.0            # 🟢/🔴 문턱(%p, 보정 뒤)
 EFF_MIN = 50.0            # 판정에 필요한 최소 유효 표본(수축이 이미 표본 크기를 벌하므로 MIN_EP 의 절반 — 10/30 복사본 시험에서 저금통+희석 없음 134건·유효 73이 우위 +2.4 인데 🪙 로 막힌 것을 보고)
 RECENT_DAYS = 180         # '최근 창' = 최근 180일(≈120거래일) 사건만의 성적을 따로(쇠퇴 감지, OddsMaker 식)
 OVERLAP_DAYS = 60         # 겹침 가중 창(달력일 ≈ H 거래일)
-EP_VERSION = "3"         # 사건 표 버전 — 바뀌면 다음 아침에 전체를 한 번 다시 씀(v2: 🐷 저금통 재생 키 + sl_pct/tp_pct 열 · v3 2026-10-30: 🩹 pricefix 가 병합 종목 일봉을 환산한 뒤 다시 씀 — 같은 아침에 pricefix 가 먼저 돈다)
+EP_VERSION = "2"         # 사건 표 버전 — 바뀌면 다음 아침에 전체를 한 번 다시 씀(v2: 🐷 저금통 재생 키 + sl_pct/tp_pct 열). 병합 환산 수리는 종목 단위로(🩹 pricefix 가 일봉이 바뀐 종목의 사건만 지움 → 같은 아침 presim 이 다시 만듦)
 F = {"ovs": 1, "ovs25": 2, "ovs20": 4, "dil": 8, "strong": 16, "money": 32, "base": 64, "pick": 256, "rank": 512, "piggy": 1024}
 # 키: (이름, flags 에 모두 있어야 하는 비트, onset 에 있어야 하는 비트) — onset = 그 신호가 '처음 켜진 날'(같은 구간을 여러 번 세지 않게)
 KEYS = {
@@ -244,6 +244,23 @@ def _load_bars(conn, tickers: list[str], since: str, now: datetime | None = None
     return res
 
 
+def _write_ep(conn, rows: list) -> None:
+    conn.executemany("INSERT OR REPLACE INTO presim_ep (ticker, date, px, flags, onset, n, hi, lo, cl, sl_pct, tp_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
+    conn.commit()
+
+
+def _prune_ep(conn, keep: set) -> int:
+    """전체 재작성 끝: keep 에 없는 행을 지운다(임시 표로 한 번에). 지운 수를 돌려줌."""
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _ep_keep (ticker TEXT, date TEXT, PRIMARY KEY (ticker, date))")
+    conn.execute("DELETE FROM _ep_keep")
+    conn.executemany("INSERT OR IGNORE INTO _ep_keep VALUES (?,?)", list(keep))
+    cur = conn.execute("DELETE FROM presim_ep WHERE NOT EXISTS (SELECT 1 FROM _ep_keep k WHERE k.ticker = presim_ep.ticker AND k.date = presim_ep.date)")
+    n = max(0, cur.rowcount or 0)
+    conn.execute("DELETE FROM _ep_keep")
+    conn.commit()
+    return n
+
+
 def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] | None = None, bars: dict | None = None, today: date | None = None) -> dict:
     """1겹 재료: 종목마다 신호가 처음 켜진 날(+ 기준 표본 · PICK · 순위)의 '그 뒤 40봉' 경로를 presim_ep 에 저장. 이어하기: 이미 40봉 다 있는 날은 건너뜀."""
     ensure(conn)
@@ -263,9 +280,10 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
     rebuild_all = ver != EP_VERSION   # 표 버전이 바뀌면(키·열 추가) 한 번 전체를 다시 씀
     if rebuild_all:
         out(f"🎲 사건 표 버전 {ver or '없음'} → {EP_VERSION}: 전체를 다시 씁니다(한 번, 수 분)")
-    if rebuild_all:   # 파생 표(일봉에서 언제든 다시 만듦)라 옛 행을 비우고 새로 씀 — 안 비우면 기준 표본 날짜가 바뀐 옛 행이 남아 두 배로 셈
-        conn.execute("DELETE FROM presim_ep")
-        conn.commit()
+    # 전체 재작성: 예전엔 먼저 DELETE 하고 채웠는데, 10/30 아침 1,200/3,386종목에서 '잠김' 으로 멈춰 표가 36,604건(원래 ≈99,300)만 남은 채
+    # 그날 시뮬레이션이 돌았음 → 이제는 덮어쓰기(INSERT OR REPLACE)로 끝까지 쓴 뒤, 이번에 쓰지 않은 옛 행(기준 표본 날짜가 바뀐 행 등)만 지움.
+    # 중간에 실패하면 옛 표 + 새 행이 섞인 채 남고 버전이 그대로라 다음 아침에 다시 시도(빈 표가 되는 일은 없음).
+    written: set | None = set() if rebuild_all else None
     have = {} if rebuild_all else {(r[0], r[1]): r[2] for r in conn.execute("SELECT ticker, date, n FROM presim_ep")}
     fx_now = _fx()
     try:
@@ -317,14 +335,19 @@ def build_episodes(conn, years: float = EP_YEARS, out=print, tickers: list[str] 
                     res["new" if prev_n is None else "updated"] += 1
             except Exception as e:  # noqa: BLE001
                 out(f"presim 사건 만들기 실패 {t}: {e}")
+        if written is not None:
+            written.update((r[0], r[1]) for r in rows)
         if rows:
-            conn.executemany("INSERT OR REPLACE INTO presim_ep (ticker, date, px, flags, onset, n, hi, lo, cl, sl_pct, tp_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)   # 열 이름 명시(6절 교훈)
+            db.retry_locked(_write_ep, conn, rows)   # 열 이름 명시(6절 교훈)
             conn.commit()
         if len(tickers) > 300:
             out(f"🎲 사건 표: {min(k + 300, len(tickers))}/{len(tickers)}종목")
+    if written is not None:   # 끝까지 썼을 때만 옛 행 정리 + 버전 표시
+        res["pruned"] = db.retry_locked(_prune_ep, conn, written)
+        out(f"🎲 사건 표 정리: 이번에 다시 만들지 않은 옛 행 {res['pruned']:,}건 지움")
     res["rows"] = conn.execute("SELECT COUNT(*) FROM presim_ep").fetchone()[0]
     try:
-        db.set_meta("presim_ep_ver", EP_VERSION)
+        db.retry_locked(db.set_meta, "presim_ep_ver", EP_VERSION)
     except Exception:  # noqa: BLE001
         pass
     out(f"🎲 사건 표(presim_ep): 종목 {res['tickers']} · 새로 {res['new']} · 갱신 {res['updated']} · 전체 {res['rows']:,}건")
@@ -645,12 +668,14 @@ def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str |
     if save:
         detail = json.dumps({"layer1": {k: v for k, v in l1.items() if k not in ("meta",)}, "base": lb, "recent": rec, "own": own, "size": sz, "basis": basis, "notes": notes,
                              "sl_pct": res["sl_pct"], "tp_pct": res["tp_pct"], "plan": l1["plan"], "p0": p0}, ensure_ascii=False, default=float)
-        conn.execute("INSERT OR REPLACE INTO presim_log (day, ticker, source, key, entry, sl, tp, horizon, p_tp, p_tp_opt, p_sl, p_none, both_pct, ev_pct, n_ep, own_p_tp, own_p_sl, own_ev, own_n, "
-                     "verdict, detail, created_at, edge, edge_raw, ev_base, n_eff, p0, recent_n, recent_ev, plan) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                     (day, ticker, source, key, entry, sl, tp, hz, l1.get("p_tp"), l1.get("p_tp_opt"), l1.get("p_sl"), l1.get("p_none"), l1.get("both_pct"), l1.get("ev_pct"), l1.get("n", 0),
-                      own.get("p_tp"), own.get("p_sl"), own.get("ev_pct"), own.get("n_days"), vd, detail, (now or datetime.now(timezone.utc)).isoformat(),
-                      edge, edge_raw, lb.get("ev_pct"), l1.get("n_eff"), p0, rec.get("n", 0), rec.get("ev_pct"), l1["plan"]))
-        conn.commit()
+        def _save():
+            conn.execute("INSERT OR REPLACE INTO presim_log (day, ticker, source, key, entry, sl, tp, horizon, p_tp, p_tp_opt, p_sl, p_none, both_pct, ev_pct, n_ep, own_p_tp, own_p_sl, own_ev, own_n, "
+                         "verdict, detail, created_at, edge, edge_raw, ev_base, n_eff, p0, recent_n, recent_ev, plan) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (day, ticker, source, key, entry, sl, tp, hz, l1.get("p_tp"), l1.get("p_tp_opt"), l1.get("p_sl"), l1.get("p_none"), l1.get("both_pct"), l1.get("ev_pct"), l1.get("n", 0),
+                          own.get("p_tp"), own.get("p_sl"), own.get("ev_pct"), own.get("n_days"), vd, detail, (now or datetime.now(timezone.utc)).isoformat(),
+                          edge, edge_raw, lb.get("ev_pct"), l1.get("n_eff"), p0, rec.get("n", 0), rec.get("ev_pct"), l1["plan"]))
+            conn.commit()
+        db.retry_locked(_save)   # 2026-10-30: 아침 작업 중 다른 프로그램이 잠금을 쥐면 17종목이 모두 '잠김' 으로 실패했음
     return res
 
 
