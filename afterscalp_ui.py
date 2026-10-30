@@ -1,5 +1,5 @@
 """🌙 애프터 스캘핑 탭 — 스캐너가 애프터 시간대에 저장한 판정·분봉을 보여 주고, 진입 신호 결과로 승률을 검증."""
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd

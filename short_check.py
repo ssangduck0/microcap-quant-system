@@ -4,7 +4,6 @@ FINRA 파일 주소 형식(cdn.finra.org/equity/regsho/daily/CNMSshvolYYYYMMDD.t
 '❌ FINRA' 가 나오면 결과를 알려 주세요."""
 import sys
 from contextlib import closing
-from datetime import datetime, timezone
 
 import db
 import shortdata

@@ -8,7 +8,6 @@ python regsho.py check   최근 파일을 받아 보고 목록 수·예시 종�
 from __future__ import annotations
 
 import sys
-import time as _time
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo

@@ -97,7 +97,6 @@ def regsho_label(n) -> str:
 def render_upcoming() -> None:
     """📅 병합 예정 — 🗓 일정의 '역분할 시행'(앞으로) + 세력·셋업 분석에서 병합 안건이 잡힌 종목."""
     import json
-    from datetime import date
     rows = []
     try:
         from contextlib import closing

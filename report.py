@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import xml.etree.ElementTree as ET
-from datetime import date, datetime
+from datetime import date
 
 import pandas as pd
 

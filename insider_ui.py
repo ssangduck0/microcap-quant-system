@@ -1,5 +1,4 @@
 """👤 내부자 매수 화면 — 일간·주간·월간, 종목별 합계(총 매수액·평단·현재가 대비)와 거래 내역."""
-import pandas as pd
 import streamlit as st
 
 import db

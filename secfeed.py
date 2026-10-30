@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import closing
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from xml.etree import ElementTree as ET
 
 import pandas as pd

@@ -85,7 +85,6 @@ def main() -> int:
 
     def volume_consistency():
         reg = closewatch.regular(tc.intraday_frame(SAMPLE))
-        daily = tc.daily_candles(SAMPLE, 3)
         if reg is None or reg.empty:
             return "정규장 1분봉이 없어 확인 불가(장중에 다시 실행하세요)"
         ctx = closewatch.daily_context(tc.daily_candles(SAMPLE, 25), reg)

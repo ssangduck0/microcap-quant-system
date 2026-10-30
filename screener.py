@@ -15,7 +15,6 @@ from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
-import config
 import db
 
 MODEL = "claude-sonnet-5-5"

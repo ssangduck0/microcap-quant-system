@@ -8,10 +8,8 @@ ANO:      50/200 SMA 교차·이격도 → 다이버전스(주가↓ 거래량�
 """
 from __future__ import annotations
 
-import json
-import math
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -292,7 +290,7 @@ def ma_intraday(df: pd.DataFrame | None, kind: str) -> dict | None:
     d = _ohlcv(df, 25)
     if d is None:
         return None
-    c, v = d["Close"], d["Volume"]
+    c = d["Close"]
     px = float(c.iloc[-1])
     out = {"px": px, "bars": len(d)}
     for n in (5, 20, 50, 60, 200):

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from contextlib import closing
 
-import numpy as np
 import pandas as pd
 
 import db

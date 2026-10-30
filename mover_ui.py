@@ -3,7 +3,6 @@ from contextlib import closing
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import pandas as pd
 import streamlit as st
 
 import db

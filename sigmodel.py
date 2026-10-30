@@ -9,8 +9,6 @@
 """
 from __future__ import annotations
 
-import json
-import math
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
@@ -67,7 +65,7 @@ def _channel_arrays(o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray, 
             continue
         if i - anchor <= cv.HEAD_DAYS:
             head = max(head, h[i])
-        foot, life = min(l[anchor], o[anchor]), o[anchor]
+        foot = min(l[anchor], o[anchor])
         if head <= foot or i - anchor > 120:
             continue
         r = head - foot

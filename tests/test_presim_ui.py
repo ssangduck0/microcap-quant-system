@@ -12,7 +12,7 @@ db.init_db()
 presim.MIN_EP = 20
 
 # 가짜 일봉 2년치(daily_prices) + 오늘 순위 1위 → 아침 자동 실행 → presim_log
-days = pd.bdate_range("2024-09-02", periods=560)
+days = pd.bdate_range(end=(pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(hours=16, minutes=20)).tz_localize(None).normalize(), periods=560)   # 2026-10-31: 마지막으로 끝난 미국 거래일까지(고정 시작일이면 날이 지나 '최근 7일' 밖으로 밀려 실패)
 r = np.random.default_rng(5)
 rets = r.normal(0.0, 0.03, len(days)); rets = rets - rets.mean()
 c = 2.0 * np.cumprod(1 + rets)

@@ -154,7 +154,7 @@ def render_effect() -> None:
         return
     rows.sort(key=lambda x: x["date"], reverse=True)
     px = _px(tuple(sorted({r["ticker"] for r in rows})))
-    cmap, fx = tosslink.codes(), _fx()
+    cmap = tosslink.codes()
     st.caption(f"{len(rows)}건 · 최신순")
     for r in rows:
         t, df = r["ticker"], px.get(r["ticker"])

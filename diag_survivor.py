@@ -38,7 +38,6 @@ def stats(conn, tickers: set[str]) -> str:
     """이벤트 연구 사건 중 이 종목들 것: 건수 · D+5 시장 대비 이긴 확률 · 중앙값."""
     if not tickers:
         return "0건"
-    import pandas as pd
     try:
         df = db.read_df("SELECT ticker, abn5 FROM ev_labels WHERE abn5 IS NOT NULL")
     except Exception:  # noqa: BLE001  (이벤트 연구를 아직 안 돌린 DB 엔 ev_labels 표가 없음)

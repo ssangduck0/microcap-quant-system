@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time as _time
 from contextlib import closing
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo

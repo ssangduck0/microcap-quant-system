@@ -238,7 +238,7 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         import secbackfill
         out(f"공시 이력 동기화: 피드에서 {secbackfill.sync_from_feed(conn):,}건 추가")
     except Exception as e:  # noqa: BLE001
-        log.warning("공시 이력 동기화 실패: %s", e)
+        log.exception("공시 이력 동기화 실패: %s", e)
     since = (date.today() - timedelta(days=days)).isoformat()
     tickers = [r["ticker"] for r in conn.execute("SELECT ticker FROM case_progress WHERE status='done'")]
     out(f"최근 {days}일 사건 갱신: {len(tickers):,}종목")
@@ -264,17 +264,17 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
     try:  # 3일 목표(2026-10-29 추가)가 빈 과거 사건을 저장된 일봉으로 보완(인터넷 없음, 몇 초)
         backfill_3d(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("3일 목표 보완 실패: %s", e)
+        log.exception("3일 목표 보완 실패: %s", e)
     try:  # 스캐너가 발견한 종목의 결과(다음날/5일 후 등)도 같이 채운다
         import tracker
         tracker.update(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("발견 종목 추적 갱신 실패: %s", e)
+        log.exception("발견 종목 추적 갱신 실패: %s", e)
     try:  # 💵 dry-run 매수 기록에 '그때 1주 샀다면' 결과(2026-10-29 아침, broker.simulate_dry — 일봉으로 익절/손절/보유일 판정, 야후 몇 종목)
         import broker
         broker.simulate_dry(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("dry-run 결과 갱신 실패: %s", e)
+        log.exception("dry-run 결과 갱신 실패: %s", e)
     try:  # 🔁 병합 후 레이더: 최근 1년 분할 기록·경로 갱신 + 오늘의 예측 기록(성과 공표용)
         import config as _cfg
         if _cfg.RSPLIT_DAILY:
@@ -284,12 +284,12 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             n = rsplit.record_daily(conn, datetime.now(_Z("America/New_York")).date().isoformat())
             out(f"병합 후 레이더: 최근 병합 {r['current']}종목 · 오늘 예측 {n}건 기록")
     except Exception as e:  # noqa: BLE001
-        log.warning("병합 후 레이더 갱신 실패: %s", e)
+        log.exception("병합 후 레이더 갱신 실패: %s", e)
     try:  # 🩹 병합 환산 수리(2026-10-30): 병합 종목의 저장 일봉을 야후 2년치로 다시 써서 옛 기준 봉(병합일 ×비율 점프)을 없앰 — presim·선별·모델이 가짜 급등을 보지 않게
         import pricefix
         pricefix.morning(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("병합 환산 수리 실패: %s", e)
+        log.exception("병합 환산 수리 실패: %s", e)
     try:
         import config as _cfg0
         _cfg0.apply_overrides()  # ⚙️ 관리 모드 설정
@@ -307,7 +307,7 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             except Exception as _e:  # noqa: BLE001
                 log.warning("비슷한 과거 딜 실패: %s", _e)
     except Exception as e:  # noqa: BLE001
-        log.warning("펀드스캔 갱신 실패: %s", e)
+        log.exception("펀드스캔 갱신 실패: %s", e)
     try:  # ✅ 스승님 3대 조건: 오늘 충족 종목을 🏆 성과 공표에 기록(같은 종목 20일에 한 번) · 🕰 타임머신은 토요일마다 다시 계산
         import setup3
         from contextlib import closing as _cl3
@@ -324,27 +324,32 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         if date.today().weekday() == 5:
             timemachine.run(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("3대 조건·타임머신 실패: %s", e)
+        log.exception("3대 조건·타임머신 실패: %s", e)
     try:  # ⏰ 예약 알림: 미뤄 둔 일(예: 공시 점수 두 방식 합치기)을 때가 되면 텔레그램으로 한 번
         import reminders
         reminders.check(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("예약 알림 확인 실패: %s", e)
+        log.exception("예약 알림 확인 실패: %s", e)
     try:  # 🧮 과거 성과 기반 공시 점수표 다시 만들기(이벤트 수집기가 쌓은 사건으로) + 최근 1년 검증
         import evscore
         _v = evscore.build()["validation"]
         out(f"공시 점수표: {_v.get('why')}")
     except Exception as e:  # noqa: BLE001
-        log.warning("공시 점수표 실패: %s", e)
+        log.exception("공시 점수표 실패: %s", e)
     try:  # 🪙 런웨이 채우기: PICK 통과 → 목표가 있는 종목 → 회사 압박 후보 순으로 SEC 재무(현금·월 소모량), 하루 상한
         import config as _cfgR
         if "@" in _cfgR.SEC_USER_AGENT:
             import runway as _rwm
             import sec as _secR
             import pick30 as _pk
-            _ps = _pk.scan()
-            with closing(db.connect()) as _c:  # 🏆 PICK 통과 종목을 목표 종류별로 기록
-                out(f"PICK 기록: 새 신호 {_pk.record(_c, _ps)}건 · 📊 PICK 변동 저장 {_pk.snapshot(_c, _ps, force=True)}종목")
+            _ps = None
+            try:  # 2026-10-30: 단계마다 따로 — 10/29 아침 여기서 난 'None 형식' 오류 한 번에 보고 기한·공시분석·AI PICK·런웨이 갱신까지 통째로 건너뛰었음
+                _ps = _pk.scan()
+                with closing(db.connect()) as _c:  # 🏆 PICK 통과 종목을 목표 종류별로 기록
+                    out(f"PICK 기록: 새 신호 {_pk.record(_c, _ps)}건 · 📊 PICK 변동 저장 {_pk.snapshot(_c, _ps, force=True)}종목")
+            except Exception as _e:  # noqa: BLE001
+                log.exception("PICK 스캔·기록 실패")   # cases.log 에 오류 줄 위치까지(다음엔 바로 원인을 찾게)
+                out(f"PICK 스캔·기록 실패: {_e}")
             try:  # ⏰ 보고 기한 캐시 + 📰 한 장 요약 자동 대기열(A·B단계 2026-10-28) — 급상승·보유·저금통 중 요약 없는 종목
                 import clock as _ck
                 import config as _cfgC
@@ -365,9 +370,13 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
                 _ai.run(scan=_ps, out=out)
             except Exception as _e:  # noqa: BLE001
                 out(f"AI PICK 실패: {_e}")
-            _rwm.refresh(_secR.SecClient(_cfgR.SEC_USER_AGENT), _rwm.targets(_ps), limit=80, out=out)
+            try:
+                _rwm.refresh(_secR.SecClient(_cfgR.SEC_USER_AGENT), _rwm.targets(_ps), limit=80, out=out)
+            except Exception as _e:  # noqa: BLE001
+                log.exception("런웨이 갱신 실패")
+                out(f"런웨이 갱신 실패: {_e}")
     except Exception as e:  # noqa: BLE001
-        log.warning("런웨이 채우기 실패: %s", e)
+        log.exception("런웨이 채우기 실패: %s", e)
     try:  # 📐 발행주식 수 추정(SEC 표지·분할 반영) · 🏛 상장유지 통지 해석 — 압박·매집·Reg SHO 후보, 하루 상한
         import config as _cfgS
         if "@" in _cfgS.SEC_USER_AGENT:
@@ -385,7 +394,7 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
                     _ptk = _pg.share_targets(_c)
                 _shS.build_missing(_cl, _ptk, limit=60, out=lambda m: out(f"🐷 {m}"))
             except Exception as e:  # noqa: BLE001
-                log.warning("저금통 주식수 이력 갱신 실패: %s", e)
+                log.exception("저금통 주식수 이력 갱신 실패: %s", e)
             try:  # 🏁 ⑥ 를 순위·PICK 에도 쓰므로(2026-10-28) 스캐너 우주 전체의 표지 이력을 30일 주기로 돌아가며 갱신(하루 110종목 ≈ 30초, SEC 무료)
                 import universe as _uv
                 _uni = _uv.cached_tickers()   # 상장 종목 캐시 파일(스캐너가 매일 갱신) — DB 표가 아님(10/28 밤 수정)
@@ -395,10 +404,10 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
                 if _uni:
                     _shS.build_missing(_cl, _uni, limit=110, out=lambda m: out(f"🏁 우주 {m}"), max_age=30)
             except Exception as e:  # noqa: BLE001
-                log.warning("우주 주식수 이력 갱신 실패: %s", e)
+                log.exception("우주 주식수 이력 갱신 실패: %s", e)
             listing.backfill(_cl, limit=30, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("주식 수·상장유지 갱신 실패: %s", e)
+        log.exception("주식 수·상장유지 갱신 실패: %s", e)
     try:  # 🧭 회사 압박 후보 종목 리포트(런웨이 등) — 없거나 7일 지난 것만, 하루 상한
         import config as _cfg3
         if _cfg3.PRESSURE_REPORTS_PER_DAY > 0 and "@" in _cfg3.SEC_USER_AGENT:
@@ -406,7 +415,7 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             import sec as _sec
             pressure.build_missing_reports(_sec.SecClient(_cfg3.SEC_USER_AGENT), _cfg3.PRESSURE_REPORTS_PER_DAY, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("회사 압박 리포트 생성 실패: %s", e)
+        log.exception("회사 압박 리포트 생성 실패: %s", e)
     try:  # 🏷 테마: 새 종목만 SEC 회사 정보(이름·업종 코드)로 테마 지정(하루 상한 400)
         import config as _cfg4
         if "@" in _cfg4.SEC_USER_AGENT:
@@ -414,19 +423,19 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             import themes
             themes.build(_sec4.SecClient(_cfg4.SEC_USER_AGENT), limit=400, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("테마 지정 실패: %s", e)
+        log.exception("테마 지정 실패: %s", e)
     try:  # 🧲 매집 의심(일간·주간·월간) — 전체 종목 일봉 분석
         import config as _cfg2
         if _cfg2.ACCUM_DAILY:
             import accum
             accum.run(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("매집 의심 분석 실패: %s", e)
+        log.exception("매집 의심 분석 실패: %s", e)
     try:  # 🗄 주가 보관소: 신호 낸 종목의 일봉 보관 · 병합 단위 맞춤 · 끊긴 종목 기록(가상매매·성과 공표 바로 앞에)
         import pricevault
         pricevault.daily(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("주가 보관소 실패: %s", e)
+        log.exception("주가 보관소 실패: %s", e)
     try:  # 🐷 저금통 후보 다시 찾기(매일 아침) — 저가 종목 박스 분석 → 🤖 자동 담기·빼기(가상매매 저금통 전략보다 먼저)
         import config as _cfg
         if _cfg.PIGGY_DAILY_SCAN:
@@ -437,69 +446,69 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
             out(f"저금통 후보 분석: {len(res):,}종목")
             piggy.auto_sync(fx, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("저금통 후보 분석 실패: %s", e)
+        log.exception("저금통 후보 분석 실패: %s", e)
     try:  # 🕶 다크풀: 감시 대상 밖(NYSE·AMEX)·미완성 의심 종목 일봉 다시 받기(비중 = 장외 ÷ 전체가 정확해지게)
         import darkpool
         darkpool.refresh_volumes(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("다크풀 일봉 보정 실패: %s", e)
+        log.exception("다크풀 일봉 보정 실패: %s", e)
     try:  # 📐 스승 관점(2026-10-27): 후보군(종합 순위·급상승·저금통·가상매매 보유·워치) 일봉·60분·5분 → 신호 기록(🏆 검증·🧪 가상매매 '스승 눌림목' 이 씀)
         import chartview
         chartview.morning(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("차트 관점 점검 실패: %s", e)
+        log.exception("차트 관점 점검 실패: %s", e)
     try:  # 🧪 가상매매: 열린 포지션 청산 판정(전략 5개) → 종합 순위·PICK·저금통 가상 매수
         import papertrade
         papertrade.daily(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("가상매매 갱신 실패: %s", e)
+        log.exception("가상매매 갱신 실패: %s", e)
     try:  # 📊 뉴스 반응(2026-10-29): 종목 있는 뉴스마다 뉴스 뒤 주가(당일 고가·종가·+1일·+5일)를 일봉으로 재서 news_react 에 쌓음 — 📰 뉴스 모음 '반응 통계'
         import newsfx
         newsfx.update(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("뉴스 반응 갱신 실패: %s", e)
+        log.exception("뉴스 반응 갱신 실패: %s", e)
     try:  # 🎲 매매 전 시뮬레이션(2026-10-29): 사건 표 이어 쌓기 → 저금통·PICK 유력·순위 상위 N 을 기본 손절·목표로 자동 실행 → presim_log(카드 배지 · 🏆 성과 공표)
         import presim
         presim.morning(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("매매 전 시뮬레이션 실패: %s", e)
+        log.exception("매매 전 시뮬레이션 실패: %s", e)
     try:  # 🔍 부검(2026-10-28): 어제 펌핑(놓침/잡음 + 전날 특징·촉매) · 새로 실패한 신호(원인 태그) — 🏆 성과 공표 판정이 끝난 뒤가 좋지만 어제 것은 이미 판정돼 있음
         import autopsy
         autopsy.morning(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("부검 실패: %s", e)
+        log.exception("부검 실패: %s", e)
     try:  # 🤖 Claude 복기(3단계 2026-10-28): 주 1회(마지막 복기 뒤 6일) 놓친 펌핑·실패 신호 원인 분류 + 규칙 후보 — Haiku, 월 예산 안
         import review
         review.run(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("Claude 복기 실패: %s", e)
+        log.exception("Claude 복기 실패: %s", e)
     try:  # 🧠 신호 승률 모델(2단계 A안 2026-10-28): 월 1회(토요일) 재학습 · 최근 3일 새 신호에 p30·p10 붙이기 (market 은 모듈 맨 위에서 이미 import — 함수 안에서 다시 import 하면 지역 이름이 돼 앞줄이 깨짐)
         import sigmodel
         with closing(db.connect()) as _c:
             sigmodel.maybe_refit(_c, out=out)
             sigmodel.score_signals(_c, out=out, download=lambda t: market.download_daily([t], period="1y").get(t))
     except Exception as e:  # noqa: BLE001
-        log.warning("신호 승률 모델 실패: %s", e)
+        log.exception("신호 승률 모델 실패: %s", e)
     try:  # 🧪 승률 점수 모델(winmodel): 토요일에 30일 넘게 묵었으면 재학습(2026-10-30 사용자 승인 — 전엔 수동 fit 뿐)
         import winmodel
         winmodel.maybe_refit(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("승률 점수 모델 재학습 실패: %s", e)
+        log.exception("승률 점수 모델 재학습 실패: %s", e)
     try:  # 🔁 리셋 사이클(2026-10-30): reset_config 종목(WHLR)의 다음 상환일 기준가·전환가 시나리오 한 줄 로그 · D-3 안이면 텔레그램(주인 전용)
         import resetcycle
         resetcycle.morning(out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("리셋 사이클 아침 메모 실패: %s", e)
+        log.exception("리셋 사이클 아침 메모 실패: %s", e)
     try:  # 🧨 공매도 잔고(Yahoo, FINRA 격주): 스퀴즈 후보 700종목(C단계: Reg SHO·고수수료·안 받은 종목 먼저 — 예전 '점수 상위 400'은 잔고 없는 종목을 영영 못 받았음)
         import shortint
         shortint.refresh(shortint.priority(700), max_n=700, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("공매도 잔고 받기 실패: %s", e)
+        log.exception("공매도 잔고 받기 실패: %s", e)
     try:  # 🏆 성과 공표: 모든 예측의 결과 갱신
         import scoreboard
         scoreboard.update(conn, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("성과 공표 갱신 실패: %s", e)
+        log.exception("성과 공표 갱신 실패: %s", e)
     known = {r["ticker"] for r in conn.execute("SELECT ticker FROM case_progress")}
     new_listed = [t for t in active if t not in known]
     if new_listed:
@@ -509,7 +518,7 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         import pagecache
         pagecache.warm(force=True, out=out)
     except Exception as e:  # noqa: BLE001
-        log.warning("화면 캐시 데우기 실패: %s", e)
+        log.exception("화면 캐시 데우기 실패: %s", e)
     return {"updated_events": n_new, "new_tickers": len(new_listed)}
 
 

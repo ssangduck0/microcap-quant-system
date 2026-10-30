@@ -78,7 +78,7 @@ def render() -> None:
     st.caption("입력창 밖을 클릭하거나 Ctrl+Enter 를 누르면 **자동 저장**됩니다. DB에 저장되어 PC를 껐다 켜도 남아 있습니다.")
 
     c1, c2 = st.columns([2, 1])
-    new = c1.text_input("새 노트 제목", key="note_new_title", placeholder="예: 장 마감 매매 방법")
+    c1.text_input("새 노트 제목", key="note_new_title", placeholder="예: 장 마감 매매 방법")
     c2.write("")
     c2.button("➕ 만들기", width="stretch", on_click=_create, args=("note_new_title",))
 

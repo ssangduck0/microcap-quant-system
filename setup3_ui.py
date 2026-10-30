@@ -1,7 +1,6 @@
 """✅ 3대 조건 화면 — 지금 후보(일봉 판정 + 고른 종목의 60분봉 확인). 🕰 타임머신(render_time)은 🏆 검증 화면의 탭이 부른다(메뉴 정리 2026-10-26)."""
 from __future__ import annotations
 
-import os
 from contextlib import closing
 
 import pandas as pd

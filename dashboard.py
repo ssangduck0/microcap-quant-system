@@ -633,7 +633,6 @@ def _render_snap() -> None:
 
         st.markdown("---")
         st.markdown("### 🔍 종목 상세")
-        tickers = list(dict.fromkeys(view["ticker"]))
         row = view.iloc[_ids.index(_pick)]
         sel = row["ticker"]
         st.markdown(f"#### {sel}")

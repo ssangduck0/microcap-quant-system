@@ -18,7 +18,6 @@ import json
 import ftplib
 import io
 import logging
-import time as _time
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo

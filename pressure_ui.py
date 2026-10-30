@@ -25,7 +25,6 @@ def _scan_cached() -> tuple[list, int]:
 
 
 def render() -> None:
-    import watch_ui
     ui.title("회사 압박 선별", "회사가 주가를 올리거나 자금을 구해야 할 이유가 급한 종목(런웨이·$1 상장유지·baby shelf·역분할·상습 희석). 규칙 기반이며 매수·매도 권유가 아닙니다.")
     with st.expander("점수 기준"):
         st.markdown("런웨이 3개월 미만 3 · 6개월 미만 2 · 12개월 미만 1 / $1 상장유지 미달 2(회복 기한 60일 이내 +1) / baby shelf 대상 1 / 최근 90일 역분할 1 / "

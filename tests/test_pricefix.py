@@ -11,7 +11,7 @@ import db, rsplit, pricefix
 db.init_db()
 T = date.today()
 D = lambda n: (T - timedelta(days=n)).isoformat()
-idx = pd.bdate_range(end=pd.Timestamp(T) - pd.Timedelta(days=1), periods=120)
+idx = pd.bdate_range(end=(pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(hours=16, minutes=20)).tz_localize(None).normalize(), periods=120)   # 2026-10-31: 마지막으로 끝난 미국 거래일까지(한국 토요일 새벽 = 미국 금요일 장중이면 '어제' 봉이 미완성으로 빠졌음)
 with closing(db.connect()) as conn:
     rsplit.ensure_tables(conn)
     conn.execute("INSERT INTO rs_events VALUES ('AAA', ?, 0.1, 5.0)", (D(40),))     # 1:10, 병합 전 봉이 옛 기준(0.5) → 경계 점프 ×10

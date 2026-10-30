@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import math
 import zlib
-from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np

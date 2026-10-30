@@ -53,7 +53,6 @@ def _basics(t: str) -> dict:
 
 
 def render(t: str, focus: str | None = None) -> None:
-    import aisummary
     import multisignal
     t = t.upper()
     b = _basics(t)

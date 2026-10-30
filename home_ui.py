@@ -2,7 +2,6 @@
 from contextlib import closing
 from datetime import date, timedelta
 
-import pandas as pd
 import streamlit as st
 
 import access

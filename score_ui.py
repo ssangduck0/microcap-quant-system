@@ -1,5 +1,4 @@
 """'점수 검증' 탭: 승률 점수 모델이 실제로 맞는지(표본 외 검증 + 라이브 성과)를 보여준다."""
-import numpy as np
 import pandas as pd
 import streamlit as st
 

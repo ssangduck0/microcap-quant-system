@@ -151,8 +151,6 @@ def record_upcoming(conn, ticker: str, info: dict, source: str, origin: str = "s
 
 def backfill_upcoming(client, days: int = 30, limit: int = 400, out=print) -> dict:
     """1회 소급: 최근 days 일 공시 피드의 8-K/6-K 중 '주식 병합' 태그·5.03 항목이 있는 것의 본문을 다시 읽어 시행일을 기록(스캐너는 새 공시부터 자동)."""
-    import json as _json
-    import re as _re
     since = (date.today() - timedelta(days=days)).isoformat()
     n_read = n_new = 0
     with closing(db.connect()) as conn:

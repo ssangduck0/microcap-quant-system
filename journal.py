@@ -6,7 +6,6 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 
-import db
 
 DDL = """CREATE TABLE IF NOT EXISTS trade_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT NOT NULL, side TEXT NOT NULL, day TEXT NOT NULL,
          price REAL NOT NULL, qty REAL NOT NULL, fee REAL DEFAULT 0, signal TEXT, note TEXT, created_at TEXT)"""

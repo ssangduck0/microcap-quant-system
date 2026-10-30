@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-from contextlib import closing
-from datetime import date
 from zoneinfo import ZoneInfo
 
 import pandas as pd

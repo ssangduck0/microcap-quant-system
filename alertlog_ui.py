@@ -2,7 +2,6 @@
 밤에 온 알림을 아침에 되짚어 보는 용도. 기록은 notify.send_telegram 이 남긴다(alert_log 표)."""
 from contextlib import closing
 
-import pandas as pd
 import streamlit as st
 
 import chartpop

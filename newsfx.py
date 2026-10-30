@@ -9,13 +9,11 @@
 """
 from __future__ import annotations
 
-from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-import db
 
 ET = ZoneInfo("America/New_York")
 DDL = """CREATE TABLE IF NOT EXISTS news_react (news_id TEXT PRIMARY KEY, ticker TEXT, day TEXT, prev_close REAL, d0_high_pct REAL, d0_close_pct REAL,

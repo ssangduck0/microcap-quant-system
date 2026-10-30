@@ -1,5 +1,4 @@
 """⭐ 워치리스트(물량 장부·런웨이·일정) · 🗓 일정 탭 화면. (📰 오늘 브리핑 화면은 2026-10-26 메뉴 정리로 삭제 — 홈과 같은 내용)"""
-import json
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -7,7 +6,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-import closewatch as cw
 import config
 import db
 import forensic

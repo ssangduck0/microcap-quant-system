@@ -4,7 +4,6 @@ import streamlit as st
 
 import rank as rk
 import tosslink
-import db
 import ui_kit as ui
 
 

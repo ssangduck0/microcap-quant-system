@@ -15,7 +15,7 @@ import logging
 import math
 import threading
 from contextlib import closing
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import config
 import db

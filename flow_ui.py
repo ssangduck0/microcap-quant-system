@@ -1,6 +1,6 @@
 """📊 매매강도 카드 — 토스 실시간 체결을 금액 구간(XL/L/M/S)별 매수·매도로(래빗스탁·오르텍스 식). 🏢 종목 화면 · 🕶 다크풀 상세에서 쓴다."""
 from contextlib import closing
-from datetime import date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import altair as alt

@@ -3,7 +3,7 @@
   <dir>/yahoo_px.pkl : {ticker: DataFrame[Close, Volume, Stock Splits]}  (yahoo_dl.py)
 컨닝 금지: 진입일 = 표지가 실린 보고서 제출일(filed) 이후 첫 거래일. 분할은 야후 Stock Splits(새/옛 비율)로 옛 표지에 반영."""
 import os, sys, pickle
-from datetime import date, timedelta
+from datetime import date
 import numpy as np
 import pandas as pd
 

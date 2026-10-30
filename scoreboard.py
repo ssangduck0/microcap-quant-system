@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import closing
 from datetime import date, timedelta
 
 import pandas as pd
