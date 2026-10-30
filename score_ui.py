@@ -20,6 +20,40 @@ def auc_comment(a: float | None) -> str:
     return "강한 신호 (과적합/누수가 없는지 의심해 볼 만큼 높음)"
 
 
+def _next_refit(fitted_at: str | None, today, days: int = 30):
+    """토요일 아침 작업이 '학습 뒤 days 일 넘은' 모델을 다시 학습 → 그 조건을 처음 만족하는 토요일."""
+    from datetime import date, timedelta
+    if not fitted_at:
+        return None
+    d0 = date.fromisoformat(str(fitted_at)[:10]) + timedelta(days=days + 1)
+    d0 = max(d0, today)
+    return d0 + timedelta(days=(5 - d0.weekday()) % 7)
+
+
+def health_rows(models: list[dict], today=None) -> list[dict]:
+    """① 모델 건강판(2026-10-30, 10/28 검토 제안): 모델마다 한 줄 — 무엇을 맞히나 · 학습 날짜 · 지난 날 · 다음 자동 재학습 · 검증 표본 · 검증 AUC · 상태.
+    상태: 🟢 학습 35일 안 & AUC ≥ 0.60 · 🟡 35~60일 또는 0.55~0.60 · 🔴 60일 넘음 또는 0.55 미만(무작위에 가까움)."""
+    from datetime import date
+    today = today or date.today()
+    out = []
+    def _row(name, what, fitted, n_test, auc, refit_days):
+        age = None if not fitted else (today - date.fromisoformat(str(fitted)[:10])).days
+        st_ = "❔"
+        if age is not None and auc is not None:
+            st_ = "🔴" if (age > 60 or auc < 0.55) else ("🟡" if (age > 35 or auc < 0.60) else "🟢")
+        nr = _next_refit(fitted, today, refit_days)
+        out.append({"상태": st_, "모델": name, "무엇을 맞히나": what, "학습 날짜": str(fitted or "-")[:10], "지난 날": age,
+                    "다음 자동 재학습": nr.isoformat() if nr else "-", "검증 표본": n_test, "검증 AUC": None if auc is None else round(float(auc), 3)})
+    for m in models:
+        if m.get("label") in winmodel.LABELS and m.get("target") is not None and isinstance(m.get("metrics"), dict):
+            mt = m["metrics"]
+            _row(m["name"], f"{winmodel.LABELS[m['label']][1]} ≥ +{m['target']:g}%", m.get("fitted_at"), mt.get("n_test"), mt.get("auc_test"), getattr(winmodel, "REFIT_DAYS", 30))
+        elif m.get("name") == "sigmodel" and isinstance(m.get("targets"), dict):
+            for k, t in m["targets"].items():
+                _row(f"sigmodel·{k}", f"신호 뒤 {t.get('horizon', '?')}거래일 안 +{t.get('target_pct', '?')}%", m.get("fitted_at"), m.get("n_test"), t.get("auc_test"), 30)
+    return out
+
+
 @st.cache_data(ttl=60)
 def load_models() -> list[dict]:
     return db.list_models()
@@ -59,8 +93,24 @@ def render_sigmodel() -> None:
     st.caption("확률 분위표·특징 가중치·다시 학습 버튼은 🔍 부검 탭의 🧠 구역에 있어요(같은 모델). 라이브 적중(🏆 성과 공표의 🧠 확률 분위)은 11/15~22 에 함께 봅니다.")
 
 
+def render_health(models: list[dict]) -> None:
+    rows = health_rows(models)
+    if not rows:
+        return
+    bad = [r for r in rows if r["상태"] in ("🔴", "🟡")]
+    with st.expander(f"🩺 모델 건강판 — {len(rows)}개 · " + ("모두 🟢" if not bad else f"점검 {len(bad)}개"), expanded=bool(bad)):
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={"검증 AUC": st.column_config.NumberColumn(format="%.3f", help="0.5 = 무작위 · 0.6 넘으면 쓸 만 · 0.7 넘으면 강함"),
+                                    "지난 날": st.column_config.NumberColumn(format="%d일"), "검증 표본": st.column_config.NumberColumn(format="%d")})
+        st.caption("🟢 학습 35일 안 & 검증 AUC 0.60 이상 · 🟡 35~60일 또는 0.55~0.60 · 🔴 60일 넘음 또는 0.55 미만. 재학습은 토요일 아침 작업이 30일 넘은 모델만 자동으로(winmodel·sigmodel 같은 규칙).")
+
+
 def render() -> None:
     st.subheader("🧪 승률 점수 검증")
+    try:
+        render_health(load_models())   # 2026-10-30 ① 모델 건강판
+    except Exception:  # noqa: BLE001
+        pass
     # 2026-10-28: models 표에는 🧠 sigmodel 같은 다른 모델도 저장된다 → 승률 모델(label·target·metrics 가 있는 것)만 고른다(안 그러면 아래 selectbox 가 KeyError)
     models = [m for m in load_models() if m.get("label") in winmodel.LABELS and m.get("target") is not None and isinstance(m.get("metrics"), dict)]
     if not models:

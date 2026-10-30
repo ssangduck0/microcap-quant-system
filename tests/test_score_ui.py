@@ -75,4 +75,19 @@ shapes = [d.value.shape for d in at.dataframe]; print("tables:", shapes)
 # 모델 바꾸기
 at.selectbox[[s.label for s in at.selectbox].index("검증할 모델")].set_value("close_0").run()
 print("close_0 exc:", [e.value for e in at.exception], "| live:", [m.value for m in at.metric if m.label=="결과가 확인된 점수 기록"])
+# ① 모델 건강판(2026-10-30): 상태 규칙 · 다음 자동 재학습(학습 뒤 30일 넘은 첫 토요일) · sigmodel 은 목표별 두 줄
+import score_ui
+from datetime import date as _d
+_t = _d(2026, 10, 30)
+assert score_ui._next_refit("2026-10-28T22:04:29+00:00", _t) == _d(2026, 11, 28) and score_ui._next_refit("2026-09-01", _t) == _d(2026, 10, 31) and score_ui._next_refit(None, _t) is None
+_ms = [{"name": "high_10", "label": "high", "target": 10.0, "fitted_at": "2026-10-28T22:04:30+00:00", "metrics": {"n_test": 37841, "auc_test": 0.68}},
+       {"name": "close_5", "label": "close", "target": 5.0, "fitted_at": "2026-09-15", "metrics": {"n_test": 100, "auc_test": 0.66}},
+       {"name": "high_20", "label": "high", "target": 20.0, "fitted_at": "2026-10-20", "metrics": {"n_test": 100, "auc_test": 0.52}},
+       {"name": "sigmodel", "fitted_at": "2026-10-28T14:55:52+00:00", "n_test": 46841, "targets": {"p30": {"horizon": 10, "target_pct": 30.0, "auc_test": 0.73}, "p10": {"horizon": 5, "target_pct": 10.0, "auc_test": 0.58}}},
+       {"name": "other"}]
+_h = {r["모델"]: r for r in score_ui.health_rows(_ms, today=_t)}
+assert set(_h) == {"high_10", "close_5", "high_20", "sigmodel·p30", "sigmodel·p10"}, list(_h)
+assert _h["high_10"]["상태"] == "🟢" and _h["high_10"]["지난 날"] == 2 and _h["high_10"]["다음 자동 재학습"] == "2026-11-28" and "다음날 고가" in _h["high_10"]["무엇을 맞히나"]
+assert _h["close_5"]["상태"] == "🟡" and _h["high_20"]["상태"] == "🔴" and _h["sigmodel·p30"]["상태"] == "🟢" and _h["sigmodel·p10"]["상태"] == "🟡"
+assert any("모델 건강판" in (e.label or "") for e in at.expander), [e.label for e in at.expander][:8]
 print("ALL OK"); print(os.environ["QUANT_DB"])
