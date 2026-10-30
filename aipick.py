@@ -381,8 +381,15 @@ def call_claude(prompt: str, model: str, max_out: int = 4000, post=None, system:
     r = post(API_URL, headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
              json=_body(model, max_out, system or SYSTEM, prompt, effort, thinking), timeout=timeout)
     if getattr(r, "status_code", 200) >= 400:
+        import aiguard   # 2026-10-30: 충전 부족·키 오류는 기록 + 하루 한 번 텔레그램(10/30 하루 종일 모르고 지나감)
+        aiguard.note(getattr(r, "status_code", None), str(getattr(r, "text", "")))
         raise RuntimeError(f"HTTP {r.status_code}: {str(getattr(r, 'text', ''))[:200]}")
     j = r.json()
+    try:
+        import aiguard
+        aiguard.ok()
+    except Exception:  # noqa: BLE001
+        pass
     text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
     u = j.get("usage") or {}
     tin, tout = int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0))

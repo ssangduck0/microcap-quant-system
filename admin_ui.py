@@ -15,6 +15,14 @@ def render_ai_cost() -> None:
     """🤖 AI 비용(2026-10-28): 월 예산 지갑을 어느 기능이 얼마나 쓰는지 — 이번 달·오늘·건당, 남은 예산, 월말 예상, 날짜별 막대. 기능별 기록은 10/28 부터(그 전은 합계만)."""
     import aipick
     s = aipick.spend_summary()
+    try:   # 2026-10-30: 계정 자체 문제(충전 잔액·키)는 우리 예산과 별개 → 빨간 경고(다음 호출이 성공하면 저절로 사라짐)
+        import aiguard
+        pb = aiguard.problem()
+        if pb:
+            st.error(f"🤖⚠️ {pb['reason']} — {pb['at'][:16].replace('T', ' ')} (UTC) 마지막 실패. 공시 요약·뉴스 번역·AI PICK·공시분석이 멈춰 있어요. "
+                     "console.anthropic.com → Billing 에서 충전(키 오류면 서버 .env 확인)하세요. 우리 월 예산과는 별개예요.")
+    except Exception:  # noqa: BLE001
+        pass
     st.markdown("**🤖 AI 비용** — 월 예산 지갑을 어느 기능이 쓰는지 (기능별 기록은 2026-10-28 부터)")
     ui.cards([{"t": "이번 달 지출", "v": f"{s['spent_krw']:,.0f}원", "s": f"예산 {s['budget_krw']:,.0f}원"},
               {"t": "남은 예산", "v": f"{s['left_krw']:,.0f}원", "s": "20% 아래면 강조", "accent": s["left_krw"] < s["budget_krw"] * 0.2},

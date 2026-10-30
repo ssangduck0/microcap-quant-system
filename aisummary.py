@@ -177,8 +177,15 @@ def call(system: str, user: str, max_tokens: int = 3500, http_post=None) -> tupl
     r = post(API_URL, {"x-api-key": key, "anthropic-version": os.environ.get("AI_API_VERSION", "2023-06-01"), "content-type": "application/json"},
              {"model": model(), "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": user}]})
     if getattr(r, "status_code", 200) >= 400:
+        import aiguard   # 2026-10-30: 충전 부족·키 오류 알림(aipick.call_claude 와 같은 판단)
+        aiguard.note(getattr(r, "status_code", None), str(getattr(r, "text", "")))
         raise RuntimeError(f"API 오류 {r.status_code}: {str(getattr(r, 'text', ''))[:300]}")
     j = r.json()
+    try:
+        import aiguard
+        aiguard.ok()
+    except Exception:  # noqa: BLE001
+        pass
     text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
     u = j.get("usage") or {}
     return text, int(u.get("input_tokens") or 0), int(u.get("output_tokens") or 0)
