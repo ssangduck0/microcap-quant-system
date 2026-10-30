@@ -107,6 +107,7 @@ def enrich(client, limit: int = 20) -> int:
                 conn.execute("INSERT OR REPLACE INTO insider_tx VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                              (r["accession"], i, r["ticker"], x["owner"], x["title"], x["date"], x["code"], x["shares"], x["price"], val, x["after"], r["url"]))
             conn.execute("UPDATE insider_seen SET done=1 WHERE accession=?", (r["accession"],))
+            conn.commit()   # 2026-10-30: 한 건마다 확정 — 예전엔 Form 4 를 SEC 에서 받는 내내 쓰기 잠금을 쥐었음
             done += 1
         conn.commit()
     return done

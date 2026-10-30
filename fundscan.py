@@ -311,6 +311,7 @@ def run(client, limit: int = 150, xbrl_limit: int = 80, out=print, ai_cap: int |
                         _rwm.save(conn, t, _rp.runway_from_facts(cf))
                     except Exception:  # noqa: BLE001
                         pass
+                    conn.commit()   # 2026-10-30: 종목마다 확정 — 예전엔 재무 원본(companyfacts) 80종목을 SEC 에서 받는 내내 쓰기 잠금을 쥐었음(아침 작업)
                     n_x += 1
             except Exception:  # noqa: BLE001
                 continue

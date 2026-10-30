@@ -113,4 +113,48 @@ with closing(db.connect()) as conn:
     assert conn.execute("SELECT COUNT(*) FROM presim_ep WHERE ticker='AAA'").fetchone()[0] == 0 and conn.execute("SELECT COUNT(*) FROM presim_ep WHERE ticker='SAME'").fetchone()[0] == 1
     res2 = presim.build_episodes(conn, bars=bars, out=lambda *_: None, today=days[-1].date())
     assert conn.execute("SELECT COUNT(*) FROM presim_ep WHERE ticker='AAA'").fetchone()[0] == n_aaa, res2   # 같은 아침에 다시 만들어짐
+
+# ---- 6) 공시 피드 보강: 다음 공시를 받는 동안 잠금 없음 + 상장유지 통지(3.01)가 실제로 저장됨(예전엔 자기 연결에 막혀 30초 뒤 조용히 실패)
+import secfeed, listing
+NOTICE = ("Item 3.01 Notice of Delisting. On September 25, 2026, HUB Cyber Security Ltd. received a letter from the Listing Qualifications Department of The Nasdaq Stock Market "
+          "notifying the Company that its Market Value of Listed Securities (MVLS) was below the $35 million minimum requirement. The Company has until March 22, 2027 to regain compliance.")
+with closing(db.connect()) as conn:
+    secfeed.ensure_tables(conn)
+    for k, it in enumerate(("3.01", "8.01", "3.01")):
+        conn.execute("INSERT INTO sec_feed (accession, ticker, cik, form, company, filed, updated, items, url, enriched, created_at) VALUES (?,?,?,?,?,?,?,?,?,0,?)",
+                     (f"f{k}", "HUBC", 7, "8-K", "HUB", "2026-09-25", f"2026-09-25T1{k}:00:00", it, f"https://www.sec.gov/Archives/edgar/data/7/f{k}/f{k}-index.htm", "x"))
+    conn.commit()
+free_feed = []
+class FS:
+    def _get(s, u, **kw):
+        free_feed.append(can_write_now())
+        class R: text = '<a href="/Archives/edgar/data/7/f/main.htm">main</a>'
+        return R()
+    def fetch_text(s, u, limit=0):
+        free_feed.append(can_write_now()); return NOTICE
+db.TIMEOUT = 2.0   # 예전 코드라면 listing.save 가 2초 뒤 'locked' 로 실패
+t0 = time.time()
+assert secfeed.enrich(FS(), limit=10) == 3
+assert all(free_feed), free_feed
+with closing(db.connect()) as conn:
+    got = {r[0] for r in conn.execute("SELECT accession FROM listing_notices")}
+assert {"f0", "f2"} <= got, got
+assert time.time() - t0 < 10, time.time() - t0
+db.TIMEOUT = 30.0
+
+# ---- 7) 내부자 거래 보강: Form 4 를 받는 동안 잠금 없음
+import insider
+with closing(db.connect()) as conn:
+    insider.ensure_tables(conn)
+    for k in range(3):
+        conn.execute("INSERT INTO insider_seen VALUES (?,?,?,0,?)", (f"i{k}", "HUBC", f"https://www.sec.gov/x/i{k}-index.htm", f"2026-10-2{k}"))
+    conn.commit()
+free_ins = []
+class FI:
+    def _get(s, u, **kw):
+        free_ins.append(can_write_now())
+        class R: text = "<html>no xml</html>"
+        return R()
+assert insider.enrich(FI(), limit=10) == 3 and all(free_ins), free_ins
+print("ALL OK 2")
 print("ALL OK")

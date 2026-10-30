@@ -690,6 +690,7 @@ def live_check(conn, daily: dict, m5: dict, tickers: list[str], h60: dict | None
             if s["code"] not in LIVE_CODES:
                 continue
             cur = conn.execute("INSERT OR IGNORE INTO chart_signals VALUES (?,?,?,?,?,?)", (day, t.upper(), s["code"], float(a["px"]), s.get("note"), now))
+            conn.commit()   # 2026-10-30: 텔레그램 보내기 전에 확정(전송하는 동안 쓰기 잠금을 쥐지 않게)
             if cur.rowcount and getattr(config, "CHART_ALERTS", True):
                 kind = "경고" if s["dir"] < 0 else "참고"
                 msg = f"{s['name']} — {t} ${a['px']:.4f}\n{s.get('note') or ''}\n{a['verdict']} (스승 관점 {kind} · 매수·매도 권유 아님)"

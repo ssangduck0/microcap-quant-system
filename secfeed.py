@@ -125,6 +125,7 @@ def poll(client, tickers_by_cik: dict[int, str], types: list[str] | None = None)
                                    (f["accession"], tk, f["cik"], f["form"], f["company"], f["filed"], f["updated"], ",".join(f["items"]), f["url"],
                                     json.dumps(tags, ensure_ascii=False), sc, sent, db.utcnow_iso()))
                 n += cur.rowcount
+            conn.commit()   # 2026-10-30: 피드 종류마다 확정(예전엔 다음 피드를 받는 동안 쓰기 잠금을 쥐고 있었음)
         conn.commit()
     return n
 
@@ -174,6 +175,8 @@ def enrich(client, limit: int = 15) -> int:
             sc, tags, sent = classify(r["form"], [x for x in (r["items"] or "").split(",") if x], text)
             conn.execute("UPDATE sec_feed SET tags=?, score=?, sentiment=?, lead=?, enriched=1 WHERE accession=?",
                          (json.dumps(tags, ensure_ascii=False), sc, sent, lead_of(text), r["accession"]))
+            conn.commit()   # 2026-10-30: 바로 확정 — 예전엔 끝까지 안 해서 ① 다음 공시들을 SEC 에서 받는 내내 쓰기 잠금 ② 아래 listing.save(새 연결)가
+            #                  자기 자신에게 막혀 30초 뒤 조용히 실패 → 10월 피드의 상장유지 통지(3.01) 38건이 하나도 저장 안 됐음
             try:  # 💰 펀드스캔: 실시간 자금조달 공시는 바로 해석
                 import fundscan
                 if text and fundscan.is_deal(r["form"], r["items"] or ""):
@@ -208,6 +211,7 @@ def enrich(client, limit: int = 15) -> int:
                         listing.save(tk["ticker"], r["accession"], tk["filed"] or date.today().isoformat(), r["url"], pl)
                 except Exception:  # noqa: BLE001
                     pass
+            conn.commit()   # 이 공시의 부가 기록(펀드스캔·toxic·병합 예정) 확정 — 다음 공시를 받기 전에
             done += 1
         conn.commit()
     return done
