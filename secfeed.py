@@ -16,7 +16,11 @@ import pandas as pd
 import db
 
 FEED = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type={t}&company=&dateb=&owner=include&start=0&count=100&output=atom"
-TYPES = ["8-K", "6-K", "424B", "S-1", "F-1", "EFFECT", "SCHEDULE 13D", "SCHEDULE 13G", "SC 13D", "SC 13G"]   # 2026-10-27: EDGAR 새 양식명 SCHEDULE 13D/G 추가(옛 SC 13D/G 는 호환용)
+TYPES = ["8-K", "6-K", "424B", "S-1", "F-1", "EFFECT", "SCHEDULE 13D", "SCHEDULE 13G", "SC 13D", "SC 13G"]
+# 잡음(2026-10-30): 424B2 = 대형 은행의 구조화 채권 가격 보충서 — 최근 7일 피드 3,700여 건 중 1,372건(39%, JPM 293·MS 243·BAC 187·GS 186…)인데
+# 우리 스캔 종목과 겹친 건 0개. 토스 거래 가능 전 종목(coverage_extra)까지 받게 넓힌 10/28 뒤 쏟아져, 본문 받기 대기가 줄지 않고 소형주 8-K 해석을 밀어냄.
+# → 우리가 실제로 보는 종목(core_tickers)이 아니면 424B2 는 저장 안 함 · 이미 쌓인 것은 본문 안 받고 처리됨 표시 · 공시 화면에서 숨김.
+NOISE_FORMS = ("424B2",)   # 2026-10-27: EDGAR 새 양식명 SCHEDULE 13D/G 추가(옛 SC 13D/G 는 호환용)
 NS = {"a": "http://www.w3.org/2005/Atom"}
 ITEMS = {  # 8-K 항목: (한글 이름, 점수, 태그)
     "1.01": ("중요 계약 체결", 0, "계약"), "1.02": ("중요 계약 해지", -1, "계약 해지"), "1.03": ("파산·회생", -3, "파산"),
@@ -108,6 +112,7 @@ def classify(form: str, items: list[str], text: str = "") -> tuple[int, list[str
 def poll(client, tickers_by_cik: dict[int, str], types: list[str] | None = None) -> int:
     """피드를 받아 우리 종목 공시만 저장. 새로 저장한 건수."""
     n = 0
+    core = core_tickers()
     with closing(db.connect()) as conn:
         ensure_tables(conn)
         for ty in types or TYPES:
@@ -117,7 +122,7 @@ def poll(client, tickers_by_cik: dict[int, str], types: list[str] | None = None)
                 continue
             for f in parse_atom(xml):
                 tk = tickers_by_cik.get(f["cik"])
-                if not tk:
+                if not tk or is_noise(f["form"], tk, core):   # 잡음(대형 은행 424B2)은 저장 안 함
                     continue
                 sc, tags, sent = classify(f["form"], f["items"])
                 cur = conn.execute("""INSERT OR IGNORE INTO sec_feed (accession, ticker, cik, form, company, filed, updated, items, url, tags, score, sentiment, enriched, created_at)
@@ -156,7 +161,14 @@ def enrich(client, limit: int = 15) -> int:
     done = 0
     with closing(db.connect()) as conn:
         ensure_tables(conn)
-        rows = conn.execute("SELECT accession, form, items, url FROM sec_feed WHERE enriched=0 ORDER BY updated DESC LIMIT ?", (limit,)).fetchall()
+        cand = conn.execute("SELECT accession, form, items, url, ticker FROM sec_feed WHERE enriched=0 ORDER BY updated DESC LIMIT ?", (max(limit * 10, 100),)).fetchall()
+        core = core_tickers()
+        noise = [r for r in cand if is_noise(r["form"], r["ticker"], core)]
+        if noise:   # 잡음(대형 은행 424B2)은 SEC 본문을 받지 않고 처리됨으로(지우지 않음)
+            conn.executemany("UPDATE sec_feed SET enriched=1, tags=COALESCE(tags, '[]') WHERE accession=?", [(r["accession"],) for r in noise])
+            conn.commit()
+        rest = [r for r in cand if not is_noise(r["form"], r["ticker"], core)]
+        rows = sorted(rest, key=lambda r: str(r["ticker"] or "").upper() not in core)[:limit]   # 우리 종목 먼저(같은 무리 안은 최신순 그대로 — 안정 정렬)
         for r in rows:
             text = ""
             try:
@@ -223,6 +235,10 @@ def feed(days: int = 7) -> pd.DataFrame:
     df = db.read_df("SELECT * FROM sec_feed WHERE COALESCE(filed, substr(updated,1,10)) >= ? ORDER BY updated DESC", ((date.today() - timedelta(days=days)).isoformat(),))
     if df.empty:
         return df
+    core = core_tickers()
+    df = df[[not is_noise(f, t, core) for f, t in zip(df["form"], df["ticker"])]].copy()   # 잡음(대형 은행 424B2) 숨김
+    if df.empty:
+        return df
     df["tags"] = df["tags"].map(lambda s: json.loads(s) if s else [])
     cnt = df.groupby("ticker")["accession"].transform("count")
     df["repeat"] = cnt >= 3  # 같은 종목 공시가 기간 안에 3건 이상 = 반복 공시
@@ -236,14 +252,17 @@ def item_names(items: str) -> list[str]:
 _MAP_CACHE: dict = {"at": 0.0, "map": {}}
 
 
-def universe_map(client, ttl: float = 3600) -> dict[int, str]:
-    """{CIK: 티커} — 우리가 보는 종목(과거 사례 대상·스캐너 기록·워치리스트·저금통)만. 1시간 캐시."""
+_CORE_CACHE: dict = {"at": 0.0, "set": set()}
+
+
+def core_tickers(ttl: float = 3600) -> set[str]:
+    """우리가 실제로 보는 종목: 과거 사례 대상 · 스캐너 기록 · 워치리스트·우선 · 저금통 · 최근 7일 급등락 · 가상매매 보유 (토스 거래 가능 '전 종목'은 뺌). 1시간 캐시."""
     import time as _t
-    if _MAP_CACHE["map"] and _t.time() - _MAP_CACHE["at"] < ttl:
-        return _MAP_CACHE["map"]
-    client.cik_for("AAPL")  # 티커 지도 불러오기
+    if _CORE_CACHE["set"] and _t.time() - _CORE_CACHE["at"] < ttl:
+        return _CORE_CACHE["set"]
     tickers: set[str] = set()
-    for sql in ("SELECT ticker FROM case_progress WHERE status='done'", "SELECT DISTINCT ticker FROM daily_snapshots"):
+    for sql in ("SELECT ticker FROM case_progress WHERE status='done'", "SELECT DISTINCT ticker FROM daily_snapshots",
+                "SELECT DISTINCT ticker FROM toss_rank WHERE date >= date('now', '-7 day')"):
         try:
             tickers |= set(db.read_df(sql)["ticker"])
         except Exception:  # noqa: BLE001
@@ -254,6 +273,28 @@ def universe_map(client, ttl: float = 3600) -> dict[int, str]:
         tickers |= set(watch.scanner_priority()) | set(piggy.tickers())
     except Exception:  # noqa: BLE001
         pass
+    try:
+        import papertrade
+        tickers |= set(papertrade.open_tickers())
+    except Exception:  # noqa: BLE001
+        pass
+    out = {str(t).upper() for t in tickers if t}
+    _CORE_CACHE.update(at=_t.time(), set=out)
+    return out
+
+
+def is_noise(form, ticker, core: set[str]) -> bool:
+    """대형 은행 구조화 채권(424B2) 같은 잡음: 잡음 양식이고 우리가 보는 종목이 아님."""
+    return str(form or "").upper().startswith(NOISE_FORMS) and str(ticker or "").upper() not in core
+
+
+def universe_map(client, ttl: float = 3600) -> dict[int, str]:
+    """{CIK: 티커} — 우리가 보는 종목(core_tickers) + 토스 거래 가능 전 종목 등(coverage_extra). 1시간 캐시."""
+    import time as _t
+    if _MAP_CACHE["map"] and _t.time() - _MAP_CACHE["at"] < ttl:
+        return _MAP_CACHE["map"]
+    client.cik_for("AAPL")  # 티커 지도 불러오기
+    tickers: set[str] = set(core_tickers())
     tickers |= coverage_extra()   # C단계 2026-10-28: 토스 거래 가능 전 종목(외국 발행사 6-K·20-F·F-1 포함)·급등락 7일·가상매매 보유
     m = {}
     for t in tickers:
