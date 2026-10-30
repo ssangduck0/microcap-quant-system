@@ -171,6 +171,42 @@ def evaluate(x: dict) -> dict:
             "n_inputs": sum(1 for k in ("vix", "vix9d", "vix3m", "spy", "ixic", "hy", "dgs2", "dgs10", "hyg_ief") if x.get(k) is not None)}
 
 
+def _naive(s: pd.Series | None) -> pd.Series | None:
+    """날짜 인덱스를 시간대 없는 날짜로(야후는 시간대가 붙어 올 때가 있음) · 중복 제거 · 정렬."""
+    if s is None:
+        return None
+    s = s.dropna()
+    idx = pd.DatetimeIndex(pd.to_datetime(s.index))
+    if idx.tz is not None:
+        idx = idx.tz_convert("America/New_York").tz_localize(None)
+    s = s.copy()
+    s.index = idx.normalize()
+    return s[~s.index.duplicated(keep="last")].sort_index()
+
+
+def history(download=None, http_get=None) -> dict:
+    """과거 재생용 재료(야후 3년 · FRED 전체) — fetch 와 같은 모양. 🎲 presim 장세 기록(보강 C, 2026-10-30)에서 한 번 씀."""
+    import market
+    return fetch(download or (lambda: market.download_daily(YAHOO, period="3y")), http_get)
+
+
+def replay(x: dict, dates) -> dict[str, dict]:
+    """그날까지 알 수 있던 자료로 신호등을 다시 계산(컨닝 없음): 야후 = 그날 종가까지 · FRED = 전날까지(다음 날 발표되니까).
+    {날짜: {points, light, vix}} — 그날 VIX·SPY 가 둘 다 없으면 건너뜀. docs/TASK_presim.md 12절 재생과 같은 방법."""
+    xs = {k: _naive(v) for k, v in (x or {}).items()}
+    out: dict[str, dict] = {}
+    for d in dates:
+        t = pd.Timestamp(str(d)[:10])
+        y = {k: (None if xs.get(k) is None else xs[k].loc[:t]) for k in ("vix", "vix9d", "vix3m", "spy", "ixic", "hyg_ief")}
+        y.update({k: (None if xs.get(k) is None else xs[k].loc[: t - pd.Timedelta(days=1)]) for k in ("hy", "dgs2", "dgs10")})
+        y = {k: (v if v is not None and len(v) else None) for k, v in y.items()}
+        if y.get("vix") is None and y.get("spy") is None:
+            continue
+        r = evaluate(y)
+        out[str(d)[:10]] = {"points": int(r["points"]), "light": r["light"], "vix": r["metrics"].get("vix")}
+    return out
+
+
 def get() -> dict:
     mm = db.get_meta("regime")
     try:

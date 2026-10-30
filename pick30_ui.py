@@ -41,7 +41,7 @@ def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None
                      f'<div class="l2"><span style="color:{STC[r["status"]]};font-weight:700">{r["status"]}</span>'
                      + ('<span class="wk" title="약한 목표: baby shelf 탈출">약</span>' if r.get("weak") else "")
                      + (f' · +{pct:.0f}%{dd}' if pct is not None else f' · -{dd}')
-                     + ((lambda b: f' <span title="{ui.esc("🎲 매매 전 시뮬레이션 " + __import__("presim_ui").badge_text(b))}">{b["verdict"]}</span>')(badges[r["ticker"]]) if badges and r["ticker"] in badges else "")
+                     + ((lambda b: f' <span title="{ui.esc("🎲 매매 전 시뮬레이션 " + __import__("presim_ui").badge_text(b))}">{__import__("presim").main_verdict(b) or b["verdict"]}</span>')(badges[r["ticker"]]) if badges and r["ticker"] in badges else "")
                      + '</div></div>')
     return ('<style>.qk-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 12px}'
             '.qk-pick{border:1px solid rgba(128,128,128,.28);border-radius:12px;padding:8px 10px;line-height:1.35}'

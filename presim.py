@@ -67,7 +67,12 @@ SOURCE_HORIZON = {"close": 5, "after": 5}   # 그 밖(저금통·PICK·순위·�
 EP_DDL = """CREATE TABLE IF NOT EXISTS presim_ep (ticker TEXT NOT NULL, date TEXT NOT NULL, px REAL, flags INTEGER, onset INTEGER, n INTEGER,
             hi BLOB, lo BLOB, cl BLOB, PRIMARY KEY (ticker, date))"""
 EP_ADD = (("sl_pct", "REAL"), ("tp_pct", "REAL"))                                                       # v2: 사건별 계획(🐷 키만, 나머지 NULL)
-LOG_ADD = (("edge", "REAL"), ("edge_raw", "REAL"), ("ev_base", "REAL"), ("n_eff", "REAL"), ("p0", "REAL"), ("recent_n", "INTEGER"), ("recent_ev", "REAL"), ("plan", "TEXT"))
+LOG_ADD = (("edge", "REAL"), ("edge_raw", "REAL"), ("ev_base", "REAL"), ("n_eff", "REAL"), ("p0", "REAL"), ("recent_n", "INTEGER"), ("recent_ev", "REAL"), ("plan", "TEXT"),
+           # 보강 C(장세 조건부 · C안 2026-10-30): 오늘 장세 · '오늘과 같은 장세 날만' 판정과 숫자 — 2년 전체 판정(verdict)은 그대로 두고 따로 기록해 🏆 에서 비교
+           ("regime", "TEXT"), ("verdict_reg", "TEXT"), ("edge_reg", "REAL"), ("ev_reg", "REAL"), ("ev_base_reg", "REAL"), ("n_eff_reg", "REAL"))
+REGIME_DDL = "CREATE TABLE IF NOT EXISTS presim_regime (date TEXT PRIMARY KEY, points INTEGER, light TEXT, vix REAL, src TEXT, at TEXT)"   # 사건 날짜별 장세(재생·실시간)
+LIGHT_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+V_ORDER = {"🔴": 0, "🪙": 1, "🟢": 2}   # 대표 판정 = 더 조심스러운 쪽(작은 값)
 LOG_DDL = """CREATE TABLE IF NOT EXISTS presim_log (day TEXT NOT NULL, ticker TEXT NOT NULL, source TEXT NOT NULL, key TEXT, entry REAL, sl REAL, tp REAL, horizon INTEGER,
              p_tp REAL, p_tp_opt REAL, p_sl REAL, p_none REAL, both_pct REAL, ev_pct REAL, n_ep INTEGER, own_p_tp REAL, own_p_sl REAL, own_ev REAL, own_n INTEGER,
              verdict TEXT, detail TEXT, created_at TEXT, PRIMARY KEY (day, ticker, source))"""
@@ -84,6 +89,7 @@ WARN = "과거 움직임의 통계일 뿐이에요. 증자 공시·병합·실�
 def ensure(conn) -> None:
     conn.execute(EP_DDL)
     conn.execute(LOG_DDL)
+    conn.execute(REGIME_DDL)
     for tbl, cols in (("presim_ep", EP_ADD), ("presim_log", LOG_ADD)):   # 기존 표 보존 — 열만 더함
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
         for c, t in cols:
@@ -392,6 +398,108 @@ def episodes(conn, key: str) -> dict:
             "sl": sl, "tp": tp, "dates": dates, "w": _overlap_weights(meta["ticker"].tolist(), dates)}
 
 
+def ensure_regimes(conn, out=print, loader=None) -> dict:
+    """🎲 장세 기록(보강 C, 2026-10-30): 사건 표 날짜 중 장세가 없는 날을 채움.
+    🔍 부검의 실시간 기록(regime_hist — 스캐너가 30분마다 넣는 그날 🚦)이 있으면 그것, 없으면 과거 재생(regime.replay · 야후는 그날 종가까지, FRED 는 전날까지 = 컨닝 없음).
+    처음 한 번은 2년치(약 500일)를 재생하고(야후 3년·FRED 받기 수십 초), 그 뒤로는 매일 새 날짜 1개라 대개 실시간 기록으로 끝남."""
+    ensure(conn)
+    have = {r[0] for r in conn.execute("SELECT date FROM presim_regime")}
+    need = sorted({r[0] for r in conn.execute("SELECT DISTINCT date FROM presim_ep")} - have)
+    res = {"need": len(need), "live": 0, "replay": 0}
+    if not need:
+        return res
+    now = db.utcnow_iso()
+    rows: list[tuple] = []
+    try:
+        live = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT date, light, points FROM regime_hist")}
+    except Exception:  # noqa: BLE001  (🔍 부검 표가 아직 없는 DB)
+        live = {}
+    rest = []
+    for d in need:
+        if d in live and live[d][0] in LIGHT_ICON:
+            rows.append((d, int(live[d][1] or 0), live[d][0], None, "live", now))
+            res["live"] += 1
+        else:
+            rest.append(d)
+    if rest:
+        try:
+            import regime
+            rp = regime.replay((loader or regime.history)(), rest)
+        except Exception as e:  # noqa: BLE001
+            out(f"🎲 장세 재생 실패(다음 아침에 다시): {e}")
+            rp = {}
+        rows += [(d, int(v["points"]), v["light"], v.get("vix"), "replay", now) for d, v in rp.items()]
+        res["replay"] = len(rp)
+    if rows:
+        def _w():
+            conn.executemany("INSERT OR REPLACE INTO presim_regime (date, points, light, vix, src, at) VALUES (?,?,?,?,?,?)", rows)
+            conn.commit()
+        db.retry_locked(_w)
+    left = len(need) - res["live"] - res["replay"]
+    out(f"🎲 장세 기록: 새 날짜 {len(need)}개 → 실시간 {res['live']} · 재생 {res['replay']}" + (f" · 못 채움 {left}(다음 아침에 다시)" if left else ""))
+    return res
+
+
+def regime_map(conn) -> dict[str, str]:
+    try:
+        return {r[0]: r[1] for r in conn.execute("SELECT date, light FROM presim_regime")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def today_light(conn=None) -> tuple[str | None, str]:
+    """오늘 장세: 실시간 🚦(스캐너 30분마다 · 5일 안 값) → 없으면 장세 기록의 가장 최근 날. (색, 출처)"""
+    try:
+        import regime
+        cur = regime.get()
+        if cur.get("light") in LIGHT_ICON and cur.get("date") and (date.today() - date.fromisoformat(str(cur["date"])[:10])).days <= 5:
+            return cur["light"], "실시간 🚦"
+    except Exception:  # noqa: BLE001
+        pass
+    if conn is not None:
+        try:
+            r = conn.execute("SELECT light, date FROM presim_regime ORDER BY date DESC LIMIT 1").fetchone()
+            if r and r[0] in LIGHT_ICON:
+                return r[0], f"장세 기록 {r[1]}"
+        except Exception:  # noqa: BLE001
+            pass
+    return None, ""
+
+
+def combine(vd: str | None, vr: str | None, on: bool | None = None) -> str | None:
+    """대표 판정(C안): 설정(PRESIM_REGIME_VERDICT)이 켜져 있으면 '2년 전체'와 '오늘과 같은 장세 날만' 중 더 조심스러운 쪽(🔴 < 🪙 < 🟢).
+    장세 판정이 ❔(표본 부족·기록 없음)면 2년 전체 판정. 끄면 언제나 2년 전체 판정(10/30 이전과 같음)."""
+    on = bool(getattr(config, "PRESIM_REGIME_VERDICT", True)) if on is None else on
+    if not on or vd not in V_ORDER or vr not in V_ORDER:
+        return vd
+    return min(vd, vr, key=V_ORDER.get)
+
+
+def main_verdict(r: dict | None) -> str:
+    """presim_log 행·run_one 결과 → 지금 설정의 대표 판정."""
+    return "" if not r else (combine(r.get("verdict"), r.get("verdict_reg")) or "")
+
+
+def _sub(ep: dict, m: np.ndarray) -> dict:
+    return {k: (v[m] if isinstance(v, np.ndarray) and v.shape[:1] == m.shape else v) for k, v in ep.items() if k != "meta"}
+
+
+def regime_split(ep: dict, epb: dict, rmap: dict, light: str, plan_k: tuple, plan_b: tuple, hz: int) -> dict:
+    """한 장세의 1겹·기준 결과와 우위. plan_k = (손절%, 목표%) — 🐷 박스 계획이면 사건별 배열. plan_b = 기준에 쓸 (손절%, 목표%)."""
+    mk = np.array([rmap.get(str(d)[:10]) == light for d in ep["dates"]], dtype=bool)
+    mb = np.array([rmap.get(str(d)[:10]) == light for d in epb["dates"]], dtype=bool)
+    if not mk.any() or not mb.any():
+        return {"n": 0, "n_eff": 0.0}
+    sk, sb = _sub(ep, mk), _sub(epb, mb)
+    k_sl = plan_k[0][mk] if isinstance(plan_k[0], np.ndarray) else plan_k[0]
+    k_tp = plan_k[1][mk] if isinstance(plan_k[1], np.ndarray) else plan_k[1]
+    l1r = outcomes(sk["hi"], sk["lo"], sk["cl"], k_sl, k_tp, hz, bars=sk["bars"], w=sk.get("w"))
+    lbr = outcomes(sb["hi"], sb["lo"], sb["cl"], plan_b[0], plan_b[1], hz, bars=sb["bars"], w=sb.get("w"))
+    raw = None if l1r.get("ev_pct") is None or lbr.get("ev_pct") is None else round(l1r["ev_pct"] - lbr["ev_pct"], 2)
+    return {"n": l1r.get("n", 0), "n_eff": l1r.get("n_eff") or 0.0, "ev": l1r.get("ev_pct"), "ev_base": lbr.get("ev_pct"), "edge_raw": raw,
+            "edge": None if raw is None else round(shrink(raw, l1r.get("n_eff") or 0), 2), "p_tp": l1r.get("p_tp"), "p_sl": l1r.get("p_sl"), "n_base": lbr.get("n", 0)}
+
+
 def ep_counts(conn) -> dict[str, int]:
     out = {}
     for k in KEYS:
@@ -604,7 +712,8 @@ def pick_key(flags_now: int, source: str, counts: dict[str, int]) -> str:
 
 def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str | None = None, *, entry: float | None = None, sl: float | None = None,
             tp: float | None = None, horizon: int | None = None, box=None, n_sim: int = N_SIM, seed: int | None = None, dil_dates: list[str] | None = None,
-            covered: bool = True, counts: dict | None = None, cache: dict | None = None, save: bool = True, now: datetime | None = None) -> dict:
+            covered: bool = True, counts: dict | None = None, cache: dict | None = None, save: bool = True, now: datetime | None = None,
+            regime_light: str | None = None) -> dict:
     """한 종목 한 번: 기본값 채우기 → 1겹(같은 신호 전체 과거 · 🐷 키는 사건별 그날 박스) → 기준(아무 날) 같은 계획 → 최근 창 → 2겹(이 종목 250일) → 수량 → 기준 대비 우위 판정 → presim_log."""
     ensure(conn)
     d = _norm(df)
@@ -655,6 +764,25 @@ def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str |
         basis = "이 종목 최근 250일(같은 신호 표본 부족 ⚠️)"
     else:
         vd, txt, basis = "❔", "자료 부족", "없음"
+    # ---- 장세 판정(보강 C · C안 2026-10-30): '오늘과 같은 장세 날만' 같은 계획으로 다시 → 두 번째 판정. 대표 판정 = combine()(관리 모드 설정)
+    # 근거: docs/TASK_presim.md 12절 — 🟢 장세에선 ⭐t1 우위가 +1.67 → +0.25%p 로 거의 사라짐(t3·과매도는 안정). 🔴/🟡 는 몇 번의 사건에 몰려 있어 표본 50 미만이면 ❔
+    light_now = regime_light if regime_light is not None else today_light(conn)[0]
+    rmap = cache.get("_rmap")
+    if rmap is None:
+        rmap = regime_map(conn)
+        cache["_rmap"] = rmap
+    by_light: dict = {}
+    vr, er, err, rsel = "❔", None, None, {}
+    if l1.get("n", 0) >= MIN_EP and lb.get("n") and rmap:
+        plan_k = (ep["sl"], ep["tp"]) if box_plan else (sl_pct, tp_pct)
+        for lt in LIGHT_ICON:
+            by_light[lt] = regime_split(ep, epb, rmap, lt, plan_k, (b_sl, b_tp), hz)
+        rsel = by_light.get(light_now) or {}
+        if key == "base":
+            vr = "🪙" if rsel.get("n") else "❔"
+        elif rsel.get("n_eff", 0) >= EFF_MIN and rsel.get("ev") is not None and rsel.get("ev_base") is not None:
+            vr, _vt, er, err = verdict_edge(rsel["ev"], rsel["ev_base"], rsel["n_eff"])
+    vmain = combine(vd, vr)
     notes = []
     if l1.get("n", 0) >= MIN_EP and own.get("ok") and own["p_tp"] is not None and l1["p_tp"] is not None and abs(own["p_tp"] - l1["p_tp"]) >= 15:
         notes.append(f"⚠️ 이 종목 최근 성격(익절 {own['p_tp']:.0f}%)이 같은 신호 평균(익절 {l1['p_tp']:.0f}%)과 많이 달라요")
@@ -664,16 +792,20 @@ def run_one(conn, ticker: str, df: pd.DataFrame, source: str = "scr", day: str |
         notes.append(f"최근 6개월({rec['n']}건)은 기대값 {rec['ev_pct']:+.1f}% 로 2년 평균({l1['ev_pct']:+.1f}%)과 달라요 — 효과가 변하는 중일 수 있어요")
     res = {"ok": True, "ticker": ticker, "source": source, "day": day, "entry": entry, "sl": sl, "tp": tp, "horizon": hz, "sl_pct": round(sl_pct, 2), "tp_pct": round(tp_pct, 2),
            "key": key, "plan": l1["plan"], "layer1": l1, "base": lb, "recent": rec, "own": own, "size": sz, "verdict": vd, "verdict_text": txt, "basis": basis,
-           "edge": edge, "edge_raw": edge_raw, "p0": p0, "n_eff": l1.get("n_eff"), "notes": notes, "warn": WARN, "flags_now": flags_now}
+           "edge": edge, "edge_raw": edge_raw, "p0": p0, "n_eff": l1.get("n_eff"), "notes": notes, "warn": WARN, "flags_now": flags_now,
+           "regime": light_now, "verdict_reg": vr, "edge_reg": er, "edge_reg_raw": err, "reg": rsel, "by_light": by_light, "verdict_main": vmain}
     if save:
         detail = json.dumps({"layer1": {k: v for k, v in l1.items() if k not in ("meta",)}, "base": lb, "recent": rec, "own": own, "size": sz, "basis": basis, "notes": notes,
-                             "sl_pct": res["sl_pct"], "tp_pct": res["tp_pct"], "plan": l1["plan"], "p0": p0}, ensure_ascii=False, default=float)
+                             "sl_pct": res["sl_pct"], "tp_pct": res["tp_pct"], "plan": l1["plan"], "p0": p0, "regime": light_now, "by_light": by_light, "edge_reg_raw": err},
+                            ensure_ascii=False, default=float)
         def _save():
             conn.execute("INSERT OR REPLACE INTO presim_log (day, ticker, source, key, entry, sl, tp, horizon, p_tp, p_tp_opt, p_sl, p_none, both_pct, ev_pct, n_ep, own_p_tp, own_p_sl, own_ev, own_n, "
-                         "verdict, detail, created_at, edge, edge_raw, ev_base, n_eff, p0, recent_n, recent_ev, plan) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         "verdict, detail, created_at, edge, edge_raw, ev_base, n_eff, p0, recent_n, recent_ev, plan, regime, verdict_reg, edge_reg, ev_reg, ev_base_reg, n_eff_reg) "
+                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                          (day, ticker, source, key, entry, sl, tp, hz, l1.get("p_tp"), l1.get("p_tp_opt"), l1.get("p_sl"), l1.get("p_none"), l1.get("both_pct"), l1.get("ev_pct"), l1.get("n", 0),
                           own.get("p_tp"), own.get("p_sl"), own.get("ev_pct"), own.get("n_days"), vd, detail, (now or datetime.now(timezone.utc)).isoformat(),
-                          edge, edge_raw, lb.get("ev_pct"), l1.get("n_eff"), p0, rec.get("n", 0), rec.get("ev_pct"), l1["plan"]))
+                          edge, edge_raw, lb.get("ev_pct"), l1.get("n_eff"), p0, rec.get("n", 0), rec.get("ev_pct"), l1["plan"],
+                          light_now, vr, er, rsel.get("ev"), rsel.get("ev_base"), rsel.get("n_eff")))
             conn.commit()
         db.retry_locked(_save)   # 2026-10-30: 아침 작업 중 다른 프로그램이 잠금을 쥐면 17종목이 모두 '잠김' 으로 실패했음
     return res
@@ -727,8 +859,14 @@ def morning(conn, out=print, now: datetime | None = None, bars: dict | None = No
             build_episodes(conn, out=out, bars=bars)
         except Exception as e:  # noqa: BLE001
             out(f"🎲 사건 표 갱신 실패(지난 표로 계속): {e}")
+    try:   # 보강 C: 사건 날짜별 장세(처음 한 번 2년 재생, 그 뒤 매일 실시간 기록)
+        ensure_regimes(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        out(f"🎲 장세 기록 실패(장세 판정은 ❔): {e}")
+    light_now, light_src = today_light(conn)
     cands = candidates(conn, top_n)
-    res = {"n": len(cands), "done": 0, "skip": 0, "verdicts": {"🟢": 0, "🪙": 0, "🔴": 0, "❔": 0}, "sec": 0.0}
+    res = {"n": len(cands), "done": 0, "skip": 0, "verdicts": {"🟢": 0, "🪙": 0, "🔴": 0, "❔": 0}, "sec": 0.0,
+           "verdicts_reg": {"🟢": 0, "🪙": 0, "🔴": 0, "❔": 0}, "verdicts_main": {"🟢": 0, "🪙": 0, "🔴": 0, "❔": 0}, "light": light_now}
     if not cands:
         out("🎲 매매 전 시뮬레이션: 후보 없음")
         return res
@@ -747,10 +885,13 @@ def morning(conn, out=print, now: datetime | None = None, bars: dict | None = No
             res["skip"] += 1
             continue
         try:
-            r = run_one(conn, t, df, c["source"], box=c.get("box"), n_sim=n_sim, dil_dates=dil.get(t, []), covered=t in cov, counts=counts, cache=cache, now=now, seed=7)
+            r = run_one(conn, t, df, c["source"], box=c.get("box"), n_sim=n_sim, dil_dates=dil.get(t, []), covered=t in cov, counts=counts, cache=cache, now=now, seed=7,
+                        regime_light=light_now)
             if r.get("ok"):
                 res["done"] += 1
                 res["verdicts"][r["verdict"]] = res["verdicts"].get(r["verdict"], 0) + 1
+                res["verdicts_reg"][r["verdict_reg"]] = res["verdicts_reg"].get(r["verdict_reg"], 0) + 1
+                res["verdicts_main"][r["verdict_main"]] = res["verdicts_main"].get(r["verdict_main"], 0) + 1
             else:
                 res["skip"] += 1
         except Exception as e:  # noqa: BLE001
@@ -758,7 +899,10 @@ def morning(conn, out=print, now: datetime | None = None, bars: dict | None = No
             out(f"🎲 {t} 실패: {e}")
     res["sec"] = round(time.time() - t0, 1)
     v = res["verdicts"]
-    out(f"🎲 매매 전 시뮬레이션: {res['done']}종목 · 🟢{v['🟢']} 🪙{v['🪙']} 🔴{v['🔴']} · 자료 부족 {res['skip']} · {res['sec']}초")
+    vr_, vm_ = res["verdicts_reg"], res["verdicts_main"]
+    out(f"🎲 매매 전 시뮬레이션: {res['done']}종목 · 2년 전체 🟢{v['🟢']} 🪙{v['🪙']} 🔴{v['🔴']} · 오늘 장세({LIGHT_ICON.get(light_now, '❔')} {light_src or '기록 없음'}) 날만 "
+        f"🟢{vr_['🟢']} 🪙{vr_['🪙']} 🔴{vr_['🔴']} ❔{vr_['❔']} · 대표({'장세 반영' if getattr(config, 'PRESIM_REGIME_VERDICT', True) else '2년 전체'}) "
+        f"🟢{vm_.get('🟢', 0)} 🪙{vm_.get('🪙', 0)} 🔴{vm_.get('🔴', 0)} · 자료 부족 {res['skip']} · {res['sec']}초")
     return res
 
 

@@ -120,6 +120,7 @@ SEC_DIGEST = os.environ.get("SEC_DIGEST", "1") != "0"                 # 📝 공
 NEWS_TRANSLATE = os.environ.get("NEWS_TRANSLATE", "1") != "0"         # 🌐 뉴스 한국어 번역(Haiku 5.5, AI 월 예산 안에서)
 PRESIM_ACCOUNT_KRW = float(os.environ.get("PRESIM_ACCOUNT_KRW", "5000000"))   # 🎲 매매 전 시뮬레이션: 계좌 크기(원) — 수량 계산용(2026-10-29 사용자 기본값)
 PRESIM_MAX_LOSS_KRW = float(os.environ.get("PRESIM_MAX_LOSS_KRW", "50000"))   # 🎲 한 번 매매의 최대 손실(원)
+PRESIM_REGIME_VERDICT = os.environ.get("PRESIM_REGIME_VERDICT", "1") != "0"   # 🎲 대표 판정에 장세 반영(2026-10-30 C안): 2년 전체 판정과 '오늘과 같은 장세 날만' 판정 중 더 조심스러운 쪽
 PRESIM_TOP_N = int(os.environ.get("PRESIM_TOP_N", "10"))                      # 🎲 아침 자동 실행: 종합 순위 상위 몇 개까지(0 = 안 함)
 AI_PICK_ENABLED = os.environ.get("AI_PICK_ENABLED", "1") != "0"       # 🤖 AI PICK(아침 갱신 때 하루 한 번 Claude 판단)
 AI_PICK_MODEL = os.environ.get("AI_PICK_MODEL", "claude-sonnet-5-5").strip()
@@ -200,6 +201,7 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "PRESIM_ACCOUNT_KRW": (float, 100000.0, 100000000.0, "숫자", "🎲 매매 전 시뮬레이션: 계좌 크기(원) — 수량 상한 10% 의 기준"),
     "PRESIM_MAX_LOSS_KRW": (float, 1000.0, 1000000.0, "숫자", "🎲 한 번 매매의 최대 손실(원) — 수량 = 이것 ÷ (매수가 − 손절가)"),
     "PRESIM_TOP_N": (int, 0, 50, "숫자", "🎲 아침 자동 실행: 종합 순위 상위 몇 개까지(0 = 순위는 안 돌림)"),
+    "PRESIM_REGIME_VERDICT": (bool, None, None, "기능", "🎲 대표 판정에 장세 반영(켜면 '2년 전체'와 '오늘과 같은 장세 날만' 중 더 조심스러운 판정을 배지·목록에 씀)"),
     "RANK_W_STRENGTH": (float, 0.3, 1.0, "순위 가중치", "🏁 종합 = 강도 × 이 값 + 임박도 × (1 − 이 값)"),
     "RANK_W_ACC": (float, 0.0, 1.0, "순위 가중치", "강도: 매집 비중"),
     "RANK_W_PR": (float, 0.0, 1.0, "순위 가중치", "강도: 회사 압박 비중"),

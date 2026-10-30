@@ -47,6 +47,10 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "presim_g": ("🎲 매매 전 시뮬레이션 🟢 유리", 1, 30.0, 40),
     "presim_c": ("🎲 매매 전 시뮬레이션 🪙 동전", 1, 30.0, 40),
     "presim_r": ("🎲 매매 전 시뮬레이션 🔴 불리(낮아야 맞음)", 1, 30.0, 40),
+    # 보강 C(C안 2026-10-30): '오늘과 같은 장세 날만' 판정 — 위의 2년 전체 판정과 같은 목표로 재서 어느 쪽이 더 잘 맞는지 2~3주 뒤 비교(docs/TASK_presim.md 12절)
+    "presim_rg": ("🎲 시뮬레이션(장세 반영) 🟢 유리", 1, 30.0, 40),
+    "presim_rc": ("🎲 시뮬레이션(장세 반영) 🪙 동전", 1, 30.0, 40),
+    "presim_rr": ("🎲 시뮬레이션(장세 반영) 🔴 불리(낮아야 맞음)", 1, 30.0, 40),
     "chart_h60": ("📐 60분봉 200선 돌파 지지", 1, 20.0, 10),
     "chart_gc": ("📐 일봉 5/20 골든크로스", 1, 20.0, 10),
     "chart_turn": ("📐 연속 하락 뒤 전환(ANO)", 1, 10.0, 5),
@@ -136,6 +140,13 @@ def collect(conn) -> pd.DataFrame:
                 p_sl = r["p_sl"] if r["p_sl"] is not None else r["own_p_sl"]
                 add(src, r["day"], r["ticker"], r["entry"], note=f"{r['source']} · 익절 {p_tp:.0f}% · 손절 {p_sl:.0f}% ({r['key']})" if p_tp is not None else str(r["source"]))
     except Exception:  # noqa: BLE001  (표가 아직 없음)
+        pass
+    try:  # 보강 C: 장세 판정(verdict_reg 열이 생긴 뒤 기록부터) — ❔(표본 부족·기록 없음)은 빼고
+        _pr = {"🟢": "presim_rg", "🪙": "presim_rc", "🔴": "presim_rr"}
+        for r in _q(conn, "SELECT day, ticker, entry, verdict_reg, regime, ev_reg, n_eff_reg, key, source FROM presim_log WHERE verdict_reg IN ('🟢','🪙','🔴')"):
+            add(_pr[r["verdict_reg"]], r["day"], r["ticker"], r["entry"],
+                note=f"{r['source']} · 장세 {r['regime'] or '-'} · 기대값 {r['ev_reg'] if r['ev_reg'] is not None else '-'}% · 표본 {r['n_eff_reg'] or 0:.0f} ({r['key']})")
+    except Exception:  # noqa: BLE001  (열이 아직 없음)
         pass
     return pd.DataFrame(rows)
 

@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 import access
+import config
 import db
 import presim
 import ui_kit as ui
@@ -31,7 +32,8 @@ def badge_text(r: dict | None) -> str:
     p_tp, p_sl = r.get("p_tp"), r.get("p_sl")
     if p_tp is None:
         p_tp, p_sl = r.get("own_p_tp"), r.get("own_p_sl")
-    return f"{r['verdict']} 익절 {p_tp:.0f}% · 손절 {p_sl:.0f}%" if p_tp is not None and p_sl is not None else str(r.get("verdict") or "")
+    v = presim.main_verdict(r) or str(r.get("verdict") or "")   # 대표 판정(보강 C · 관리 모드 설정)
+    return f"{v} 익절 {p_tp:.0f}% · 손절 {p_sl:.0f}%" if p_tp is not None and p_sl is not None else v
 
 
 def badge_chip(t: str, lm: dict | None = None) -> str:
@@ -41,8 +43,27 @@ def badge_chip(t: str, lm: dict | None = None) -> str:
         return ""
     txt = badge_text(r)
     tip = (f"🎲 매매 전 시뮬레이션({r['day']}): {presim.KEYS.get(r.get('key'), ('?',))[0]} {r.get('n_ep') or 0}건 기준 · 손절 ${r['sl']:.4g} · 목표 ${r['tp']:.4g} · {r['horizon']}거래일"
-           f" · 기대값 {r['ev_pct'] if r.get('ev_pct') is not None else r.get('own_ev')}% — 과거 통계일 뿐, 예측 아님")
-    return ui.chip("🎲 " + txt, COLOR.get(r["verdict"], "gray"), tip=tip)
+           f" · 기대값 {r['ev_pct'] if r.get('ev_pct') is not None else r.get('own_ev')}%"
+           f" · 판정: 2년 전체 {r.get('verdict')} · 오늘 장세({presim.LIGHT_ICON.get(r.get('regime'), '❔')}) 날만 {r.get('verdict_reg') or '❔'} — 과거 통계일 뿐, 예측 아님")
+    return ui.chip("🎲 " + txt, COLOR.get(presim.main_verdict(r) or r["verdict"], "gray"), tip=tip)
+
+
+def _regime_caption(r: dict) -> str:
+    """'판정 두 개' 한 줄(보강 C · C안 2026-10-30) — 2년 전체 · 오늘과 같은 장세 날만 · 대표."""
+    lt = r.get("regime")
+    icon = presim.LIGHT_ICON.get(lt, "❔")
+    rs = r.get("reg") or {}
+    vm = r.get("verdict_main") or presim.main_verdict(r)
+    on = bool(getattr(config, "PRESIM_REGIME_VERDICT", True))
+    e_all = "" if r.get("edge") is None else f" {r['edge']:+.1f}%p"
+    if r.get("verdict_reg") in presim.V_ORDER and rs.get("ev") is not None and rs.get("ev_base") is not None:
+        e_reg = "" if r.get("edge_reg") is None else f" {r['edge_reg']:+.1f}%p"
+        reg_txt = (f"오늘과 같은 {icon} 장세 날만 {r['verdict_reg']}{e_reg}(기대값 {rs['ev']:+.1f}% · 기준 {rs['ev_base']:+.1f}% · 유효 표본 {rs.get('n_eff') or 0:,.0f})")
+    else:
+        why = "장세 기록 없음" if not lt else f"유효 표본 {rs.get('n_eff') or 0:,.0f} < {presim.EFF_MIN:.0f}"
+        reg_txt = f"오늘과 같은 {icon} 장세 날만 ❔({why})"
+    return (f"판정 두 개 — 2년 전체 {r.get('verdict')}{e_all} · {reg_txt} → **대표 {vm}**"
+            f"({'장세 반영: 둘 중 더 조심스러운 쪽' if on else '2년 전체 기준'} · ⚙️ 관리 모드에서 바꿈)")
 
 
 def _bars(t: str) -> pd.DataFrame | None:
@@ -60,7 +81,10 @@ def _bars(t: str) -> pd.DataFrame | None:
 
 def _result_block(r: dict, key: str) -> None:
     l1, own, sz = r["layer1"], r["own"], r["size"]
-    st.markdown(f"**{r['verdict']} {ui.esc(r['verdict_text'])}** <span class='qk-sub'>— 판정 근거: {ui.esc(r['basis'])}</span>", unsafe_allow_html=True)
+    vm = r.get("verdict_main") or presim.main_verdict(r) or r["verdict"]
+    vtxt = r["verdict_text"] if vm == r["verdict"] else presim.VERDICT_TEXT.get(vm, r["verdict_text"])
+    st.markdown(f"**{vm} {ui.esc(vtxt)}** <span class='qk-sub'>— 판정 근거: {ui.esc(r['basis'])}</span>", unsafe_allow_html=True)
+    st.caption(_regime_caption(r))
     cols = st.columns(4)
     if l1.get("n"):
         cols[0].metric("익절 먼저(같은 신호 과거)", f"{l1['p_tp']:.0f}%", help=f"같은 날 둘 다 닿은 날을 익절로 보면 {l1['p_tp_opt']:.0f}% (범위)")
@@ -77,6 +101,13 @@ def _result_block(r: dict, key: str) -> None:
             st.caption(f"기준(아무 날 {b['n']:,}건)에 같은 계획: 익절 {b['p_tp']:.0f}% · 손절 {b['p_sl']:.0f}% · 기대값 {b['ev_pct']:+.1f}%{_e} · 동전 던지기라면 익절 {r.get('p0') or 0:.0f}%", unsafe_allow_html=True)
         if rec.get("n"):
             st.caption(f"최근 6개월 {rec['n']:,}건만: 익절 {rec['p_tp']:.0f}% · 손절 {rec['p_sl']:.0f}% · 기대값 {rec['ev_pct']:+.1f}%")
+        bl = r.get("by_light") or {}
+        if any(v.get("n") for v in bl.values()):
+            with st.expander("🚦 장세별 같은 신호 성적(🟢 🟡 🔴)"):
+                st.dataframe(ui.tidy(pd.DataFrame([{"장세": presim.LIGHT_ICON.get(k, k), "유효 표본": v.get("n_eff"), "기대값(%)": v.get("ev"), "기준 기대값(%)": v.get("ev_base"),
+                                                    "우위(%p)": v.get("edge_raw"), "우위 보정(%p)": v.get("edge"), "익절 먼저(%)": v.get("p_tp")} for k, v in bl.items()])),
+                             hide_index=True, width="stretch")
+                st.caption("🔴·🟡 장세는 몇 번의 큰 사건(예: 2025-04 급락)에 몰려 있어 숫자가 흔들릴 수 있어요 — 🟢 가 가장 믿을 만해요(docs/TASK_presim.md 12절).")
     else:
         cols[0].caption("같은 신호의 과거 사건이 아직 부족해요(아침 작업이 사건 표를 쌓아요)")
     if own.get("ok"):
