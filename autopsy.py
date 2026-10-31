@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
@@ -24,6 +26,10 @@ PUMP_PCT = 30.0        # 종가 기준 전일 대비 +30%
 PUMP_HI_PCT = 50.0     # 고가(세션 포함) 기준 +50%
 SIGNAL_LOOKBACK = 10   # 펌핑 전 며칠 안의 우리 신호를 '잡았다'로 볼지
 MIN_PREV_DVOL = 20_000.0   # 전날 거래대금이 이보다 작은 종목(거래 없는 휴지)은 펌핑 목록에서 뺌
+# 2026-10-31 병합일 가짜 펌핑: 야후가 병합을 늦게 반영하면 병합 당일 봉만 새 단위 → WHLR(1:6) +553%·CHOW(1:10) +861% 가 '놓친 펌핑' 1·2위로 잡히고
+# 🤖 복기(review, 놓친 펌핑을 고가 순으로 Claude 에 보냄)에도 먼저 감. 10/26~30 펌핑 91건 중 5~6건이 이런 봉이었음.
+SPLIT_WIN = (-5, 3)     # 알려진 병합일이 펌핑일 -5~+3일 안(야후·SEC·우리 기록 날짜가 하루씩 어긋남: NUWE 10/26↔10/27, WHLR 10/30↔공시 10/29)
+SPLIT_TAG_DAYS = 60     # 비율을 모르는 '주식 병합' 태그 공시가 이 안에 있고 시가가 정수배(×4 이상)로 뛰었으면 병합 봉으로 봄
 FEAT_KEYS = ["px", "bucket", "chg1", "dd20", "vol_x", "dvol20", "rsi", "zone", "stage", "base_days", "above50", "gc_days", "sar", "bb_sq", "float", "mcap",
              "dil", "si_pct", "dtc", "sv_pct", "regsho", "sec7", "sec_good7", "news7", "news_good7", "regime", "regime_pts"]
 TAGS = {"regime": "🚦 장세 나쁨", "dilution": "🧾 희석 출회(424B·S-1·ATM)", "short": "🩳 공매 눌림(숏볼륨 60%↑)", "thin": "💧 거래량 없음", "nocat": "📰 호재 없음",
@@ -73,10 +79,64 @@ def prev_trading_day(conn, day: str) -> str | None:
     return r[0] if r and r[0] else None
 
 
-def find_pumps(conn, day: str, tradable_only: bool = True) -> list[dict]:
-    """그날 펌핑 종목: 종가 +30%↑ 또는 고가(정규장 고가·세션별 고점) +50%↑. 토스 급상승 순위(+30%↑)도 합친다."""
+def known_splits(conn, day: str) -> tuple[dict[str, float], set[str]]:
+    """그날 앞뒤(SPLIT_WIN)로 알려진 역병합 → ({티커: N(1:N)}, 비율 모르는 병합 의심 종목).
+    배수는 야후(rs_events) → SEC 공시(🗓 역분할 시행) → 🔁 리셋 사이클 설정 순으로 믿는다. 의심 = 비율 미확인 시행 · 최근 '주식 병합' 태그 공시(이미 병합이 끝난 종목은 뺌)."""
+    d0 = date.fromisoformat(day)
+    lo, hi = (d0 + timedelta(days=SPLIT_WIN[0])).isoformat(), (d0 + timedelta(days=SPLIT_WIN[1])).isoformat()
+    known: dict[str, float] = {}
+    unknown: set[str] = set()
+    q = [("SELECT ticker, 1.0 / ratio FROM rs_events WHERE date BETWEEN ? AND ? AND ratio > 0 AND ratio < 1", (lo, hi)),
+         ("SELECT ticker, title FROM events WHERE kind='역분할 시행' AND date BETWEEN ? AND ?", (lo, hi)),
+         ("SELECT ticker, 1.0 / split_ratio FROM reset_config WHERE split_date BETWEEN ? AND ? AND split_ratio > 0 AND split_ratio < 1", (lo, hi))]
+    for sql, args in q:
+        try:
+            rows = conn.execute(sql, args).fetchall()
+        except Exception:  # noqa: BLE001 (표 없음)
+            continue
+        for t, v in rows:
+            t = str(t or "").upper()
+            if isinstance(v, str):
+                m = re.search(r"1:(\d+(?:\.\d+)?)", v)
+                v = float(m.group(1)) if m else None
+            if not t:
+                continue
+            if v and float(v) > 1.2:
+                known.setdefault(t, float(v))
+            else:
+                unknown.add(t)
+    try:
+        done = {r[0] for r in conn.execute("SELECT DISTINCT ticker FROM rs_events WHERE date BETWEEN date(?, ?) AND ?", (day, f"-{SPLIT_TAG_DAYS} day", lo))}
+        for (t,) in conn.execute("SELECT DISTINCT ticker FROM sec_feed WHERE tags LIKE '%주식 병합%' AND COALESCE(filed, substr(updated, 1, 10)) BETWEEN date(?, ?) AND ?",
+                                 (day, f"-{SPLIT_TAG_DAYS} day", day)):
+            if t and str(t).upper() not in done:
+                unknown.add(str(t).upper())
+    except Exception:  # noqa: BLE001
+        pass
+    return known, unknown - set(known)
+
+
+def split_factor(o: float | None, c: float, pc: float, n: float | None, suspect: bool) -> float | None:
+    """그날 봉이 병합 환산 전(새 단위)인데 전날은 옛 단위면 전날 종가에 곱할 배수, 아니면 None.
+    시가로 본다 — 병합은 장 시작부터 새 단위라 시가가 ×N 로 뛴다(진짜 펌핑은 장중에 오르므로 시가가 전날과 비슷: GCTK 10/26).
+    알려진 N: 시가÷전날 > √N 이면 환산 전(환산된 자료엔 그런 점프가 없음 — resetcycle.to_current 와 같은 기준).
+    비율 모르는 의심 종목: 시가가 4배 이상 + 정수배에 가까울 때만(±12%) — 진짜 +300% 갭은 드물고 정수배까지 맞기는 더 드묾."""
+    g = (o if o and o > 0 else c) / pc
+    if n:
+        return n if g > math.sqrt(n) else None
+    if suspect:
+        k = round(g)
+        if k >= 4 and abs(g - k) / k <= 0.12:
+            return float(k)
+    return None
+
+
+def find_pumps(conn, day: str, tradable_only: bool = True, skipped: list | None = None) -> list[dict]:
+    """그날 펌핑 종목: 종가 +30%↑ 또는 고가(정규장 고가·세션별 고점) +50%↑. 토스 급상승 순위(+30%↑)도 합친다.
+    병합 환산 전 봉은 전날 종가를 ×N 해서 다시 재고, 그래도 기준을 넘을 때만 펌핑(skipped 에 (티커, N) 으로 뺀 종목을 담음)."""
     prev = prev_trading_day(conn, day)
-    rows = conn.execute("SELECT ticker, close, high, volume FROM daily_prices WHERE date=?", (day,)).fetchall()
+    rows = conn.execute("SELECT ticker, close, high, volume, open FROM daily_prices WHERE date=?", (day,)).fetchall()
+    known, suspect = known_splits(conn, day)
     pv = {}
     if prev:
         for t, c, v in conn.execute("SELECT ticker, close, volume FROM daily_prices WHERE date=?", (prev,)):
@@ -88,7 +148,8 @@ def find_pumps(conn, day: str, tradable_only: bool = True) -> list[dict]:
     except Exception:  # noqa: BLE001
         pass
     out: dict[str, dict] = {}
-    for t, c, h, v in rows:
+    split_out: set[str] = set()
+    for t, c, h, v, o in rows:
         p = pv.get(t)
         if not p or not p[0] or p[0] <= 0 or not c:
             continue
@@ -97,6 +158,15 @@ def find_pumps(conn, day: str, tradable_only: bool = True) -> list[dict]:
             continue
         hi = max([float(h or 0)] + [float(x) for x in (ext.get(t) or {}).values() if x])
         chg, hichg = (float(c) / pc - 1) * 100, (hi / pc - 1) * 100
+        sf = split_factor(o, float(c), pc, known.get(t), t in suspect) if (chg >= PUMP_PCT or hichg >= PUMP_HI_PCT) and (t in known or t in suspect) else None
+        if sf:
+            pc *= sf
+            chg, hichg = (float(c) / pc - 1) * 100, (hi / pc - 1) * 100
+            if not (chg >= PUMP_PCT or hichg >= PUMP_HI_PCT):
+                split_out.add(t)
+                if skipped is not None:
+                    skipped.append((t, sf))
+                continue
         if chg >= PUMP_PCT or hichg >= PUMP_HI_PCT:
             sess = "reg"
             for s in ("night", "pre", "reg", "post"):
@@ -105,9 +175,11 @@ def find_pumps(conn, day: str, tradable_only: bool = True) -> list[dict]:
                     sess = s
                     break
             out[t] = {"ticker": t, "pump_pct": chg, "hi_pct": hichg, "session": sess, "prev_close": pc, "volume": float(v or 0)}
-    try:  # 토스 급상승 순위(일봉이 아직 없는 종목 보완)
+            if sf:
+                out[t]["split"] = sf
+    try:  # 토스 급상승 순위(일봉이 아직 없는 종목 보완) — 병합 봉으로 뺀 종목만 다시 넣지 않음(병합 공시만 있고 장 마감 뒤 오른 NCPL 10/28 +44% 같은 건 그대로)
         for t, price, chg in conn.execute("SELECT ticker, price, change_pct FROM toss_rank WHERE date=? AND kind='up'", (day,)):
-            if t and t not in out and chg is not None and float(chg) >= PUMP_PCT:
+            if t and t not in out and t not in split_out and chg is not None and float(chg) >= PUMP_PCT:
                 out[t] = {"ticker": t, "pump_pct": float(chg), "hi_pct": float(chg), "session": "toss", "prev_close": (float(price) / (1 + float(chg) / 100)) if price else None, "volume": None}
     except Exception:  # noqa: BLE001
         pass
@@ -120,6 +192,31 @@ def find_pumps(conn, day: str, tradable_only: bool = True) -> list[dict]:
         except Exception:  # noqa: BLE001
             pass
     return sorted(out.values(), key=lambda r: -r["pump_pct"])
+
+
+def recheck_splits(conn, days: int = 21, today: str | None = None) -> int:
+    """지난 펌핑 기록 중 뒤늦게 병합으로 밝혀진 것 정리(야후·SEC 가 병합을 하루~며칠 늦게 알려 줌): 병합 봉이면 지우고, 배수가 바뀌면 등락률을 고쳐 씀.
+    병합이 알려진 종목만 다시 본다(다른 기록은 그대로). 바꾼 행 수."""
+    ensure(conn)
+    since = ((date.fromisoformat(today) if today else date.today()) - timedelta(days=days)).isoformat()
+    n = 0
+    for (d,) in conn.execute("SELECT DISTINCT date FROM pump_autopsy WHERE date >= ?", (since,)).fetchall():
+        known, suspect = known_splits(conn, d)
+        rec = [t for (t,) in conn.execute("SELECT ticker FROM pump_autopsy WHERE date=?", (d,)).fetchall() if t in known or t in suspect]
+        if not rec:
+            continue
+        skipped: list = []
+        now = {p["ticker"]: p for p in find_pumps(conn, d, tradable_only=False, skipped=skipped)}
+        gone = {t for t, _ in skipped}
+        for t in rec:
+            p = now.get(t)
+            if t in gone or p is None:   # 병합 봉(환산된 뒤엔 그냥 펌핑 아님)
+                n += conn.execute("DELETE FROM pump_autopsy WHERE date=? AND ticker=?", (d, t)).rowcount
+            elif p.get("split"):
+                n += conn.execute("UPDATE pump_autopsy SET pump_pct=?, hi_pct=?, prev_close=? WHERE date=? AND ticker=? AND ABS(COALESCE(prev_close, 0) - ?) > 1e-9",
+                                  (p["pump_pct"], p["hi_pct"], p["prev_close"], d, t, p["prev_close"])).rowcount
+    conn.commit()
+    return n
 
 
 def our_signals(conn) -> pd.DataFrame:
@@ -320,7 +417,8 @@ def run(conn, day: str | None = None, out=print, download=None, fail_days: int =
     prev = prev_trading_day(conn, day) or day
     sig = our_signals(conn)
     held = held_sets(conn, day)
-    pumps = find_pumps(conn, day)
+    skipped: list = []
+    pumps = find_pumps(conn, day, skipped=skipped)
     since = (date.fromisoformat(day) - timedelta(days=SIGNAL_LOOKBACK)).isoformat()
     n_new = n_caught = 0
     now = db.utcnow_iso()
@@ -354,12 +452,18 @@ def run(conn, day: str | None = None, out=print, download=None, fail_days: int =
     except Exception as e:  # noqa: BLE001
         out(f"부검: 실패 신호 처리 중 오류({e})")
     conn.commit()
-    out(f"🔍 부검 {day}: 펌핑 {len(pumps)}종목(새로 {n_new} · 그중 우리 신호/보유 {n_caught}) · 실패 신호 부검 {n_fail}건")
+    try:
+        n_fix = recheck_splits(conn, today=day)
+    except Exception as e:  # noqa: BLE001
+        n_fix = 0
+        out(f"부검: 지난 기록 병합 정정 중 오류({e})")
+    extra = (" · 병합 봉이라 뺌 " + ", ".join(f"{t}(1:{n:g})" for t, n in skipped) if skipped else "") + (f" · 지난 기록 병합 정정 {n_fix}건" if n_fix else "")
+    out(f"🔍 부검 {day}: 펌핑 {len(pumps)}종목(새로 {n_new} · 그중 우리 신호/보유 {n_caught}) · 실패 신호 부검 {n_fail}건{extra}")
     for p in pumps[:15]:
         row = conn.execute("SELECT caught, caught_by, held, catalyst FROM pump_autopsy WHERE date=? AND ticker=?", (day, p["ticker"])).fetchone()
         if row:
             out(f"  {p['ticker']} {p['pump_pct']:+.0f}%(고가 {p['hi_pct']:+.0f}%, {p['session']}) · {'✅ ' + (row[1] or '') + (row[2] or '') if row[0] else '❌ 놓침'} · {row[3][:80]}")
-    return {"day": day, "pumps": len(pumps), "new": n_new, "caught": n_caught, "fails": n_fail}
+    return {"day": day, "pumps": len(pumps), "new": n_new, "caught": n_caught, "fails": n_fail, "split_skipped": skipped, "split_fixed": n_fix}
 
 
 def morning(out=print) -> dict:

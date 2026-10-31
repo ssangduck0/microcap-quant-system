@@ -249,7 +249,7 @@ def item_names(items: str) -> list[str]:
     return [ITEMS[i][0] for i in (items or "").split(",") if i in ITEMS]
 
 
-_MAP_CACHE: dict = {"at": 0.0, "map": {}}
+_MAP_CACHE: dict = {"at": 0.0, "map": {}, "multi": {}}
 
 
 _CORE_CACHE: dict = {"at": 0.0, "set": set()}
@@ -294,15 +294,46 @@ def universe_map(client, ttl: float = 3600) -> dict[int, str]:
     if _MAP_CACHE["map"] and _t.time() - _MAP_CACHE["at"] < ttl:
         return _MAP_CACHE["map"]
     client.cik_for("AAPL")  # 티커 지도 불러오기
-    tickers: set[str] = set(core_tickers())
-    tickers |= coverage_extra()   # C단계 2026-10-28: 토스 거래 가능 전 종목(외국 발행사 6-K·20-F·F-1 포함)·급등락 7일·가상매매 보유
-    m = {}
-    for t in tickers:
-        cik = (client._map or {}).get(str(t).upper())
-        if cik and cik not in m:
-            m[cik] = str(t).upper()
-    _MAP_CACHE.update(at=_t.time(), map=m)
+    core = core_tickers()
+    tickers = {str(t).upper() for t in set(core) | coverage_extra() if t}   # C단계 2026-10-28: 토스 거래 가능 전 종목(외국 발행사 6-K·20-F·F-1 포함)·급등락 7일·가상매매 보유
+    smap = client._map or {}
+    rank = {t: i for i, t in enumerate(smap)}
+    m: dict[int, str] = {}
+    multi: dict[int, list[str]] = {}
+    # 2026-10-31: 한 회사(CIK)에 티커가 여럿(WHLR·WHLRP)이면 집합 순서대로 아무거나 골랐음 → WHLR 공시 11건이 전부 우선주 WHLRP 로 저장
+    #   (WHLR 화면·🗓 역분할 일정·부검이 못 봄). SEC 표(company_tickers.json)는 회사마다 보통주를 맨 앞에 둠(WHLR·CMCSA·CUBI·PRU 확인) → 그 순서로 고정.
+    #   '짧은 티커' 규칙은 CMCSA 를 채권 티커 CCZ 로 바꿔서 버림.
+    for t in sorted(tickers, key=lambda x: (rank.get(x, 10**9), x not in core, x)):
+        cik = smap.get(t)
+        if not cik:
+            continue
+        if cik not in m:
+            m[cik] = t
+        else:
+            multi.setdefault(cik, []).append(t)
+    _MAP_CACHE.update(at=_t.time(), map=m, multi=multi)
     return m
+
+
+def relabel(conn, client) -> int:
+    """같은 회사 공시가 다른 티커로 저장된 것(WHLRP)을 지금 고른 티커(WHLR)로 고쳐 씀 — 공시 피드 · 공시 이력 · 🗓 역분할 시행(공시에서 뽑은 것).
+    지도에서 티커가 여럿인 회사만 보므로 가볍고, 여러 번 돌려도 같음. 바꾼 행 수."""
+    m = universe_map(client)
+    n = 0
+    for cik, others in (_MAP_CACHE.get("multi") or {}).items():
+        pref = m.get(cik)
+        if not pref:
+            continue
+        qs = ",".join("?" * len(others))
+        n += conn.execute(f"UPDATE sec_feed SET ticker=? WHERE cik=? AND ticker IN ({qs})", (pref, cik, *others)).rowcount
+        for sql, args in ((f"UPDATE OR IGNORE sec_hist SET ticker=? WHERE ticker IN ({qs}) AND accession IN (SELECT accession FROM sec_feed WHERE cik=?)", (pref, *others, cik)),
+                          (f"UPDATE OR IGNORE events SET ticker=? WHERE ticker IN ({qs}) AND kind='역분할 시행' AND origin='secfeed'", (pref, *others))):
+            try:
+                n += conn.execute(sql, args).rowcount
+            except Exception:  # noqa: BLE001 (표 없음)
+                pass
+    conn.commit()
+    return n
 
 
 def coverage_extra() -> set[str]:

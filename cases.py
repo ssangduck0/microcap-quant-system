@@ -234,6 +234,15 @@ def build(conn, active: list[str], delisted: list[str], years: int = 10, thresho
 # ---------------------------------------------------------------- 매일 갱신
 def update(conn, active: list[str], delisted: list[str], days: int = 60, years: int = 10, threshold: float = THRESHOLD,
            chunk: int = 50, pause: float = 1.0, out=print) -> dict:
+    try:  # 2026-10-31: 한 회사 여러 티커(WHLR·WHLRP)로 갈라 저장된 공시를 보통주 티커로 — 동기화 전에(공시 이력도 같은 티커로)
+        import secfeed
+        import sec as _secL
+        if "@" in config.SEC_USER_AGENT:
+            _n = secfeed.relabel(conn, _secL.SecClient(config.SEC_USER_AGENT))
+            if _n:
+                out(f"공시 티커 고침: {_n}행(한 회사 여러 티커 → 보통주 티커로)")
+    except Exception as e:  # noqa: BLE001
+        log.exception("공시 티커 고침 실패: %s", e)
     try:  # 2026-10-30: 공시 이력(sec_hist)이 10/15 백필에서 멈춰 있던 것 → 스캐너 피드(sec_feed)를 매일 합침(수집기·presim/타임머신 희석 깃발·📚 플래그가 새 공시를 보게)
         import secbackfill
         out(f"공시 이력 동기화: 피드에서 {secbackfill.sync_from_feed(conn):,}건 추가")
