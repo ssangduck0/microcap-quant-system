@@ -460,6 +460,12 @@ def open_trade(conn, strategy: str, day: str, ticker: str, price: float, *, rank
     c = c or cfg(strategy)
     if not c["on"] or not price or price <= 0:
         return False
+    try:  # 2026-11-01: 병합 시행 7일 안이면 어떤 전략도 사지 않음(2년 10일 기대값 −3.9~−8.8%, −20%↓ 76~87% — rsplit.soon 주석). 전략 비교는 모두 같은 조건
+        import rsplit
+        if rsplit.soon(conn, ticker):
+            return False
+    except Exception:  # noqa: BLE001
+        pass
     b = book(strategy)
     if conn.execute("SELECT 1 FROM pt_trades WHERE strategy=? AND ticker=? AND status='open' LIMIT 1", (strategy, ticker)).fetchone():
         return False

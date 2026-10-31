@@ -197,6 +197,25 @@ def backfill_upcoming(client, days: int = 30, limit: int = 400, out=print, only_
     return {"read": n_read, "new": n_new}
 
 
+# 2026-11-01 병합 예정 보류(사용자 승인 · docs/regime_scorecard_2026-11-01.md): 🕰 2년 판정 중 '병합 시행 7일 안' 408건이 장세·기간 네 칸 모두 큰 손실 —
+#   10거래일 기대값 −8.8%(2024-25 🟢) · −8.2%(🟡🔴) · −7.7%(2026 🟢) · −3.9%(🟡🔴), 20일 안 −20%↓ 76~87%(김곰 G1.1 의 '확정 예정 병합 제외' 규칙과 같은 결론).
+#   🏆 실제 기록에서도 7~10월 신호 1,791건 중 33건(1.8%)이 병합 7일 전이었고 그중 18건이 −20%↓ → 저금통 자동 담기·가상/실매매 진입에서 뺌.
+SOON_DAYS = 7
+
+
+def soon(conn, ticker: str, days: int = SOON_DAYS, today: date | None = None) -> dict | None:
+    """병합 시행일이 오늘~days 일 안이면 {date, title, d}(가장 가까운 것), 아니면 None — 🗓 일정(events '역분할 시행') 기준."""
+    today = today or date.today()
+    try:
+        r = conn.execute("SELECT date, title FROM events WHERE ticker=? AND kind='역분할 시행' AND date BETWEEN ? AND ? ORDER BY date LIMIT 1",
+                         (ticker.upper(), today.isoformat(), (today + timedelta(days=days)).isoformat())).fetchone()
+    except Exception:  # noqa: BLE001 (events 표 없음)
+        return None
+    if not r:
+        return None
+    return {"date": r[0], "title": r[1] or "역분할 시행", "d": (date.fromisoformat(r[0]) - today).days}
+
+
 def upcoming(conn) -> pd.DataFrame:
     """병합 예정 표: 티커 · 시행일 · D-day · 비율 · 현재가 · 병합 환산가(현재가×비율, 예측 아님) · 병합 후 주식 수 · 근거."""
     try:

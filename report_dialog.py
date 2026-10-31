@@ -63,6 +63,9 @@ def _money(v) -> str:
 def _head(t: str, b: dict, hd: dict, ms: list, why: str) -> None:
     """서랍 머리: 티커·이름·가격·등락 + 칩 + 한 줄(하락 원인 첫 후보 또는 공식 잔고)."""
     chips = ""
+    if hd.get("rs_soon"):   # 2026-11-01: 병합 시행 7일 안 — 저금통 자동 담기·가상/실매매 진입에서 빠짐(rsplit.soon 주석)
+        rs = hd["rs_soon"]
+        chips += ui.chip(f"🚫 병합 예정 {rs['date'][5:].replace('-', '/')} (D-{rs['d']}) · 매수 보류", "red", tip=f"{rs['title']} — 2년 자료상 병합 7일 전 매수 10일 기대값 −4~−9%, 한 달 안 −20%↓ 76~87%")
     if hd.get("sho"):
         chips += ui.chip(f"Reg SHO {hd['sho']}일째", "red")
     if hd.get("dil"):

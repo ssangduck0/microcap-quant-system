@@ -188,6 +188,14 @@ def can_buy(conn, strategy: str, ticker: str, ref_px: float, qty: int, *, diluti
         return False, f"희석 {dilution}"
     if share_cls == "bad":
         return False, "⑥ 주식수 +20% 초과"
+    if strategy != "probe":   # 2026-11-01: 병합 시행 7일 안(2년 10일 기대값 −3.9~−8.8%, −20%↓ 76~87% — rsplit.soon 주석)
+        try:
+            import rsplit
+            rs = rsplit.soon(conn, ticker)
+        except Exception:  # noqa: BLE001
+            rs = None
+        if rs:
+            return False, f"병합 예정 {rs['date']}({rs['title']})"
     if dollar_vol is not None and dollar_vol < float(config.LIVE_MIN_DOLLAR_VOL):
         return False, f"거래대금 ${dollar_vol:,.0f} < ${float(config.LIVE_MIN_DOLLAR_VOL):,.0f}"
     k = killed()

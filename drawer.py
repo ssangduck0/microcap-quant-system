@@ -273,6 +273,11 @@ def headline(conn, t: str) -> dict:
     n_sig = len(_q(conn, "SELECT 1 FROM pred_outcomes WHERE ticker=? AND date >= ?", t, (date.today() - timedelta(days=30)).isoformat()))
     hi = max((x["high"] or x["close"]) for x in b) if b else None
     lst = [f for f in filings(conn, t, 180) if f["form"].upper().startswith("8-K") and "3.01" in f["items"]]
-    return {"price": px, "chg": chg, "asof": b[-1]["date"] if b else snap.get("date"), "float": snap.get("float_shares"), "dil": snap.get("dilution_status"),
+    try:
+        import rsplit
+        rs_soon = rsplit.soon(conn, t)   # 병합 시행 7일 안(2년 10일 기대값 −3.9~−8.8% — 저금통·매매 진입에서 뺌)
+    except Exception:  # noqa: BLE001
+        rs_soon = None
+    return {"rs_soon": rs_soon, "price": px, "chg": chg, "asof": b[-1]["date"] if b else snap.get("date"), "float": snap.get("float_shares"), "dil": snap.get("dilution_status"),
             "si": si.get("si_pct"), "si_date": si.get("date"), "dtc": si.get("dtc"), "fee": ib.get("fee"), "avail": ib.get("available"), "ib_asof": ib.get("as_of"),
             "sho": sho, "n_sig": n_sig, "hi30": hi, "listing": bool(lst)}

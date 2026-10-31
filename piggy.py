@@ -291,7 +291,18 @@ def rule_ok(m: dict | None, dil_status: str | None, fx: float, r: dict | None = 
                 return False
         except Exception:  # noqa: BLE001
             pass
+        if _rs_soon(m["ticker"]):   # 2026-11-01: 병합 시행 7일 안도 제외(🏆 7~10월 병합 직전 신호 33건 중 10건이 저금통 — rsplit.soon 주석)
+            return False
     return ok
+
+
+def _rs_soon(t: str) -> dict | None:
+    try:
+        import rsplit
+        with closing(db.connect()) as c:
+            return rsplit.soon(c, t)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _dil_map() -> dict:
@@ -379,8 +390,11 @@ def alerts(price_map: dict[str, float], today: str | None = None) -> list[str]:
         prev = st.get(t) or {}
         if z in ALERT_ZONES and not (prev.get("date") == today and prev.get("zone") == z):
             act = {"🟢 저점 구간": "매수 검토", "🔴 고점 구간": "매도 검토", "⚠️ 박스 이탈": "손절·제외 검토"}[z]
+            rs = _rs_soon(t) if z == "🟢 저점 구간" else None
+            if rs:   # 2026-11-01: 병합 시행 7일 안이면 매수 검토 대신 보류 안내(가상·실매매도 사지 않음 — rsplit.soon 주석)
+                act = f"매수 보류 — 병합 예정 {rs['date']}(D-{rs['d']} · {rs['title']})"
             msgs.append(f"🐷 {t} {z} — {act}\n현재 ${p:.4f} · 박스 ${lo:.4f}~${hi:.4f} ({r.get('category') or ''})")
-            if z == "🟢 저점 구간":  # 성과 공표: 저점 진입 뒤 박스 상단까지 갔는지 검증
+            if z == "🟢 저점 구간" and not rs:  # 성과 공표: 저점 진입 뒤 박스 상단까지 갔는지 검증
                 with closing(db.connect()) as c:
                     c.execute("INSERT OR IGNORE INTO piggy_events (date, ticker, price, box_low, box_high) VALUES (?,?,?,?,?)", (today, t, p, lo, hi))
                     c.commit()
