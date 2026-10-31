@@ -7,6 +7,7 @@ os.environ.pop("QUANT_TEST_ALL_PAGES", None)
 import os as _os_qs; _os_qs.environ.setdefault("QS_ROOT", _os_qs.path.dirname(_os_qs.path.dirname(_os_qs.path.abspath(__file__)))); sys.path.insert(0, _os_qs.environ["QS_ROOT"])
 import numpy as np, pandas as pd
 import db, config, aipick, secdigest, newtools, secfeed
+secfeed.core_tickers = lambda ttl=3600: {"AAA", "BBB", "CCC", "DDD", "EEE"}   # 2026-10-31: 공시 요약은 우리가 보는 종목만
 db.init_db()
 T = date.today(); d = lambda n: (T - timedelta(days=n)).isoformat()
 with closing(db.connect()) as conn:

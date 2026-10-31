@@ -64,7 +64,8 @@ def render() -> None:
     st.dataframe(_ss, hide_index=True, width="stretch", column_config=_pct_cfg(_ss))
     typ = st.selectbox("사례 보기", ["(선택)"] + sorted(v["type"].unique()), key="ev_type")
     if typ != "(선택)":
-        ex = v[v["type"] == typ].sort_values("up5", ascending=False)
+        ex = v[v["type"] == typ].sort_values("up5", ascending=False).copy()
+        ex["title"] = ex["title"].map(ev.clean_title)   # 예전 수집분 제목 앞의 파일 머리글 떼기
         st.dataframe(ex[["day0", "ticker", "timing", "title", "price", "gap", "ret0", "up5", "dn5", "ret5"]].rename(columns={
             "day0": "기준일", "ticker": "티커", "timing": "시점", "title": "제목", "price": "전일 종가", "gap": "갭(%)", "ret0": "당일(%)", "up5": "D+5 최고(%)", "dn5": "D+5 최저(%)", "ret5": "D+5 종가(%)"}),
             hide_index=True, width="stretch")

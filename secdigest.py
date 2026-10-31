@@ -4,10 +4,12 @@
   ③ 13D/13G 대량 보유(보유자·지분율·경영개입형/단순투자형)                   — 🏦 대량 보유 화면
 래빗스탁의 '공시 AI 요약' · 'RS Scanner(병합 예정)' · '13D/13G 분석기' 를 우리 데이터로.
 · 한 사이클에 LIMIT 건(기본 12), 6건씩 묶어 한 번에 · 원문은 앞부분 + 핵심 단어 주변만 · Haiku 생각 끔
+· 대상: 우리가 보는 종목(secfeed.core_tickers)만 · 원문 = 보도자료(EX-99) + 주 문서(2026-10-31, `doc_text`)
 · 비용: 공시 1건 약 1~3원 · 🤖 AI 월 예산(aipick)과 같은 지갑
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from contextlib import closing
@@ -41,19 +43,75 @@ def ensure(conn) -> None:
     conn.execute(DDL)
 
 
-def pending(conn, limit: int = LIMIT) -> list[dict]:
+def pending(conn, limit: int = LIMIT, core: set[str] | None = None) -> list[dict]:
+    """요약할 공시. 2026-10-31: 우리가 실제로 보는 종목(secfeed.core_tickers)만 · 대형 은행 구조화 채권(424B2)은 뺌 —
+    10/28~31 요약 3,225건 중 64%가 우리 종목 밖(424B2 1,094건 등)이라 예산만 썼음."""
     ensure(conn)
+    if core is None:
+        import secfeed
+        core = secfeed.core_tickers()
     since = (date.today() - timedelta(days=DAYS)).isoformat()
     rows = conn.execute("""SELECT f.accession, f.ticker, f.form, f.filed, f.url, f.company FROM sec_feed f LEFT JOIN sec_digest d ON d.accession = f.accession
                            WHERE d.accession IS NULL AND f.ticker IS NOT NULL AND COALESCE(f.filed, substr(f.updated,1,10)) >= ? AND f.url IS NOT NULL
-                           ORDER BY COALESCE(f.filed, f.updated) DESC LIMIT ?""", (since, limit * 4)).fetchall()
+                           ORDER BY COALESCE(f.filed, f.updated) DESC LIMIT ?""", (since, limit * 50)).fetchall()
     out = []
     for a, t, fm, fl, u, co in rows:
-        if str(fm or "").upper() in FORMS or str(fm or "").upper().startswith("424B"):
+        fu = str(fm or "").upper()
+        if (fu in FORMS or (fu.startswith("424B") and not fu.startswith("424B2"))) and str(t).upper() in core:
             out.append({"accession": a, "ticker": t, "form": fm, "filed": fl, "url": u, "company": co})
         if len(out) >= limit:
             break
     return out
+
+
+_XML13 = (("issuer", ("issuerName",)), ("reporting person", ("reportingPersonName",)), ("percent of class", ("classPercent", "percentOfClass")),
+          ("amount beneficially owned", ("amountBeneficiallyOwned", "aggregateAmountOwned")), ("type of reporting person", ("typeOfReportingPerson",)),
+          ("date of event", ("eventDateRequiresFilingThisStatement", "dateOfEvent")), ("amendment no", ("amendmentNo",)))
+
+
+def xml13(raw: str) -> str:
+    """13D/13G XML → 'reporting person: … ; percent of class: … ; …' (없으면 빈칸)."""
+    parts = []
+    for label, tags in _XML13:
+        vals = []
+        for tg in tags:
+            vals += [re.sub(r"\s+", " ", html.unescape(v)).strip() for v in re.findall(rf"<{tg}>(.*?)</{tg}>", raw or "", re.S | re.I)]
+        vals = [v for v in dict.fromkeys(vals) if v]
+        if vals:
+            parts.append(f"{label}: {', '.join(vals[:4])}")
+    return "; ".join(parts)
+
+
+def doc_text(client, url: str, form: str) -> str:
+    """공시 목록 페이지 주소 → 요약할 본문. 2026-10-31: 예전엔 목록 페이지(문서 이름·크기 표)를 그대로 읽어 요약 4,762건 중 99%가
+    '발췌에 내용이 없어 확인 불가' · 병합 일정·지분율 칸이 전부 빈칸이었음 → 8-K·6-K 는 EX-99 보도자료 먼저 + 주 문서(표지 건너뛰고 첫 Item 부터),
+    그 밖(13D/G·S-1·424B 등)은 주 문서. 목록 링크를 못 찾으면 예전처럼 주소 그대로."""
+    try:
+        import rsplit
+        links = rsplit.doc_links(client._get(url).text)
+    except Exception:  # noqa: BLE001  (목록 페이지가 아님 · 가짜 클라이언트)
+        links = []
+    if not links:
+        return client.fetch_text(url, limit=400_000)
+    fu = str(form or "").upper()
+    if "13D" in fu or "13G" in fu:   # 13D/G 는 2025년부터 XML(.txt 한 통) — 태그를 지우면 '보고자·지분율' 라벨이 사라져 값만 남음 → 핵심 칸을 라벨 붙여 앞에
+        raw_fn = getattr(client, "fetch_raw", None)
+        if raw_fn:
+            raw = raw_fn("https://www.sec.gov" + links[0], 400_000) or ""
+            import sec
+            return (xml13(raw) + " " + sec.html_to_text(raw)).strip()
+    main = client.fetch_text("https://www.sec.gov" + links[0], limit=400_000) or ""
+    if not fu.startswith(("8-K", "6-K")):
+        if "13D" in fu or "13G" in fu:   # 옛 글 형식: 앞이 SEC 머리글(접수번호·주소) → 보고자 이름부터
+            m = re.search(r"\bnames? of reporting persons?\b|\bcusip\b", main[:60_000])
+            if m:
+                main = main[m.start():]
+        return main
+    m = re.search(r"\bitem \d\.\d\d\b", main[:30_000])
+    if m:
+        main = main[m.start():]
+    press = [client.fetch_text("https://www.sec.gov" + x, limit=200_000) or "" for x in rsplit.ex99_links(links)]
+    return " ".join([*press, main])
 
 
 def excerpt(text: str, head: int = 2500, cap: int = 4200) -> str:
@@ -85,7 +143,7 @@ def run(client=None, post=None, out=print, limit: int = LIMIT) -> int:
         docs = []
         for it in part:
             try:
-                txt = client.fetch_text(it["url"], limit=400_000)
+                txt = doc_text(client, it["url"], it["form"])
             except Exception as e:  # noqa: BLE001
                 txt = f"(본문 받기 실패: {e})"
             docs.append({"accession": it["accession"], "ticker": it["ticker"], "form": it["form"], "filed": it["filed"], "company": it["company"], "text": excerpt(txt)})

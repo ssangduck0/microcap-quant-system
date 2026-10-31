@@ -122,12 +122,19 @@ class SecClient:
 
 
 # ------------------------------------------------------------------ text helpers
-def html_to_text(raw: str, lower: bool = True) -> str:
-    """lower=False: 대소문자 그대로(공시 피드 '핵심 문장' 발췌용 — 2026-10-31: 소문자 본문에선 'On October …' 를 못 찾아 1,690건 전부 빈칸이었음)."""
+def html_to_text(raw: str, lower: bool = True, keep_lines: bool = False) -> str:
+    """lower=False: 대소문자 그대로(공시 피드 '핵심 문장' 발췌용 — 2026-10-31: 소문자 본문에선 'On October …' 를 못 찾아 1,690건 전부 빈칸이었음).
+    keep_lines=True: 문단·줄바꿈 태그를 줄로 남김(🔬 이벤트 연구 제목·첫 문단 자르기용 — 한 줄로 합치면 제목이 파일 머리글이 됐음)."""
     raw = re.sub(r"(?is)<ix:header>.*?</ix:header>", " ", raw)
     raw = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
-    txt = re.sub(r"(?s)<[^>]+>", " ", raw)
-    txt = re.sub(r"\s+", " ", html.unescape(txt))
+    if keep_lines:
+        raw = re.sub(r"(?i)<br\s*/?>|</(?:p|div|tr|li|h\d|table|center)>", "\n", raw)
+    txt = html.unescape(re.sub(r"(?s)<[^>]+>", " ", raw))
+    if keep_lines:
+        txt = re.sub(r"[^\S\n]+", " ", txt)
+        txt = re.sub(r" ?\n[\s]*", "\n", txt).strip()
+    else:
+        txt = re.sub(r"\s+", " ", txt)
     return txt.lower() if lower else txt
 
 

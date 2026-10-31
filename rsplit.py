@@ -125,7 +125,8 @@ def doc_links(idx: str) -> list[str]:
 
 
 def ex99_links(links: list[str]) -> list[str]:
-    return [x for x in links[1:4] if re.search(r"ex[-_]?99|ex99|press", x, re.I)][:2]
+    """EX-99 보도자료 첨부(최대 2개). 파일 이름이 ex99-1 · ex-99 · exh_991(WPRT 6-K) · exhibit991 처럼 제각각."""
+    return [x for x in links[1:4] if re.search(r"ex(?:h|hibit)?[-_]?99|press", x, re.I)][:2]
 
 
 def filing_text(client, index_url: str, min_main: int = 4000) -> str:

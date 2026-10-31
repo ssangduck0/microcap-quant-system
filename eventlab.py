@@ -44,7 +44,14 @@ TYPES = [  # (이름, 정규식, 우선순위 낮을수록 먼저)
 ]
 ITEM_TYPES = {"3.01": "상장유지 통지", "3.02": "공모·사모(희석)", "1.01": "계약·수주", "2.01": "인수·합병", "2.02": "실적 발표", "5.02": "경영진·이사회", "1.03": "파산·존속 위험",
               "5.03": "주식 병합"}
-SKIP_LINE = re.compile(r"^(exhibit\s*99|for immediate release|press release|news release|source:|contact|investor relations|\(?nasdaq|\(?nyse|page \d)", re.I)
+SKIP_LINE = re.compile(r"^(exhibit\s*99|for immediate release|press release|news release|source:|contact|investor relations|\(?nasdaq|\(?nyse|page \d|ex-?\d+(?:\.\d+)?\s+\d+\s+\S+\.htm)", re.I)
+# 2026-10-31: 예전 수집분 제목은 한 줄로 합친 본문의 앞 250자라 파일 머리글이 붙어 있음('ex-99.1 2 exhibit991….htm ex-99.1 … exhibit 99.1 jeld-wen announces …') → 화면에서 떼어 냄
+_TITLE_HDR = re.compile(r"^\s*(?:ex-?\d+(?:\.\d+)?\s+\d+\s+\S+\.(?:htm|html|txt)\s+)?(?:ex-?\d+(?:\.\d+)?\s+\S+\s+)?(?:exhibit\s+\d+(?:\.\d+)?\s*)?", re.I)
+
+
+def clean_title(t: str | None) -> str:
+    s = _TITLE_HDR.sub("", t or "", count=1).strip()
+    return s or (t or "")
 
 
 def ensure_tables(conn) -> None:
@@ -139,8 +146,15 @@ def collect(client, years: int = 3, limit: int = 0, tickers: list[str] | None = 
                 acc_t = ix["accepted"]
                 doc = ix["ex99"] or ix["main"]
                 if doc:
-                    text = client.fetch_text(doc, limit=60_000)
-                    title, lead = headline(text)
+                    raw_fn = getattr(client, "fetch_raw", None)
+                    if raw_fn:   # 2026-10-31: 줄을 살린 원문으로 제목·첫 문단(한 줄로 합친 본문으론 제목 = 파일 머리글 · 첫 문단 = 늘 빈칸이었음). 판정은 예전과 같은 소문자 본문
+                        import sec
+                        raw = raw_fn(doc, 60_000)
+                        text = sec.html_to_text(raw)
+                        title, lead = headline(sec.html_to_text(raw, lower=False, keep_lines=True))
+                    else:
+                        text = client.fetch_text(doc, limit=60_000)
+                        title, lead = headline(text)
                     ok = 1
             except Exception:  # noqa: BLE001
                 ok = 0
