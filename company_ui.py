@@ -111,6 +111,8 @@ def render(t: str) -> None:
                        ("유통 주식", _fmt_sh(hf["float"])), ("유통 비율", "-" if hf["float_pct"] is None else f"{hf['float_pct']:.1f}%")])
                 + "<div style='margin:4px 0 8px'>" + ui.chip(f"희석 조달 {badge[0]}", badge[1]) + share_chip(hf) + (ui.chip(f"⛔ {_tl}", "red") if _tl else "") + (ui.chip(_tx[0], _tx[1]) if _tx else "") + _cv
                 + "".join(ui.chip(x, "blue") for x in hf["themes"][:3]) + "</div>", unsafe_allow_html=True)
+    import verdict_ui   # 🧭 종합 판단 카드(2026-10-31, 김곰 워치리스트 참고): 한 줄 판단 · 올려야 하는 이유 · 현금조달 가능성 · 공시 흐름
+    verdict_ui.render(t, c)
     with st.expander("⚡ 지금 분석(1분봉 · 장전·정규장·애프터)"):
         import live_ui
         live_ui.render(t, key="co")
