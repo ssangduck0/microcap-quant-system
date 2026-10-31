@@ -121,6 +121,9 @@ def render_ai() -> None:
                     f" <span style='opacity:.7'>판단 {px}</span><br><span>{r['reason']}</span><br>"
                     f"<span style='opacity:.7'>⚠️ {r['risk']}</span></div>")
     st.markdown("".join(html), unsafe_allow_html=True)
+    if st.toggle("📋 텍스트(메신저에 붙여 넣기)", False, key="ai_txt"):   # 2026-10-31: PICK 처럼 복사용 글(김곰 워치리스트 '사유 텍스트 복사' 참고)
+        st.code("\n".join(f"{r['rank']}. {r['ticker']} · ⚡{r['timing']} · 확신 {r['confidence']}\n   근거: {r['reason']}\n   주의: {r['risk']}" for r in cur)
+                + f"\n(🤖 AI PICK {cur[0]['date']} · Claude 판단 추정 · 투자 권유 아님)", language=None)
     st.caption(f"모델 {last.get('model', '-')} · 입력 {last.get('in', 0):,} · 출력 {last.get('out', 0):,} 토큰. 공시 원문은 다시 열지 않고 우리 요약만 보냈어요 — 근거는 리포트·기업 분석에서 원문으로 확인하세요.")
     tk = st.selectbox("📄 종목 리포트", ["-"] + [r["ticker"] for r in cur], key="ai_rep")
     if tk and tk != "-":
@@ -162,8 +165,13 @@ def render_changes() -> None:
                         "임박(일)": r["imm_days"]} for r in rows])
     import pick as picker
     t = picker.clickable(ui.tidy(tb), list(tb["티커"]), "pk_chg", hide_index=True, width="stretch")
-    if ch["gone"]:
-        st.caption("❌ 빠진 종목: " + " · ".join(f"{g['ticker']}(전 {g['rank']}위·{g['status']})" for g in ch["gone"][:20]))
+    if ch["gone"]:   # 2026-10-31: 왜 빠졌는지(지금 걸린 탈락 조건) — 김곰 'PICK 변동 이유' 참고
+        try:
+            why = {f["ticker"]: f["fail"] for f in _scan().get("fail") or []}
+        except Exception:  # noqa: BLE001
+            why = {}
+        st.caption("❌ 빠진 종목: " + " · ".join(f"{g['ticker']}(전 {g['rank']}위·{g['status']}" + (f" → 탈락: {why[g['ticker']]}" if why.get(g["ticker"]) else "") + ")"
+                                              for g in ch["gone"][:20]))
     if t:
         with closing(db.connect()) as conn:
             hs = pick30.history(conn, t)

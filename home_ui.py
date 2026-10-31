@@ -75,6 +75,16 @@ def render(pages: list[tuple], page_obj: dict | None = None) -> None:
         if not access.is_guest():
             _box("🗓 7일 안 일정", b["events"], "#F76B15")
         _box("📖 처음이라면", ["🏁 종합 순위 → 📄 리포트 → 🏢 종목(기업 분석) 순서로 보세요", "용어가 어려우면 📖 가이드북의 용어 사전"], "#30A46C")
+    try:   # 🆕 업데이트 노트(2026-10-31): 배포마다 바뀐 점을 쉬운 말로 — 방문객은 방문객 화면에 관련된 줄만
+        import updates
+        nts = updates.latest(access.is_guest())
+        if nts:
+            with st.expander(f"🆕 업데이트 노트 · {nts[0]['date']} {nts[0]['title']}"):
+                for nt in nts:
+                    st.markdown(f"**{ui.esc(nt['title'])}** <span class='qk-sub'>{nt['date']}</span>", unsafe_allow_html=True)
+                    st.markdown("\n".join(f"- {ui.md_safe(x)}" for x in nt["lines"]))
+    except Exception:  # noqa: BLE001
+        pass
     if not access.is_guest():   # 🛠 운영 현황(2026-10-31): 점검표·자동 작업 일정·작업 기록 — 조용한 고장을 화면에서 바로
         try:
             import jobs_ui

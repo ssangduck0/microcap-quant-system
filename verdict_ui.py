@@ -80,4 +80,6 @@ def render(t: str, b: dict | None = None) -> None:
     with c3.container(border=True):
         st.markdown("**📰 공시 흐름**", help="최근 14일 공시를 호재·희석(공모·등록·3.02 등)·악재로 셈 + 주총 흐름.")
         st.markdown(_flow(v["flow"]), unsafe_allow_html=True)
+    with st.expander("📋 요약 복사(메신저에 붙여 넣기)"):
+        st.code(verdict.text(v), language=None)
     st.caption("규칙으로 정리한 판단(비용 0 · 예측 아님) — 숫자는 공시·시세 기반 추정이니 원문 확인. 김곰 워치리스트의 종합 판단 구성을 참고했어요.")

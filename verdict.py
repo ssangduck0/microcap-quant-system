@@ -319,3 +319,25 @@ def fin_stats(conn, horizon: int = 30, today: date | None = None) -> dict:
             hit += any(_is_raise(fm, it) for fm, it in rows)
         out[lv] = (len(sub), round(hit / len(sub) * 100))
     return out
+
+
+def text(v: dict) -> str:
+    """📋 메신저용 복사 글(김곰 '근거 / -> 해설·판단 / 종합 판단' 간략판 참고)."""
+    sm, f, fl = v["summary"], v["fin"], v["flow"]
+    lines = [f"[{v['ticker']}] 🧭 {sm['label']}", "근거"]
+    for p in v["purposes"]:
+        need = "" if not p.get("need") else f" 필요 주가 ${p['need']:.4f}" + (f"(+{p['need_pct']:.0f}%)" if p.get("need_pct") and p["need_pct"] > 0 else "")
+        lines.append(f"- 올릴 이유: {p['title']}" + (f" {p['deadline']}" if p.get("deadline") else "") + need + f" — {p.get('why') or ''}")
+    if not v["purposes"]:
+        lines.append("- 올릴 이유: 뚜렷한 것 없음")
+    lines.append(f"- 현금조달 가능성 {f['level']}({f['score']}점): " + (" · ".join(r for _, r in f["reasons"]) or "특별한 신호 없음"))
+    pu = f["pump"]
+    if pu["pumps"]:
+        lines.append(f"- 최근 3년 급등 {pu['pumps']}번 중 7일 안 조달 {pu['raised']}번" + (f"(평소 {pu['base']}%)" if pu.get("base") is not None else ""))
+    c = fl["count"]
+    lines.append(f"- 공시 흐름({fl['days']}일): {fl['verdict']} · 호재 {c['호재']} · 희석 {c['희석']} · 악재 {c['악재']}" + (f" · 주총: {' · '.join(fl['agm'])}" if fl["agm"] else ""))
+    if v.get("forensic"):
+        lines.append(f"- 공시분석({v['forensic']['as_of']}): {v['forensic']['one_liner']}")
+    lines.append(f"-> 종합: {sm['text']}")
+    lines.append("(규칙 기반 정리 · 공시·시세 추정 · 투자 권유 아님)")
+    return "\n".join(lines)

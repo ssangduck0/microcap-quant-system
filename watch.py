@@ -23,6 +23,9 @@ LISTS = ["관심", "보유", "그레이", "블랙"]
 STATUSES = ["활성", "잠김", "소멸", "확인 필요"]
 KINDS = ["워런트", "선지급 워런트", "전환사채", "ATM", "ELOC", "공모 주식", "사모(PIPE)", "기타"]
 DDL = [
+    # ↩ 해제한 종목(2026-10-31, 김곰 워치리스트 참고): 뺀 종목·그때 가격 — 실수로 뺀 것 되돌리기 · 뺀 뒤 어떻게 됐나
+    """CREATE TABLE IF NOT EXISTS watch_removed (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT NOT NULL, removed_at TEXT, list TEXT, added_at TEXT,
+        added_price REAL, note TEXT, price REAL)""",
     """CREATE TABLE IF NOT EXISTS watchlist (ticker TEXT PRIMARY KEY, list TEXT DEFAULT '관심', added_at TEXT, added_price REAL,
         note TEXT DEFAULT '', updated_at TEXT)""",
     """CREATE TABLE IF NOT EXISTS overhang (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT NOT NULL, kind TEXT, qty_m REAL, price REAL,
@@ -72,10 +75,38 @@ def update(ticker: str, **fields) -> None:
         c.commit()
 
 
-def remove(ticker: str) -> None:
+def remove(ticker: str, price: float | None = None) -> None:
+    t = ticker.upper()
     with closing(_conn()) as c:
-        c.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
+        r = c.execute("SELECT list, added_at, added_price, note FROM watchlist WHERE ticker=?", (t,)).fetchone()
+        if r:   # ↩ 해제 이력(그때 가격 — 없으면 최신 스냅샷)
+            if price is None:
+                px = c.execute("SELECT price FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
+                price = px[0] if px else None
+            c.execute("INSERT INTO watch_removed (ticker, removed_at, list, added_at, added_price, note, price) VALUES (?,?,?,?,?,?,?)",
+                      (t, db.utcnow_iso(), r[0], r[1], r[2], r[3], price))
+        c.execute("DELETE FROM watchlist WHERE ticker=?", (t,))
         c.commit()
+
+
+def removed(limit: int = 30) -> pd.DataFrame:
+    """↩ 해제한 종목(최근 순) — 이미 다시 담은 종목은 뺌."""
+    with closing(_conn()) as c:
+        return pd.read_sql_query("SELECT r.* FROM watch_removed r LEFT JOIN watchlist w ON w.ticker = r.ticker WHERE w.ticker IS NULL "
+                                 "AND r.id IN (SELECT MAX(id) FROM watch_removed GROUP BY ticker) ORDER BY r.id DESC LIMIT ?", c, params=(limit,))
+
+
+def restore(ticker: str) -> bool:
+    """실수로 뺀 종목 되돌리기 — 뺄 때의 리스트·추가가·메모 그대로."""
+    t = ticker.upper()
+    with closing(_conn()) as c:
+        r = c.execute("SELECT list, added_at, added_price, note FROM watch_removed WHERE ticker=? ORDER BY id DESC LIMIT 1", (t,)).fetchone()
+        if not r:
+            return False
+        c.execute("INSERT OR IGNORE INTO watchlist (ticker, list, added_at, added_price, note, updated_at) VALUES (?,?,?,?,?,?)",
+                  (t, r[0] or "관심", r[1] or db.utcnow_iso(), r[2], r[3] or "", db.utcnow_iso()))
+        c.commit()
+    return True
 
 
 def all_items() -> pd.DataFrame:

@@ -14,6 +14,7 @@ import pick as picker
 import flowread_ui
 import pumpsetup_ui
 import tosslink_ui
+import ui_kit as ui
 import shortflow_ui
 import intel
 import intel_ui
@@ -105,6 +106,28 @@ def add_button(ticker: str, price: float | None = None, key: str = "wl") -> None
 
 
 # ---------------------------------------------------------------- ⭐ 워치리스트
+def _removed_box() -> None:
+    """↩ 해제한 종목(2026-10-31, 김곰 워치리스트 참고): 뺀 날·그때 가격·지금까지 등락 · 실수로 뺀 종목 되돌리기."""
+    import access
+    if access.is_guest():
+        return
+    rm = watch.removed(30)
+    if rm.empty:
+        return
+    with st.expander(f"↩ 해제한 종목 {len(rm)}개 — 뺀 뒤 어떻게 됐나 · 되돌리기"):
+        now_px = latest_snapshots(list(rm["ticker"]))
+        npx = {} if now_px.empty else dict(zip(now_px["ticker"], now_px["price"]))
+        tb = pd.DataFrame([{"티커": r["ticker"], "뺀 날": str(r["removed_at"])[:10], "리스트": r["list"], "뺀 때 가격($)": r["price"], "지금($)": npx.get(r["ticker"]),
+                            "뺀 뒤(%)": None if not r["price"] or not npx.get(r["ticker"]) else round((npx[r["ticker"]] / r["price"] - 1) * 100, 1),
+                            "메모": r["note"] or ""} for r in rm.to_dict("records")])
+        st.dataframe(ui.tidy(tb), hide_index=True, width="stretch")
+        a, b = st.columns([2, 1])
+        pick = a.selectbox("되돌릴 종목", ["(선택)"] + list(rm["ticker"]), key="wl_restore_pick", label_visibility="collapsed")
+        if b.button("↩ 되돌리기", key="wl_restore", disabled=pick == "(선택)", width="stretch") and pick != "(선택)":
+            watch.restore(pick)
+            st.rerun()
+
+
 def render_watchlist() -> None:
     st.subheader("⭐ 워치리스트")
     forensic_ui.render_cowork_setup()
@@ -121,6 +144,7 @@ def render_watchlist() -> None:
             st_px = _px_stats(prices((t,)).get(t), None)
             watch.add(t, l_new, st_px.get("price"), n_new)
             st.rerun()
+    _removed_box()
     items = watch.all_items()
     if items.empty:
         st.info("워치리스트가 비어 있습니다. 위에서 티커를 추가하거나, 📊 종목 상세·🗂 리포트의 **⭐ 워치리스트에 추가** 버튼을 쓰세요.")
@@ -197,7 +221,7 @@ def render_watchlist() -> None:
     c2.text_input("메모 (입력창 밖을 클릭하면 저장)", key=nk, on_change=lambda: watch.update(t, note=st.session_state[nk]))
     c3.write("")
     if c3.button("🗑 워치리스트에서 빼기", key=f"wl_del_{t}"):
-        watch.remove(t)
+        watch.remove(t, s.get("price"))   # ↩ 해제 이력(그때 가격)
         st.rerun()
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("현재가", "-" if s.get("price") is None else f"${s['price']:.4f}", None if s.get("chg") is None else f"{s['chg']:+.1f}% (오늘)")
