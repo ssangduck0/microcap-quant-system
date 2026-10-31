@@ -537,6 +537,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         squeeze.daily(out=out)
     except Exception as e:  # noqa: BLE001
         log.exception("스퀴즈 순위 저장 실패: %s", e)
+    try:  # 🧭 공매도 방향 기록(2026-11-01): IBKR 대차 방향(신규 숏 유입·커버 의심) · 장세 공포 사후 가설 → 🏆 에서 앞으로 검증(판정엔 안 씀)
+        import shortdir
+        shortdir.daily(conn, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("공매도 방향 기록 실패: %s", e)
     try:  # 🏆 성과 공표: 모든 예측의 결과 갱신
         import scoreboard
         scoreboard.update(conn, out=out)

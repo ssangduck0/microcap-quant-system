@@ -49,9 +49,11 @@ def fx() -> float:
 
 
 def month_spend_usd() -> float:
+    # 2026-11-01: created_at 은 UTC 라 '이번 달(현지)' 첫날 0시를 UTC 로 바꿔 비교(전엔 매달 1일 0~9시 KST 에 지난달 기록과 어긋남)
+    start = datetime(date.today().year, date.today().month, 1).astimezone().astimezone(timezone.utc).isoformat(timespec="seconds")
     with closing(db.connect()) as conn:
         ensure_tables(conn)
-        r = conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM ai_reports WHERE substr(created_at,1,7)=?", (date.today().strftime("%Y-%m"),)).fetchone()
+        r = conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM ai_reports WHERE created_at >= ?", (start,)).fetchone()
     return float(r[0] or 0)
 
 

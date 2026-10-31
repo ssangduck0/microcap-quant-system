@@ -39,6 +39,10 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     # 2026-10-31 개선(U1 🟢 장세 · U2 상습 조달): 보류된 1·2순위도 같은 기준으로 재서 '보류가 맞았나' 검증(보류 쪽 성공률이 낮아야 맞음)
     "s3_h1": ("⏸ 보류(🟢 장세·상습 조달) · RSI≤20 + 희석 없음 — 낮아야 맞음", 1, 30.0, 40),
     "s3_h2": ("⏸ 보류(🟢 장세·상습 조달) · RSI≤25 + 희석 없음 — 낮아야 맞음", 1, 30.0, 40),
+    # 2026-11-01 공매도 방향 기록(shortdir.py · docs/squeeze_validation_2026-11-01.md): 과거 검증이 안 되는 대차 방향 · 사후 가설을 앞으로 검증
+    "sd_ib_inflow": ("🆕 신규 숏 유입 의심(IBKR 빌릴 주식↓·수수료↑) → 10일 안 −20%", -1, 20.0, 10),
+    "sd_ib_cover": ("🔙 숏 커버 의심(IBKR 빌릴 주식↑·수수료↓) → 10일 안 +30%", 1, 30.0, 10),
+    "sd_fear_si": ("🧪 가설: 🟡·🔴 장세 + 결제일 뒤 −20%↓ + 공식 잔고 10%↑", 1, 30.0, 10),
     "cx_si_up": ("📡 공매도 잔고 보고 +30%↑(ChartExchange)", 1, 30.0, 10),      # 숏이 급히 쌓인 뒤 10거래일 안 +30%(스퀴즈 가설) — 신호일 = 자료 받은 날
     "cx_ftd_spike": ("📡 FTD 급증(20일 평균 3배↑)", 1, 30.0, 10),
     "toxic_drop": ("⚠️ 대폭 할인 전환(40%↑) → 60일 안 −50%", -1, 50.0, 60),     # 내림 예측: 저가가 −50% 에 닿으면 성공(OMH 패턴 검증)
@@ -129,6 +133,9 @@ def collect(conn) -> pd.DataFrame:
         add(f"s3_{'h' if held else 't'}{int(r['tier'])}", r["date"], r["ticker"], r["price"],
             note=(f"RSI {r['rsi']:.0f}" if r["rsi"] is not None else "") + f" · 반등형 {_cfgT.TIER_HOLD_DAYS}일" + (f" · 보류: {r['hold']}" if held else ""),
             target=float(_cfgT.TIER_TARGET), horizon=int(_cfgT.TIER_HOLD_DAYS))
+    for r in _q(conn, "SELECT date, ticker, kind, price, note FROM short_dir_signals"):   # 🧭 공매도 방향 기록
+        if f"sd_{r['kind']}" in SOURCES:
+            add(f"sd_{r['kind']}", r["date"], r["ticker"], entry=r["price"], note=r["note"] or "")
     for r in _q(conn, "SELECT date, ticker, kind, price, note FROM chart_signals"):   # 📐 스승 관점
         if r["kind"] in CHART_SRC:
             add(CHART_SRC[r["kind"]], r["date"], r["ticker"], entry=r["price"], note=r["note"] or "")

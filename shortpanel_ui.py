@@ -92,6 +92,17 @@ def render(t: str) -> None:
               {"t": "대차 수수료", "v": "-" if r["fee"] is None else f"{r['fee']:.2f}%", "s": _level(r["fee"], [100, 30, 10], ["빌리기 극히 어려움", "높음", "보통", "낮음"])},
               {"t": "대차 가용주식", "v": "0K" if htb else ("-" if r["avail"] is None else f"{r['avail'] / 1e3:,.0f}K"), "s": "HTB — 빌릴 주식 없음" if htb else "IBKR"},
               {"t": "가격 모멘텀", "v": "-" if r.get("r30") is None else f"{r['r30']:+.2f}%", "s": "1개월 주가 변동률"}])
+    try:  # 🧭 대차 방향(2026-11-01, shortdir.py): IBKR 5거래일 변화 — 기록만 하고 🏆 에서 앞으로 검증
+        import shortdir
+        with closing(db.connect()) as conn:
+            bd = shortdir.label(conn, t)
+        if bd and bd["avail0"] is not None and bd["avail1"] is not None:
+            st.markdown(f"**🧭 대차 방향(IBKR {bd['d0']}→{bd['d1']})** " + ui.chip(bd["label"], {"ib_inflow": "red", "ib_cover": "green"}.get(bd["kind"], "gray"))
+                        + f" 빌릴 수 있는 주식 {bd['avail0']:,.0f}→{bd['avail1']:,.0f}주 · 수수료 {bd['fee0'] or 0:.1f}→{bd['fee1'] or 0:.1f}%", unsafe_allow_html=True)
+    except Exception:  # noqa: BLE001
+        pass
+    st.caption("ℹ️ 공식 공매도 잔고는 **한 달에 2번**(15일·말일 결제일 기준, 약 7영업일 뒤 공개) — 그 사이 매일 바뀌는 건 IBKR 대차 수수료·빌릴 수 있는 주식이에요. "
+               "일별 공매도 거래량(숏볼륨)은 잔고가 아니고, Reg SHO 목록에 없다고 결제 실패(FTD)가 없다는 뜻도 아니에요.")
     if (r["fee"] or 0) >= 50 or htb:
         st.warning(("대차 수수료 " + (f"{r['fee']:.1f}%" if r["fee"] is not None else "-") + " — 빌리는 비용이 매우 높아 공매도 포지션 유지 부담이 큽니다." if (r["fee"] or 0) >= 50 else "")
                    + (" 가용주식 0 — 새로 빌릴 주식이 없습니다(HTB)." if htb else ""))
