@@ -188,7 +188,8 @@ def brief(conn, cand: dict, regsho: dict | None = None) -> dict:
     rs_ = q("SELECT COUNT(*), MAX(date) FROM rs_events WHERE ticker=? AND date >= ?", (t, (today - timedelta(days=730)).isoformat()))
     if rs_ and rs_[0][0]:
         b["reverse_splits_2y"] = f"{rs_[0][0]}회(최근 {rs_[0][1]})"
-    tr = q("SELECT tier FROM s3_tier_signals WHERE ticker=? AND date >= ? ORDER BY date DESC LIMIT 1", (t, (today - timedelta(days=10)).isoformat()))
+    import setup3 as _s3h   # 보류(🟢 장세·상습 조달)는 순위로 안 줌(2026-10-31)
+    tr = q(f"SELECT tier FROM s3_tier_signals WHERE ticker=? AND date >= ?{_s3h.not_held(conn)} ORDER BY date DESC LIMIT 1", (t, (today - timedelta(days=10)).isoformat()))
     if tr:
         b["s3_tier"] = int(tr[0][0])
     try:  # 🧾 덕구 공시분석(최근 45일 보고서)의 적색경보·런웨이 요약

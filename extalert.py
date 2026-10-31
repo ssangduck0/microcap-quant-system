@@ -31,8 +31,9 @@ def interest(conn, today: date | None = None) -> dict[str, str]:
         add(watch.scanner_priority(), "⭐ 워치리스트·저금통")
     except Exception:  # noqa: BLE001
         pass
+    import setup3
     for sql, why, d in (("SELECT DISTINCT ticker FROM close_watchlist WHERE kind='frozen' AND date >= ?", "🎯 장마감 체크리스트", 3),
-                        ("SELECT DISTINCT ticker FROM s3_tier_signals WHERE date >= ?", "⭐ 깊은 과매도+희석 없음(검증 순위)", 7),
+                        ("SELECT DISTINCT ticker FROM s3_tier_signals WHERE date >= ?" + setup3.not_held(conn), "⭐ 깊은 과매도+희석 없음(검증 순위)", 7),   # 보류(U1·U2) 제외
                         ("SELECT DISTINCT ticker FROM setup3_signals WHERE date >= ?", "✅ 3대 조건 신호", 7),
                         ("SELECT DISTINCT ticker FROM pt_trades WHERE status='open' AND day >= ?", "🧪 가상매매 보유", 30)):
         try:

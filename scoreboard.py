@@ -36,6 +36,9 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "s3_t1": ("⭐ 1순위 · RSI≤20 + 희석 없음", 1, 30.0, 40),   # 반등형(기본 40거래일 안 +30%, 관리 모드에서 변경)
     "s3_t2": ("2순위 · RSI≤25 + 희석 없음", 1, 30.0, 40),
     "s3_t3": ("3순위 · 과매도 + 희석 없음(참고)", 1, 30.0, 40),
+    # 2026-10-31 개선(U1 🟢 장세 · U2 상습 조달): 보류된 1·2순위도 같은 기준으로 재서 '보류가 맞았나' 검증(보류 쪽 성공률이 낮아야 맞음)
+    "s3_h1": ("⏸ 보류(🟢 장세·상습 조달) · RSI≤20 + 희석 없음 — 낮아야 맞음", 1, 30.0, 40),
+    "s3_h2": ("⏸ 보류(🟢 장세·상습 조달) · RSI≤25 + 희석 없음 — 낮아야 맞음", 1, 30.0, 40),
     "cx_si_up": ("📡 공매도 잔고 보고 +30%↑(ChartExchange)", 1, 30.0, 10),      # 숏이 급히 쌓인 뒤 10거래일 안 +30%(스퀴즈 가설) — 신호일 = 자료 받은 날
     "cx_ftd_spike": ("📡 FTD 급증(20일 평균 3배↑)", 1, 30.0, 10),
     "toxic_drop": ("⚠️ 대폭 할인 전환(40%↑) → 60일 안 −50%", -1, 50.0, 60),     # 내림 예측: 저가가 −50% 에 닿으면 성공(OMH 패턴 검증)
@@ -119,9 +122,12 @@ def collect(conn) -> pd.DataFrame:
         import config as _cfgA
         add({"높음": "ai_hi", "중간": "ai_mid"}.get(r["confidence"], "ai_lo"), r["date"], r["ticker"], r["price"], note=f"{r['rank']}위 · {r['timing']}",
             horizon=int(_cfgA.AI_PICK_HORIZON))
-    for r in _q(conn, "SELECT date, ticker, price, tier, rsi, note FROM s3_tier_signals"):
+    _tiers = _q(conn, "SELECT date, ticker, price, tier, rsi, note, hold FROM s3_tier_signals") or _q(conn, "SELECT date, ticker, price, tier, rsi, note FROM s3_tier_signals")
+    for r in _tiers:
         import config as _cfgT  # 반등형: 보유 기간·익절 % 는 관리 모드 설정(기본 20거래일 안 +30%)
-        add(f"s3_t{int(r['tier'])}", r["date"], r["ticker"], r["price"], note=(f"RSI {r['rsi']:.0f}" if r["rsi"] is not None else "") + f" · 반등형 {_cfgT.TIER_HOLD_DAYS}일",
+        held = bool(r.get("hold")) and int(r["tier"]) in (1, 2)
+        add(f"s3_{'h' if held else 't'}{int(r['tier'])}", r["date"], r["ticker"], r["price"],
+            note=(f"RSI {r['rsi']:.0f}" if r["rsi"] is not None else "") + f" · 반등형 {_cfgT.TIER_HOLD_DAYS}일" + (f" · 보류: {r['hold']}" if held else ""),
             target=float(_cfgT.TIER_TARGET), horizon=int(_cfgT.TIER_HOLD_DAYS))
     for r in _q(conn, "SELECT date, ticker, kind, price, note FROM chart_signals"):   # 📐 스승 관점
         if r["kind"] in CHART_SRC:

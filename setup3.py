@@ -163,6 +163,59 @@ def marks(tickers, px: dict, conn) -> dict[str, dict]:
     return out
 
 
+# 2026-10-31 개선(사용자 승인 · docs/upgrade_tier_2026-10-31.md): ⭐ 1·2순위 '보류' 규칙 — 목록엔 회색으로 남고 1·2순위로 세지 않음(🏆 엔 보류로 따로 기록해 계속 검증)
+#  U1 🟢 장세(조용한 시장) 날엔 보류: 2년 검증 RSI≤25+③ 🟢 날 기대값 +0.13%(2024-25)·−1.29%(2026) vs 🟡·🔴 날 +5.42%·+4.09% · 분기 6개 중 5개에서 🟡·🔴 우세 ·
+#     🟢 신호는 짧은 목표 11가지로도 2026 에 모두 손실 → 살리지 않고 보류
+#  U2 그날 전 1년 회사 조달 서류(424B·S-1/S-3·8-K 3.02) 4건↑ = 상습 조달 → 보류: 기대값 비슷, 2026 −20%↓ 30.8 → 27.2% · 위험 대비 0.122 → 0.173
+HOLD_LIGHTS = ("green",)
+HABIT_MAX = 4
+RAISE_FORMS = ("424B1", "424B2", "424B4", "424B5", "424B7", "S-1", "S-3", "F-1", "F-3")
+
+
+def regime_light(conn=None, as_of: str | None = None) -> str | None:
+    """그날 장세 색(green·yellow·red). as_of 가 있으면 🎲 presim 날짜별 장세 표에서 그날 이전 가장 가까운 날, 없으면 지금 장세(🚦)."""
+    if as_of is None:
+        try:
+            import regime
+            lt = (regime.get() or {}).get("light")
+            if lt:
+                return lt
+        except Exception:  # noqa: BLE001
+            pass
+    if conn is None:
+        return None
+    try:
+        r = conn.execute("SELECT light FROM presim_regime WHERE date <= ? ORDER BY date DESC LIMIT 1", ((as_of or date.today().isoformat())[:10],)).fetchone()
+        return r[0] if r else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def habit_count(t: str, conn, as_of: str | None = None) -> int:
+    """그날 전 1년 회사 조달 서류 수(424B 공모 · S-1/S-3 등록 · 8-K 3.02)."""
+    end = (as_of or date.today().isoformat())[:10]
+    start = (date.fromisoformat(end) - timedelta(days=365)).isoformat()
+    try:
+        rows = conn.execute("SELECT form, COALESCE(items,'') FROM sec_hist WHERE ticker=? AND filed >= ? AND filed < ?", (t.upper(), start, end)).fetchall()
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for fm, it in rows if str(fm).upper() in RAISE_FORMS or (str(fm).upper().startswith("8-K") and "3.02" in str(it)))
+
+
+def tier_hold(t: str, tr: int | None, conn, as_of: str | None = None, light: str | None = None) -> str:
+    """⭐ 1·2순위를 보류할 이유('' = 보류 아님). 3순위(참고)는 그대로."""
+    if tr not in (1, 2) or conn is None:
+        return ""
+    why = []
+    lt = light if light is not None else regime_light(conn, as_of)
+    if lt in HOLD_LIGHTS:
+        why.append("🟢 조용한 장세")
+    n = habit_count(t, conn, as_of)
+    if n >= HABIT_MAX:
+        why.append(f"상습 조달(1년 {n}번)")
+    return " · ".join(why)
+
+
 def tier(rsi, oversold: bool, dil_ok) -> int | None:
     """검증된 순위(1이 가장 좋음). 희석 서류가 있거나 모르면 순위 없음."""
     if dil_ok is not True:
@@ -176,7 +229,7 @@ def tier(rsi, oversold: bool, dil_ok) -> int | None:
     return None
 
 
-def evaluate(t: str, daily: pd.DataFrame | None, conn=None, intra60: pd.DataFrame | None = None, as_of: str | None = None) -> dict:
+def evaluate(t: str, daily: pd.DataFrame | None, conn=None, intra60: pd.DataFrame | None = None, as_of: str | None = None, light: str | None = None) -> dict:
     """세 조건 판정. as_of 를 주면 daily 는 그날까지로 잘라서 넘겨야 함(타임머신이 처리)."""
     m = money_flow(daily)
     m60 = money_flow(intra60) if intra60 is not None else None
@@ -184,8 +237,11 @@ def evaluate(t: str, daily: pd.DataFrame | None, conn=None, intra60: pd.DataFram
     dl = dilution_absent(t, conn, as_of) if conn is not None else {"ok": None, "n": 0, "recent": [], "label": "확인 안 함"}
     oks = [m["ok"], s["ok"], dl["ok"]]
     n_ok = sum(1 for x in oks if x)
-    tr = tier(s.get("rsi"), s["oversold"], dl["ok"])
-    return {"ticker": t, "money": m, "money60": m60, "support": s, "dilution": dl, "n_ok": n_ok, "tier": tr, "tier_name": TIER_NAMES.get(tr, ""),
+    raw = tier(s.get("rsi"), s["oversold"], dl["ok"])
+    hold = tier_hold(t, raw, conn, as_of, light)
+    tr = None if hold else raw
+    name = f"⏸ 보류 · {TIER_NAMES[raw]} — {hold}" if hold else TIER_NAMES.get(tr, "")
+    return {"ticker": t, "money": m, "money60": m60, "support": s, "dilution": dl, "n_ok": n_ok, "tier": tr, "tier_raw": raw, "tier_hold": hold, "tier_name": name,
             "all": bool(all(x for x in oks)), "verdict": "✅ 3대 조건 충족" if all(x for x in oks) else (
                 "❌ 희석 있음" if dl["ok"] is False else f"{n_ok}/3 충족")}
 
@@ -213,11 +269,12 @@ def candidates(conn, days: int = 7, limit: int = 400) -> list[str]:
 def scan(conn, prices: dict, tickers: list[str]) -> list[dict]:
     """종목별 세 조건 판정(일봉 기준). 충족 수 많은 순 → 강한 유입 → 희석 없음."""
     out = []
+    light = regime_light(conn)   # 장세는 한 번만 읽음(종목마다 같음)
     for t in tickers:
         df = prices.get(t)
         if df is None or df.empty:
             continue
-        r = evaluate(t, df, conn)
+        r = evaluate(t, df, conn, light=light)
         r["price"] = float(df["Close"].dropna().iloc[-1])
         out.append(r)
     out.sort(key=lambda r: (-(r["tier"] or 9), r["all"], r["n_ok"], bool(r["dilution"]["ok"]), r["money"]["strong"], r["money"]["obv_ratio"] or -9), reverse=True)
@@ -227,16 +284,32 @@ def scan(conn, prices: dict, tickers: list[str]) -> list[dict]:
 TIER_DDL = "CREATE TABLE IF NOT EXISTS s3_tier_signals (date TEXT, ticker TEXT, price REAL, tier INTEGER, rsi REAL, note TEXT, PRIMARY KEY (date, ticker))"
 
 
-def record_tiers(conn, rows: list[dict], today: date | None = None) -> int:
-    """검증 순위(1~3) 종목을 🏆 성과 공표용으로 기록 — 같은 종목은 10일에 한 번."""
-    today = today or date.today()
+def ensure_tiers(conn) -> None:
     conn.execute(TIER_DDL)
+    if "hold" not in {r[1] for r in conn.execute("PRAGMA table_info(s3_tier_signals)")}:   # 2026-10-31: 보류 이유(U1·U2) — 비면 정상 순위
+        conn.execute("ALTER TABLE s3_tier_signals ADD COLUMN hold TEXT")
+
+
+def not_held(conn) -> str:
+    """보류(⏸) 신호를 빼는 SQL 조각 — 옛 표(hold 칸이 아직 없음: 배포 뒤 첫 아침 갱신 전)면 빈 문자열."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(s3_tier_signals)")}
+    except Exception:  # noqa: BLE001
+        return ""
+    return " AND COALESCE(hold,'')=''" if "hold" in cols else ""
+
+
+def record_tiers(conn, rows: list[dict], today: date | None = None) -> int:
+    """검증 순위(1~3) 종목을 🏆 성과 공표용으로 기록 — 같은 종목은 10일에 한 번. 보류된 1·2순위도 hold 이유와 함께 기록(🏆 에서 따로 검증)."""
+    today = today or date.today()
+    ensure_tiers(conn)
     recent = {r[0] for r in conn.execute("SELECT ticker FROM s3_tier_signals WHERE date >= ?", ((today - timedelta(days=10)).isoformat(),))}
     n = 0
     for r in rows:
-        if r.get("tier") and r["ticker"] not in recent and r.get("price"):
-            conn.execute("INSERT OR IGNORE INTO s3_tier_signals VALUES (?,?,?,?,?,?)",
-                         (today.isoformat(), r["ticker"], r["price"], r["tier"], r["support"].get("rsi"), r["dilution"]["label"][:60]))
+        tr = r.get("tier") or (r.get("tier_raw") if r.get("tier_hold") else None)
+        if tr and r["ticker"] not in recent and r.get("price"):
+            conn.execute("INSERT OR IGNORE INTO s3_tier_signals (date, ticker, price, tier, rsi, note, hold) VALUES (?,?,?,?,?,?,?)",
+                         (today.isoformat(), r["ticker"], r["price"], tr, r["support"].get("rsi"), r["dilution"]["label"][:60], r.get("tier_hold") or None))
             n += 1
     conn.commit()
     return n

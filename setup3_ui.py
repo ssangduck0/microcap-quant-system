@@ -57,14 +57,18 @@ def render_now() -> None:
         st.info("판정할 종목이 없어요. 스캐너가 돌면 최근 7일에 본 종목($20 미만)과 워치리스트를 판정해요.")
         return
     full = [r for r in rows if r["all"]]
-    tiered = [r for r in rows if r.get("tier")]
+    tiered = [r for r in rows if r.get("tier") or r.get("tier_hold")]   # 보류(⏸)도 회색으로 함께
     import config as _cfg
     st.info("🕰 **검증 순위**(타임머신 3,000종목·2년, 2024·2025·2026 모두 기준보다 좋음): ⭐ 1순위 RSI≤20+희석 없음 · 2순위 RSI≤25+희석 없음 · 3순위 과매도+희석 없음. "
             "단타보다 **반등형**이 맞아요 — 1순위 기대값(+30% 익절·−20% 손절) 5일 +2.2% → 10일 +3.7% → 20일 +4.3% → 40일 +6.1%, 나쁜 해였던 2026년에도 40일 +4.2%(아무 종목 +0.1%). "
             "3순위는 비용(약 2%)을 빼면 거의 0이라 참고용이에요. "
             f"지금 기준: **{_cfg.TIER_HOLD_DAYS}거래일 보유 · +{_cfg.TIER_TARGET:g}% 익절 · {_cfg.TIER_STOP:g}% 손절**(관리 모드에서 변경). 비용(왕복 1~5%) 빼기 전.")
+    held = [r for r in rows if r.get("tier_hold")]
+    lt = s3.regime_light()
+    st.caption(f"⏸ **보류 규칙(2026-10-31 개선)**: 1·2순위라도 🟢 조용한 장세 날이거나 1년 조달 서류 4건↑(상습 조달)이면 보류 — 2년 검증에서 🟢 날 신호는 기대값 −1.3%(2026), "
+               f"🟡·🔴 날은 +4.1%. 지금 장세: {({'green': '🟢 조용함 — 1·2순위 보류 중', 'yellow': '🟡 주의', 'red': '🔴 불안'}).get(lt, '확인 못 함')}. 보류 종목은 '검증 순위' 보기에 회색으로 남아요.")
     ui.cards([{"t": "⭐ 1순위", "v": f"{sum(1 for r in rows if r.get('tier') == 1)}", "accent": True}, {"t": "2순위", "v": f"{sum(1 for r in rows if r.get('tier') == 2)}"},
-              {"t": "3순위", "v": f"{sum(1 for r in rows if r.get('tier') == 3)}"}])
+              {"t": "3순위", "v": f"{sum(1 for r in rows if r.get('tier') == 3)}"}, {"t": "⏸ 보류", "v": f"{len(held)}", "s": "🟢 장세·상습 조달"}])
     ui.cards([{"t": "판정 종목", "v": f"{len(rows)}"}, {"t": "✅ 3대 조건 충족", "v": f"{len(full)}"},
               {"t": "💰 강한 유입", "v": f"{sum(1 for r in rows if r['money']['ok'])}"}, {"t": "❌ 희석 있음", "v": f"{sum(1 for r in rows if r['dilution']['ok'] is False)}"}])
     view = st.radio("보기", ["검증 순위(1~3)만", "3대 조건 충족만", "전체"], index=0 if tiered else (1 if full else 2), horizontal=True, key="s3_view",
