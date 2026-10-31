@@ -156,6 +156,22 @@ def lead_of(text: str, max_chars: int = 520) -> str:
     return out or body[:max_chars]
 
 
+def _lead_from(client, idx: str, form: str) -> str:
+    """대소문자를 살린 주 문서(iXBRL '/ix?doc=' 포함)에서 핵심 문장 — 없고 6-K 면 EX-99 보도자료에서. 가짜 클라이언트(fetch_raw 없음)는 빈칸."""
+    raw_fn = getattr(client, "fetch_raw", None)
+    if raw_fn is None:
+        return ""
+    import rsplit
+    import sec
+    links = rsplit.doc_links(idx)
+    tries = links[:1] + (rsplit.ex99_links(links)[:1] if form.upper().startswith("6-K") else [])
+    for ln in tries:
+        lead = lead_of(sec.html_to_text(raw_fn("https://www.sec.gov" + ln, 200_000), lower=False))
+        if lead:
+            return lead
+    return ""
+
+
 def enrich(client, limit: int = 15) -> int:
     """본문 키워드로 다시 판정(공시 목록 페이지 → 주 문서). 아직 안 본 최근 공시부터 limit건."""
     done = 0
@@ -170,14 +186,20 @@ def enrich(client, limit: int = 15) -> int:
         rest = [r for r in cand if not is_noise(r["form"], r["ticker"], core)]
         rows = sorted(rest, key=lambda r: str(r["ticker"] or "").upper() not in core)[:limit]   # 우리 종목 먼저(같은 무리 안은 최신순 그대로 — 안정 정렬)
         for r in rows:
-            text = ""
+            text, lead = "", ""
             try:
                 idx = client._get(r["url"]).text
+                # 판정용 본문 = 목록 페이지의 첫 '/Archives/…' 링크. iXBRL 공시(요즘 8-K 대부분)는 주 문서가 '/ix?doc=' 링크라 실제로는 첫 첨부(보도자료·계약서)나 전체 묶음 .txt 를 읽음(2026-10-31 확인).
+                # 주 문서로 바꾸면 70건 중 24건 판정이 바뀌는데 실적 공시는 주 문서가 껍데기·내용은 EX-99 라 나아지는지 모름 → 이벤트 연구 주가 반응으로 검증하기 전까진 그대로(HANDOFF ③)
                 m = re.search(r'href="(/Archives/edgar/data/[^"]+\.(?:htm|html|txt))"', idx, re.I)
                 if m and "-index" not in m.group(1):
                     text = client.fetch_text("https://www.sec.gov" + m.group(1), limit=200_000)
             except Exception:  # noqa: BLE001
                 pass
+            try:   # 핵심 문장은 대소문자를 살린 주 문서에서(6-K 는 표지뿐이면 EX-99 보도자료) — 판정엔 안 쓰임
+                lead = _lead_from(client, idx, r["form"]) if text else ""
+            except Exception:  # noqa: BLE001
+                lead = ""
             if text and len(text) < 4000 and r["form"].upper().startswith("6-K"):   # 6-K 표지뿐이면 첨부(보도자료)까지 읽어 태그·병합 판정(C단계)
                 try:
                     import rsplit
@@ -186,7 +208,7 @@ def enrich(client, limit: int = 15) -> int:
                     pass
             sc, tags, sent = classify(r["form"], [x for x in (r["items"] or "").split(",") if x], text)
             conn.execute("UPDATE sec_feed SET tags=?, score=?, sentiment=?, lead=?, enriched=1 WHERE accession=?",
-                         (json.dumps(tags, ensure_ascii=False), sc, sent, lead_of(text), r["accession"]))
+                         (json.dumps(tags, ensure_ascii=False), sc, sent, lead or lead_of(text), r["accession"]))
             conn.commit()   # 2026-10-30: 바로 확정 — 예전엔 끝까지 안 해서 ① 다음 공시들을 SEC 에서 받는 내내 쓰기 잠금 ② 아래 listing.save(새 연결)가
             #                  자기 자신에게 막혀 30초 뒤 조용히 실패 → 10월 피드의 상장유지 통지(3.01) 38건이 하나도 저장 안 됐음
             try:  # 💰 펀드스캔: 실시간 자금조달 공시는 바로 해석
@@ -209,9 +231,14 @@ def enrich(client, limit: int = 15) -> int:
                     info = rsplit.upcoming_from_text(text)
                     if not info and len(text) < 4000:   # 6-K 표지만 있고 내용은 EX-99 보도자료인 경우
                         info = rsplit.upcoming_from_text(rsplit.filing_text(client, r["url"]))
+                    elif not info and ("주식 병합" in tags or "5.03" in (r["items"] or "")):
+                        # 2026-10-31: 위 본문이 첨부(정관 변경 증서 EX-3.1 등)라 시행일 문장이 없던 것 — ATYR 10/27 8-K(1:40, 10/29 시행)를 놓쳐
+                        # 🔍 부검·🩹 계단 수리가 비율을 몰랐음. 병합 공시만 주 문서 + EX-99 로 다시 읽음(최근 30일 재 보니 새로 잡힘 ATYR·HCTI)
+                        info = rsplit.upcoming_from_text(rsplit.filing_text(client, r["url"], min_main=10**9))
                     if info:
                         tk3 = conn.execute("SELECT ticker, filed FROM sec_feed WHERE accession=?", (r["accession"],)).fetchone()
-                        rsplit.record_upcoming(conn, tk3["ticker"], info, f"{r['form']} {tk3['filed'] or ''} {r['url']}".strip())
+                        if rsplit.record_upcoming(conn, tk3["ticker"], info, f"{r['form']} {tk3['filed'] or ''} {r['url']}".strip()):
+                            conn.commit()   # 예전엔 확정이 없어 다음 공시의 확정에 기대고 있었음(마지막 공시면 잃음)
                 except Exception:  # noqa: BLE001
                     pass
             if "3.01" in (r["items"] or "") and text:  # 🏛 상장유지 미달 통지: 기준 종류·회복 기한

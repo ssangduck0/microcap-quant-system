@@ -243,6 +243,15 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
                 out(f"공시 티커 고침: {_n}행(한 회사 여러 티커 → 보통주 티커로)")
     except Exception as e:  # noqa: BLE001
         log.exception("공시 티커 고침 실패: %s", e)
+    try:  # 2026-10-31: 병합 일정 한 번 다시 읽기 — 스캐너가 병합 공시를 첨부(EX-3.1 등)로 읽어 ATYR 1:40 같은 시행일을 놓쳤던 것(주 문서 + EX-99 로) · 🩹 계단 수리보다 먼저
+        import rsplit as _rsB
+        import sec as _secB
+        if "@" in config.SEC_USER_AGENT and db.get_meta("rs_upcoming_refill_v2") is None:
+            _rb = _rsB.backfill_upcoming(_secB.SecClient(config.SEC_USER_AGENT), days=30, out=lambda *_: None, only_tagged=True, min_main=10**9)
+            db.set_meta("rs_upcoming_refill_v2", date.today().isoformat())
+            out(f"병합 일정 다시 읽기(한 번): 병합 공시 {_rb['read']}건 · 새 시행일 {_rb['new']}건")
+    except Exception as e:  # noqa: BLE001
+        log.exception("병합 일정 다시 읽기 실패: %s", e)
     try:  # 2026-10-30: 공시 이력(sec_hist)이 10/15 백필에서 멈춰 있던 것 → 스캐너 피드(sec_feed)를 매일 합침(수집기·presim/타임머신 희석 깃발·📚 플래그가 새 공시를 보게)
         import secbackfill
         out(f"공시 이력 동기화: 피드에서 {secbackfill.sync_from_feed(conn):,}건 추가")

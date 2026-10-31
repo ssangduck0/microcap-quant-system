@@ -119,15 +119,24 @@ def upcoming_from_text(text: str, today: date | None = None) -> dict | None:
     return {"date": d.isoformat(), "ratio": ratio}
 
 
+def doc_links(idx: str) -> list[str]:
+    """공시 목록 페이지의 문서 경로들(첫 번째 = 주 문서). iXBRL 주 문서는 '/ix?doc=/Archives/…' 링크라 그것도 셈 · 목록 페이지 자신(-index)은 뺌."""
+    return [m.group(1) for m in re.finditer(r'href="(?:/ix\?doc=)?(/Archives/edgar/data/[^"]+?\.(?:htm|html|txt))"', idx, re.I) if "-index" not in m.group(1)]
+
+
+def ex99_links(links: list[str]) -> list[str]:
+    return [x for x in links[1:4] if re.search(r"ex[-_]?99|ex99|press", x, re.I)][:2]
+
+
 def filing_text(client, index_url: str, min_main: int = 4000) -> str:
-    """공시 목록 페이지 → 주 문서 본문. 주 문서가 짧으면(6-K 표지 등) EX-99 첨부(보도자료)도 이어 붙인다."""
+    """공시 목록 페이지 → 주 문서 본문. 주 문서가 짧으면(6-K 표지 등) EX-99 첨부(보도자료)도 이어 붙인다(min_main 을 크게 주면 항상)."""
     idx = client._get(index_url).text
-    links = [m.group(1) for m in re.finditer(r'href="(?:/ix\?doc=)?(/Archives/edgar/data/[^"]+?\.(?:htm|html|txt))"', idx, re.I) if "-index" not in m.group(1)]
+    links = doc_links(idx)
     if not links:
         return ""
     text = client.fetch_text("https://www.sec.gov" + links[0], limit=200_000) or ""
     if len(text) < min_main:
-        for ln in [x for x in links[1:4] if re.search(r"ex[-_]?99|ex99|press", x, re.I)][:2]:
+        for ln in ex99_links(links):
             try:
                 text += " " + (client.fetch_text("https://www.sec.gov" + ln, limit=200_000) or "")
             except Exception:  # noqa: BLE001
@@ -158,18 +167,22 @@ def record_upcoming(conn, ticker: str, info: dict, source: str, origin: str = "s
         return False
 
 
-def backfill_upcoming(client, days: int = 30, limit: int = 400, out=print) -> dict:
-    """1회 소급: 최근 days 일 공시 피드의 8-K/6-K 중 '주식 병합' 태그·5.03 항목이 있는 것의 본문을 다시 읽어 시행일을 기록(스캐너는 새 공시부터 자동)."""
+def backfill_upcoming(client, days: int = 30, limit: int = 400, out=print, only_tagged: bool = False, min_main: int = 4000) -> dict:
+    """1회 소급: 최근 days 일 공시 피드의 8-K/6-K 중 '주식 병합' 태그·5.03 항목이 있는 것의 본문을 다시 읽어 시행일을 기록(스캐너는 새 공시부터 자동).
+    only_tagged: '주식 병합' 태그·5.03 만(6-K 전부를 읽지 않음) · min_main: 주 문서가 이보다 짧으면 EX-99 도 붙임(크게 주면 항상)."""
     since = (date.today() - timedelta(days=days)).isoformat()
     n_read = n_new = 0
     with closing(db.connect()) as conn:
         rows = [dict(r) for r in conn.execute("""SELECT accession, ticker, form, filed, items, url, tags FROM sec_feed
                                                  WHERE COALESCE(filed, substr(updated,1,10)) >= ? AND (form LIKE '8-K%' OR form LIKE '6-K%' OR form LIKE '424B%' OR form LIKE 'DEF 14%' OR form LIKE 'PRE 14%')
                                                  ORDER BY filed DESC""", (since,))]
-        rows = [r for r in rows if r["form"].upper().startswith("6-K") or "5.03" in (r["items"] or "") or "8.01" in (r["items"] or "") or "주식 병합" in (r["tags"] or "")][:limit]   # 6-K 는 항목·태그가 없어 전부 · 424B/주총 서류는 '주식 병합' 태그 있는 것만
+        if only_tagged:
+            rows = [r for r in rows if "5.03" in (r["items"] or "") or "주식 병합" in (r["tags"] or "")][:limit]
+        else:
+            rows = [r for r in rows if r["form"].upper().startswith("6-K") or "5.03" in (r["items"] or "") or "8.01" in (r["items"] or "") or "주식 병합" in (r["tags"] or "")][:limit]   # 6-K 는 항목·태그가 없어 전부 · 424B/주총 서류는 '주식 병합' 태그 있는 것만
         for r in rows:
             try:
-                text = filing_text(client, r["url"])
+                text = filing_text(client, r["url"], min_main=min_main)
             except Exception:  # noqa: BLE001
                 continue
             if not text:

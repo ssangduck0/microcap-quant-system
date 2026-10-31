@@ -122,11 +122,13 @@ class SecClient:
 
 
 # ------------------------------------------------------------------ text helpers
-def html_to_text(raw: str) -> str:
+def html_to_text(raw: str, lower: bool = True) -> str:
+    """lower=False: 대소문자 그대로(공시 피드 '핵심 문장' 발췌용 — 2026-10-31: 소문자 본문에선 'On October …' 를 못 찾아 1,690건 전부 빈칸이었음)."""
     raw = re.sub(r"(?is)<ix:header>.*?</ix:header>", " ", raw)
     raw = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
     txt = re.sub(r"(?s)<[^>]+>", " ", raw)
-    return re.sub(r"\s+", " ", html.unescape(txt)).lower()
+    txt = re.sub(r"\s+", " ", html.unescape(txt))
+    return txt.lower() if lower else txt
 
 
 def scan_text(text: str, form: str) -> list[str]:
