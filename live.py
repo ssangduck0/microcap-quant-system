@@ -70,6 +70,9 @@ def analyze(m1: pd.DataFrame, daily: pd.DataFrame | None = None, shares: float |
 
 def fetch(t: str) -> dict | None:
     """야후 1분봉(5일, 장전·애프터 포함) + 1년 일봉 + 주식 수(📐) → analyze."""
+    import config
+    if config.OFFLINE:   # 2026-10-31: 테스트 오프라인 모드 — 야후(curl_cffi)는 requests 차단에 안 걸려 테스트가 실제로 접속하던 것
+        return None
     import yfinance as yf
 
     import shares as sh

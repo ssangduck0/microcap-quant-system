@@ -516,7 +516,16 @@ def auto_enqueue(conn, out=print, limit: int = 4, max_age: int = 30, up_n: int =
     q = set(forensic.queue_list())
     fail_after = (date.today() - timedelta(days=RETRY_DAYS)).isoformat()
     new: list[str] = []
+    try:   # 2026-10-31: 리포트 뒤 🔴 새 물량 공시(424B·EFFECT·3.02)가 온 종목을 새 종목보다 먼저(최대 2) — 하루 3종목 예산을 바뀐 종목에(김곰 '재분석 필요' 참고)
+        import reanalyze
+        for t in reanalyze.stale(conn, limit=2):
+            if t not in q and (db.get_meta(f"forensic_ai_fail:{t}") or {}).get("value", "") < fail_after:
+                new.append(t)
+    except Exception:  # noqa: BLE001
+        pass
     for t in dict.fromkeys(str(x).upper() for x in cands if x):
+        if t in new:
+            continue
         if t in have or t in q:
             continue
         if (db.get_meta(f"forensic_ai_fail:{t}") or {}).get("value", "") >= fail_after:

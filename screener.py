@@ -39,6 +39,9 @@ def ensure(conn) -> None:
 def fetch_earnings(t: str, yf_ticker=None) -> dict:
     """다음 실적 발표일 · 매출/EPS 컨센서스 · 직전 분기 매출/EPS(없으면 None)."""
     out = {"next_date": None, "rev_avg": None, "rev_low": None, "rev_high": None, "eps_avg": None, "last_q": None, "last_rev": None, "last_eps": None}
+    import config
+    if yf_ticker is None and config.OFFLINE:   # 2026-10-31: 테스트 오프라인 모드에선 야후 접속 안 함(가짜 yf_ticker 를 넘긴 테스트는 그대로)
+        return out
     try:
         if yf_ticker is None:
             import yfinance as yf

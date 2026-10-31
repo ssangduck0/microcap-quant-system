@@ -70,6 +70,10 @@ def render(t: str, b: dict | None = None) -> None:
     st.markdown(ui.verdict("🧭 " + sm["label"], sm["text"], color=sm["color"]), unsafe_allow_html=True)
     if v.get("forensic"):
         st.caption(f"🧾 공시분석 한 줄({v['forensic']['as_of']}): {v['forensic']['one_liner']}")
+    import reanalyze
+    bd = reanalyze.badge(v.get("reanalyze") or {})
+    if bd:
+        st.markdown(ui.chip(bd, "red" if v["reanalyze"]["level"] == "red" else "orange"), unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1.container(border=True):
         st.markdown("**🎯 주가를 올려야 하는 이유**", help="회사가 주가를 올려야 풀리는 일들 — 필요한 주가·기한·근거. 주총·역분할 자체는 상승 이유로 치지 않아요.")

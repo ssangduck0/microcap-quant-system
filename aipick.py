@@ -244,7 +244,7 @@ def spent_usd(month: str | None = None) -> float:
 
 
 KINDS = {"pick": "🤖 AI PICK(아침 판단)", "forensic": "🧾 공시분석(11섹션 + 📰 요약)", "review": "🔍 Claude 복기(주 1회)", "card": "📇 스크리너 카드",
-         "digest": "📨 공시 요약(Haiku)", "translate": "🌐 뉴스 번역(Haiku)", "summary": "🏢 종목 AI 요약", "other": "기타(빈 답 등)"}
+         "digest": "📨 공시 요약(Haiku)", "translate": "🌐 뉴스 번역(Haiku)", "summary": "🏢 종목 AI 요약", "desc": "🏢 기업 설명(Haiku, 종목당 한 번)", "other": "기타(빈 답 등)"}
 SAVE_HINT = {"forensic": "관리 모드 '서버 공시분석 하루 종목 수'(FORENSIC_PER_RUN)를 줄이거나 자동 대기열을 끄면 가장 크게 줄어요",
              "card": "스크리너 카드는 버튼을 누를 때만 만들어지니 필요한 종목만", "pick": "AI PICK 모델을 Haiku 로 바꾸면 1/20 비용",
              "review": "주 1회라 거의 안 듦", "digest": "공시 요약 대상 폼을 줄이기", "translate": "뉴스 번역 건수 제한", "summary": "종목 AI 요약은 손으로 누를 때만"}

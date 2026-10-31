@@ -269,11 +269,18 @@ def build(t: str, b: dict | None = None, conn=None) -> dict:
             stats = json.loads((db.get_meta("fin_stats") or {}).get("value") or "{}")
         except ValueError:
             stats = {}
+        try:   # 🧾 재분석 필요(리포트 뒤 새 물량·공시)
+            import reanalyze
+            r0 = conn.execute("SELECT MAX(created_at) FROM forensic_reports WHERE ticker=?", (t,)).fetchone()
+            rean = reanalyze.need(conn, t, str(r0[0])[:10] if r0 and r0[0] else None)
+        except Exception:  # noqa: BLE001
+            rean = {"level": None}
     finally:
         if own:
             conn.close()
     return {"ticker": t, "purposes": purposes, "fin": fin, "flow": fl, "summary": summary(purposes, fin, fl),
-            "forensic": ({"one_liner": fs.get("one_liner"), "as_of": fs.get("as_of")} if fs and fs.get("one_liner") else None), "fin_stats": stats}
+            "forensic": ({"one_liner": fs.get("one_liner"), "as_of": fs.get("as_of")} if fs and fs.get("one_liner") else None), "fin_stats": stats,
+            "reanalyze": rean}
 
 
 # ---------------------------------------------------------------- 검증: 아침마다 기록 → 30일 안 실제 조달과 맞춰 봄

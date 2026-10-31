@@ -522,6 +522,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         shortint.refresh(shortint.priority(700), max_n=700, out=out)
     except Exception as e:  # noqa: BLE001
         log.exception("공매도 잔고 받기 실패: %s", e)
+    try:  # 🏢 기업 설명(2026-10-31): 워치리스트·PICK·AI PICK·급상승 중 설명 없는 종목 하루 40개(Haiku 약 1원/종목, AI 예산 안)
+        import companydesc
+        companydesc.morning(out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("기업 설명 실패: %s", e)
     try:  # 🏦 현금조달 가능성 기록(2026-10-31) — 관심 종목(최신 스냅샷)마다 높음/중간/낮음 → 30일 뒤 실제 조달과 맞춰 보는 검증 재료
         import verdict
         verdict.log_daily(conn, out=out)

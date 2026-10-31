@@ -77,6 +77,23 @@ def share_chip(hf: dict) -> str:
                    f"직전 두 분기 SEC 표지 {sc['d']} · 검증(10/28): +20% 초과는 60일 뒤 중앙값 −16%·급락 터치 52%, 10~20% 는 −10%·44%, 이내는 −5%·35%")
 
 
+def _desc_box(t: str) -> None:
+    import companydesc
+    d = companydesc.get(t)
+    if d and d.get("ko"):
+        st.markdown(f"<div class='qk-sub' style='margin:2px 0 8px;font-size:.92rem'>🏢 {ui.esc(d['ko'])}</div>", unsafe_allow_html=True)
+        return
+    if access.is_guest():
+        return
+    if st.button("🏢 기업 설명 가져오기(야후 소개 → 한국어, 약 1원)", key=f"desc_{t}"):
+        with st.spinner("가져오는 중…"):
+            r = companydesc.ensure_one(t)
+        if not (r and r.get("ko")):
+            st.caption("야후에 회사 소개가 없거나 AI 예산이 모자라요.")
+        else:
+            st.rerun()
+
+
 def render(t: str) -> None:
     import aisummary
     import watch_ui
@@ -111,6 +128,7 @@ def render(t: str) -> None:
                        ("유통 주식", _fmt_sh(hf["float"])), ("유통 비율", "-" if hf["float_pct"] is None else f"{hf['float_pct']:.1f}%")])
                 + "<div style='margin:4px 0 8px'>" + ui.chip(f"희석 조달 {badge[0]}", badge[1]) + share_chip(hf) + (ui.chip(f"⛔ {_tl}", "red") if _tl else "") + (ui.chip(_tx[0], _tx[1]) if _tx else "") + _cv
                 + "".join(ui.chip(x, "blue") for x in hf["themes"][:3]) + "</div>", unsafe_allow_html=True)
+    _desc_box(t)   # 🏢 기업 설명(2026-10-31): 무슨 회사인지 쉬운 한국어로
     import verdict_ui   # 🧭 종합 판단 카드(2026-10-31, 김곰 워치리스트 참고): 한 줄 판단 · 올려야 하는 이유 · 현금조달 가능성 · 공시 흐름
     verdict_ui.render(t, c)
     with st.expander("⚡ 지금 분석(1분봉 · 장전·정규장·애프터)"):
