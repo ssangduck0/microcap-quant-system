@@ -1,9 +1,9 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🚫 11/1 새벽 3 — 신호 × 장세 성적표 → 병합 예정 매수 보류(사용자 '성적표 먼저' → '굳이 필요할까?' → '1번만 진행' · **배포 필요**)
+> ## 🚫 11/1 새벽 3 — 신호 × 장세 성적표 → 병합 예정 매수 보류(사용자 '성적표 먼저' → '굳이 필요할까?' → '1번만 진행' · ✅ 11/1 04:24 배포·확인)
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
-> | 1 | 배포(사용자) | `python deploy/deploy_from_pc.py` — 이번 코드: rsplit(soon) · piggy · papertrade · broker · drawer · report_dialog · updates (+ test_rs_soon) |
+> | 1 | ~~배포~~ ✅ **11/1 04:24 · Claude 확인 끝(04:30 · 읽기 전용)**: 파일 9개 md5 = PC(bec0d3b) · 서비스 6개 04:24:18~20 재시작, 그 뒤 오류 0 · health 200 · 캐시 데우기 성공 · 📜 배포 줄(파일 412개) · 서버 배포본 테스트 10개(rs_soon·piggy·piggy_auto·papertrade·broker·drawer·report_dialog·rsplit·cases·nav) 통과 · 운영 DB: VCIG(D-1)·UFG(D-2)·NEXR·ONCO·TOPS(D-5) 모두 병합 예정으로 잡히고 서랍 칩 켜짐 · CLRO 는 없음 | 이번 코드: rsplit(soon) · piggy · papertrade · broker · drawer · report_dialog · updates (+ test_rs_soon) |
 > | 2 | 배포 뒤 | 📄 서랍: 병합 7일 안 종목 머리에 '🚫 병합 예정 · 매수 보류' 칩(지금 VCIG·UFG·NEXR·ONCO·TOPS) · 🐷 알림 '매수 보류 — 병합 예정' · 💵 실매매 dry 기록 사유 '병합 예정 …' |
 > | 3 | 12월 초 | `regime_card.py` 다시(🏆 실제 기록 장세별 — 지금은 기간 끝난 날짜 17일뿐) |
 >
