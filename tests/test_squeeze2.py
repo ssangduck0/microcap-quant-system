@@ -40,7 +40,7 @@ assert tb.iloc[0]["티커"] == "BENF" and tb.iloc[0]["대차 가용"] == "0 (HTB
 open(__import__("os").path.join(__import__("tempfile").gettempdir(), "sp_app.py"), "w").write('import sys; sys.path.insert(0,__import__("os").environ["QS_ROOT"])\nimport ui_kit, report_dialog\nui_kit.inject()\nreport_dialog.render("BENF", "short")\n')
 os.environ.pop("QUANT_TEST_PAGE")
 at = AppTest.from_file(__import__("os").path.join(__import__("tempfile").gettempdir(), "sp_app.py"), default_timeout=120).run(); assert not at.exception, [e.value for e in at.exception]
-assert [x.label for x in at.tabs][:2] == ["🧨 공매도", "📌 한눈에"]
+assert [x.label for x in at.tabs][:2] == ["🧨 숏·수급", "📌 한눈에"]
 html = "\n".join(m.value for m in at.markdown); assert "60.74%" in html and "25.65일" in html and "0K" in html and "HTB" in html and "115.37%" in html
 assert any("대차 수수료" in w.value for w in at.warning)
 print("ALL OK")

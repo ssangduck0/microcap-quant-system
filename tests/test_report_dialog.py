@@ -29,10 +29,12 @@ with closing(db.connect()) as conn:
                  "매수 동기": ["공시 없음"], "가격 사다리": ["$1.00 상장 유지선"], "주의사항": ["희석"]}, ensure_ascii=False), now))
     conn.commit()
 from streamlit.testing.v1 import AppTest
-at = AppTest.from_file(__import__("os").path.join(__import__("tempfile").gettempdir(), "dlg_app.py"), default_timeout=120).run(); print("exc:", [e.value for e in at.exception]); assert not at.exception
-assert [x.label for x in at.tabs][:6] == ["📌 한눈에", "⚡ 지금", "🧨 공매도", "🤖 AI 요약", "🔀 교차검증", "🧾 덕구 스캔"]
+_app = os.path.join(tmp, "dlg_app.py")
+open(_app, "w", encoding="utf-8").write(f"import sys; sys.path.insert(0, {os.environ['QS_ROOT']!r})\nimport ui_kit, report_dialog\nui_kit.inject()\nreport_dialog.render('BRNX')\n")   # 전엔 임시 폴더에 남아 있던 파일에 기댐
+at = AppTest.from_file(_app, default_timeout=120).run(); print("exc:", [e.value for e in at.exception]); assert not at.exception
+assert [x.label for x in at.tabs][:8] == ["📌 한눈에", "🧨 숏·수급", "🏦 공급·근거", "🏆 성과·이력", "⚡ 지금", "🤖 AI 요약", "🔀 교차검증", "🧾 덕구 스캔"]   # 2026-11-01 서랍
 html = "\n".join(m.value for m in at.markdown)
-assert "회피" in html and "&#36;0.3M" in html and "📋 핵심 포인트" in html and "[가격 사다리] &#36;1.00 상장 유지선" in html and "qk-flag on" in html
+assert "회피" in html and "&#36;0.3M" in html and "📋 핵심 포인트" in html and "[가격 사다리] &#36;1.00 상장 유지선" in html and "ATM(424B5 보충서)" in html and "qk-drawer" in html
 md = [m.value for m in at.markdown if "BRNX — SEC" in m.value]; assert md and "\\$" not in md[0] or True
 nxt = [b for b in at.button if b.key.endswith("_next")][0]; nxt.click().run(); assert not at.exception
 assert any("\\$1.07" in m.value for m in at.markdown) and any("2 / 4" in m.value for m in at.markdown)      # 다음 섹션 · '$' 는 글자로

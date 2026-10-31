@@ -105,6 +105,28 @@ h1 { font-weight: 800 !important; letter-spacing: -.02em; } h2, h3 { font-weight
 .qk-kv { display: flex; justify-content: space-between; padding: 10px 4px; border-bottom: 1px solid rgba(128,128,128,.18); font-size: .92rem; } .qk-kv b { font-weight: 800; }
 .qk-box { border: 1px solid rgba(128,128,128,.22); border-radius: 14px; padding: 12px 14px; height: 100%; }
 .qk-box .h { font-weight: 800; margin-bottom: 6px; } .qk-box ul { margin: 0; padding-left: 1.1rem; } .qk-box li { font-size: .88rem; margin: 4px 0; opacity: .9; }
+/* 📄 종목 서랍(2026-11-01, 김곰 G1.1 서랍 참고): 리포트 대화상자를 오른쪽 서랍으로 — 표시자(.qk-drawer)가 있는 대화상자에만 적용 */
+[data-testid="stDialog"] [role="dialog"]:has(.qk-drawer) { position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; left: auto !important; margin: 0 !important;
+  width: min(780px, 62vw) !important; max-width: 100vw !important; height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important;
+  overflow-y: auto !important; transform: none !important; border-left: 1px solid rgba(128,128,128,.35) !important;
+  background: inherit !important; padding: 0 4px !important; }  /* 배경은 원래 바깥 상자에 있어 물려받음(라이트·다크 그대로) */
+div[data-testid="stDialog"]:has(.qk-drawer) { background: rgba(0,0,0,.18) !important; }
+@media (max-width: 768px) { [data-testid="stDialog"] [role="dialog"]:has(.qk-drawer) { width: 100vw !important; } .qk-dr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+[data-testid="stDialog"] [role="dialog"]:has(.qk-drawer) [data-baseweb="tab-list"] { gap: 2px; overflow-x: auto; }
+[data-testid="stDialog"] [role="dialog"]:has(.qk-drawer) [data-baseweb="tab"] { padding: 6px 8px !important; font-size: .84rem; }
+.qk-dr-lbl { font-size: .72rem; opacity: .6; } .qk-dr-num { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
+.qk-dr-box { border: 1px solid rgba(128,128,128,.25); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; }
+.qk-dr-box .h { font-size: .78rem; opacity: .65; font-weight: 700; margin-bottom: 6px; }
+.qk-dr-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: .84rem; padding: 5px 0; border-bottom: 1px solid rgba(128,128,128,.14); }
+.qk-dr-row:last-child { border-bottom: none; } .qk-dr-row .d { opacity: .62; font-size: .78rem; text-align: right; flex: 1; }
+.qk-dr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 10px; }
+.qk-dr-grid .c { border: 1px solid rgba(128,128,128,.25); border-radius: 10px; padding: 8px 10px; }
+.qk-ladder { position: relative; height: 64px; margin: 6px 26px 2px; } .qk-ladder .ln { position: absolute; top: 24px; left: 0; right: 0; height: 3px; background: rgba(128,128,128,.35); }
+.qk-ladder .p { position: absolute; top: 0; transform: translateX(-50%); text-align: center; font-size: .72rem; white-space: nowrap; }
+.qk-ladder .p .dot { width: 9px; height: 9px; border-radius: 50%; margin: 3px auto; background: rgba(128,128,128,.7); }
+.qk-ladder .p.now { color: #3678F6; font-weight: 800; } .qk-ladder .p.now .dot { background: #3678F6; } .qk-ladder .p.supply .dot { background: #F76B15; } .qk-ladder .p.line .dot { background: #E5484D; }
+.qk-ladder .p.lo { top: 34px; } .qk-ladder .p.lo .dot { display: none; }
+.qk-tl { display: flex; gap: 12px; font-size: .84rem; padding: 4px 0; } .qk-tl .d { width: 44px; opacity: .55; flex: none; }
 </style>
 """
 
