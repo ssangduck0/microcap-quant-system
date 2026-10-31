@@ -329,7 +329,10 @@ def main(argv: list[str]) -> int:
         return 0
     t0 = time.time()
     r = warm(a.names or None, a.force)
-    print(f"끝 — {sum(1 for v in r.values() if v is not None and v >= 0)}개 만듦 · {sum(1 for v in r.values() if v is None)}개 건너뜀 · {sum(1 for v in r.values() if v == -1)}개 실패 · {time.time() - t0:.0f}초")
+    msg = f"{sum(1 for v in r.values() if v is not None and v >= 0)}개 만듦 · {sum(1 for v in r.values() if v is None)}개 건너뜀 · {sum(1 for v in r.values() if v == -1)}개 실패 · {time.time() - t0:.0f}초"
+    print(f"끝 — {msg}")
+    import jobs
+    jobs.mark("warm", ok=not any(v == -1 for v in r.values()), summary=msg)   # 🛠 운영 현황 ⏱ 일정의 '지난 실행'(2026-10-31)
     return 0
 
 

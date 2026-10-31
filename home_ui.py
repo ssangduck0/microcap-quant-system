@@ -75,6 +75,12 @@ def render(pages: list[tuple], page_obj: dict | None = None) -> None:
         if not access.is_guest():
             _box("🗓 7일 안 일정", b["events"], "#F76B15")
         _box("📖 처음이라면", ["🏁 종합 순위 → 📄 리포트 → 🏢 종목(기업 분석) 순서로 보세요", "용어가 어려우면 📖 가이드북의 용어 사전"], "#30A46C")
+    if not access.is_guest():   # 🛠 운영 현황(2026-10-31): 점검표·자동 작업 일정·작업 기록 — 조용한 고장을 화면에서 바로
+        try:
+            import jobs_ui
+            jobs_ui.render()
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"운영 현황을 그리지 못했어요: {e}")
     st.markdown("### 🧰 도구 바로가기")
     secs = list(dict.fromkeys(p[4] for p in pages if p[0] != "home"))
     for sec in secs:

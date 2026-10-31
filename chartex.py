@@ -423,7 +423,14 @@ def main() -> int:
     with closing(db.connect()) as conn:
         ensure(conn)
         tg = targets(conn, n_si=a.n, n_ftd=min(a.n, 250), n_sv=min(a.n, 300))
-    collect(out=print, budget_s=a.budget * 60, backfill=(a.cmd == "backfill"), tg=tg)
+    from datetime import datetime, timezone
+    import jobs
+    t0, r = datetime.now(timezone.utc), {}
+    try:
+        r = collect(out=print, budget_s=a.budget * 60, backfill=(a.cmd == "backfill"), tg=tg) or {}
+    finally:   # 🛠 운영 현황 📜 작업 기록(2026-10-31)
+        jobs.record("chartex", t0, ok=bool(r) and not r.get("errors"), warn=int(r.get("errors") or 0),
+                    summary=f"공매 수집 · {r.get('tickers', 0)}종목 · 잔고 {r.get('si', 0)} · FTD {r.get('ftd', 0)} · 숏볼륨 {r.get('sv', 0)}" + (f" · 오류 {r['errors']}" if r.get('errors') else ""))
     return 0
 
 

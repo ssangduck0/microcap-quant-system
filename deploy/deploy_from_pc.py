@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -61,8 +62,21 @@ def main() -> int:
     if run(["ssh", SERVER, remote]) != 0:
         print("❌ 서버 적용 실패")
         return 1
+    _record_deploy(n)
     print("✅ 배포 완료 — 위 목록이 모두 active 면 정상이에요")
     return 0
+
+
+def _record_deploy(n: int) -> None:
+    """🛠 운영 현황 📜 작업 기록에 배포 한 줄(2026-10-31) — 실패해도 배포는 성공으로 둠."""
+    try:
+        head = subprocess.run(["git", "-C", str(ROOT), "log", "-1", "--format=%h %s"], capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    except Exception:  # noqa: BLE001
+        head = ""
+    msg = f"배포 · 파일 {n}개" + (f" · 커밋 {head[:80]}" if head else "")
+    b64 = base64.b64encode(msg.encode("utf-8")).decode()
+    code = f"import base64,datetime as d,jobs;jobs.record('deploy',d.datetime.now(d.timezone.utc),summary=base64.b64decode('{b64}').decode('utf-8'))"
+    subprocess.call(["ssh", SERVER, f"cd /home/quant/quant_system && sudo -u quant venv/bin/python -c \"{code}\""])
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ import logging
 import sys
 import time
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -624,9 +624,15 @@ def main() -> int:
             build(conn, active, delisted, args.years, args.threshold, args.chunk, args.rebuild, args.limit)
             status(conn)
         else:
-            active, delisted = case_universe(False)
-            update(conn, active, delisted, args.days, threshold=args.threshold, out=_out)
-            status(conn)
+            import jobs
+            _t0, _ok = datetime.now(timezone.utc), False
+            try:
+                active, delisted = case_universe(False)
+                update(conn, active, delisted, args.days, threshold=args.threshold, out=_out)
+                status(conn)
+                _ok = True
+            finally:   # 🛠 운영 현황(2026-10-31): 📜 작업 기록 한 줄 + 🩺 점검표 숫자(실패해도 남김)
+                jobs.morning_done(_t0, _ok, out=_out)
     return 0
 
 
