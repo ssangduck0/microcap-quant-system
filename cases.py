@@ -522,6 +522,11 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         shortint.refresh(shortint.priority(700), max_n=700, out=out)
     except Exception as e:  # noqa: BLE001
         log.exception("공매도 잔고 받기 실패: %s", e)
+    try:  # 🧨 스퀴즈 순위·대차 감시 목록 매일 저장(2026-10-31: 화면을 열 때만 저장돼 10/26 뒤로 멈춰 있었음) — 새 공매도 잔고를 받은 뒤
+        import squeeze
+        squeeze.daily(out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("스퀴즈 순위 저장 실패: %s", e)
     try:  # 🏆 성과 공표: 모든 예측의 결과 갱신
         import scoreboard
         scoreboard.update(conn, out=out)

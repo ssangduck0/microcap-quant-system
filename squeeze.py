@@ -85,15 +85,40 @@ def rows(r30: dict | None = None) -> list[dict]:
     return sorted(out, key=lambda x: -x["score"])
 
 
-def save_ranks(rs: list[dict], day: str | None = None) -> dict[str, int | None]:
-    """오늘 순위를 저장하고 전날 대비 변화(↑ 양수)를 돌려준다."""
+def save_ranks(rs: list[dict], day: str | None = None, track_from: list[dict] | None = None) -> dict[str, int | None]:
+    """오늘 순위를 저장하고 전날 대비 변화(↑ 양수)를 돌려준다. track_from: 감시 목록을 고를 전체 순위(없으면 rs — 상위 100만 저장할 때도 감시는 150)."""
     day = day or date.today().isoformat()
     with closing(db.connect()) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS squeeze_rank (date TEXT NOT NULL, ticker TEXT NOT NULL, rank INTEGER, score REAL, PRIMARY KEY (date, ticker))")
         conn.executemany("INSERT OR REPLACE INTO squeeze_rank VALUES (?,?,?,?)", [(day, r["ticker"], i, r["score"]) for i, r in enumerate(rs, 1)])
         prev_day = conn.execute("SELECT MAX(date) FROM squeeze_rank WHERE date < ?", (day,)).fetchone()[0]
         prev = {r[0]: r[1] for r in conn.execute("SELECT ticker, rank FROM squeeze_rank WHERE date=?", (prev_day,))} if prev_day else {}
-        conn.execute("INSERT OR REPLACE INTO shortdata_meta (k, v, t) VALUES ('tracked', ?, 0)", (json.dumps([r["ticker"] for r in rs[:150]]),)) if conn.execute(
+        conn.execute("INSERT OR REPLACE INTO shortdata_meta (k, v, t) VALUES ('tracked', ?, 0)", (json.dumps(tracked(conn, track_from or rs)),)) if conn.execute(
             "SELECT name FROM sqlite_master WHERE name='shortdata_meta'").fetchone() else None
         conn.commit()
     return {r["ticker"]: (prev[r["ticker"]] - i if r["ticker"] in prev else None) for i, r in enumerate(rs, 1)}
+
+
+def tracked(conn, rs: list[dict]) -> list[str]:
+    """15분마다 대차 가용주식·수수료를 기록할 감시 목록 = 스퀴즈 상위 150 + Reg SHO 연속 + 워치리스트(스캐너 우선) + 저금통.
+    2026-10-31: 예전엔 스퀴즈 상위만 넣어 shortdata 주석('스퀴즈 상위·Reg SHO·워치리스트·저금통')과 달랐음."""
+    out = [r["ticker"] for r in rs[:150]]
+    extra: list = []
+    for src in (lambda: __import__("regsho").streaks(conn), lambda: __import__("watch").scanner_priority(),
+                lambda: __import__("piggy").tickers_all()):   # 저금통은 방문객 가림 없는 전체(아침 작업용) · 하나가 실패해도 나머지는 넣음
+        try:
+            extra += list(src())
+        except Exception:  # noqa: BLE001
+            pass
+    return list(dict.fromkeys(out + [str(t).upper() for t in extra if t]))
+
+
+def daily(out=print, day: str | None = None) -> int:
+    """아침 작업: 오늘 순위·감시 목록 저장. 2026-10-31: 예전엔 🧨 스퀴즈 랭크 화면을 열 때만 저장해 10/26 뒤로 멈춤 —
+    '전날 대비 순위 변화'가 어제가 아니라 마지막으로 연 날 대비였고, 15분 대차 기록의 감시 목록도 10/26 그대로였음."""
+    rs = rows()
+    if not rs:
+        return 0
+    save_ranks(rs[:100], day, track_from=rs)
+    out(f"🧨 스퀴즈 순위 저장: 후보 {len(rs)}종목 · 1위 {rs[0]['ticker']}({rs[0]['score']:.0f}점)")
+    return len(rs)

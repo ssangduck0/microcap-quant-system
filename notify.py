@@ -40,21 +40,28 @@ def classify(text: str) -> tuple[str, str | None]:
     return kind, ticker
 
 
-def _log(text: str, ok: bool) -> None:
+def _ensure(conn) -> None:
+    conn.execute(DDL)
+    if "retried" not in {r[1] for r in conn.execute("PRAGMA table_info(alert_log)")}:   # 2026-10-31: 실패 알림 다시 보내기(한 번만)
+        conn.execute("ALTER TABLE alert_log ADD COLUMN retried INTEGER")
+
+
+def _log(text: str, ok: bool, retried: int | None = None) -> None:
     try:
         import db
         kind, ticker = classify(text)
         with closing(db.connect()) as conn:
-            conn.execute(DDL)
-            conn.execute("INSERT INTO alert_log (at, kind, ticker, text, ok) VALUES (?,?,?,?,?)", (db.utcnow_iso(), kind, ticker, (text or "")[:2000], int(bool(ok))))
+            _ensure(conn)
+            conn.execute("INSERT INTO alert_log (at, kind, ticker, text, ok, retried) VALUES (?,?,?,?,?,?)",
+                         (db.utcnow_iso(), kind, ticker, (text or "")[:2000], int(bool(ok)), retried))
             conn.commit()
     except Exception:  # noqa: BLE001
         pass
 
 
-def send_telegram(text: str) -> bool:
+def send_telegram(text: str, _retry: bool = False) -> bool:
     if not (config.TELEGRAM_TOKEN and config.TELEGRAM_CHAT_ID):
-        _log(text, False)
+        _log(text, False, 1)   # 키 없음 = 다시 보낼 것도 없음
         return False
     ok = False
     try:
@@ -65,8 +72,46 @@ def send_telegram(text: str) -> bool:
         ok = True
     except Exception as e:  # noqa: BLE001
         log.warning("텔레그램 전송 실패: %s", type(e).__name__)  # 토큰이 URL에 있으므로 예외 전문은 남기지 않음
-    _log(text, ok)
+    _log(text, ok, 1 if _retry else None)
     return ok
+
+
+RETRY_MIN = 30
+RETRY_WAIT_MIN = 5
+
+
+def retry_failed(max_age_min: int = RETRY_MIN, limit: int = 10, now=None) -> int:
+    """최근 max_age_min 분 안에 전송 실패한 알림을 한 번만 다시 보냄(끝에 '⏱ 지연 전송' 표시). 다시 보낸 건수(성공).
+    2026-10-31: 10/31 06:20~07:01 텔레그램 응답 지연으로 11건(🎯 신호 4 · 🐷 저금통 3 · 🌙 애프터 3 · 🔔 공시 1)이 실패하고 그대로 사라졌음.
+    응답만 늦고 실제로는 도착한 경우엔 두 번 올 수 있음(잃는 것보다 나음). 다시 보낸 것이 또 실패하면 더 안 보냄."""
+    if not (config.TELEGRAM_TOKEN and config.TELEGRAM_CHAT_ID):
+        return 0
+    from datetime import datetime, timedelta, timezone
+    import db
+    now = now or datetime.now(timezone.utc)
+    since = (now - timedelta(minutes=max_age_min)).isoformat(timespec="seconds")
+    until = (now - timedelta(minutes=RETRY_WAIT_MIN)).isoformat(timespec="seconds")   # 끊김이 지나가게 몇 분 기다렸다가
+    try:
+        with closing(db.connect()) as conn:
+            _ensure(conn)
+            rows = conn.execute("SELECT id, at, text FROM alert_log WHERE ok=0 AND retried IS NULL AND at >= ? AND at <= ? ORDER BY id LIMIT ?",
+                                (since, until, limit)).fetchall()
+            if not rows:
+                return 0
+            conn.executemany("UPDATE alert_log SET retried=1 WHERE id=?", [(r[0],) for r in rows])   # 먼저 표시(두 번 다시 보내지 않게)
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for _id, at, text in rows:
+        try:
+            hhmm = (datetime.fromisoformat(str(at).replace("Z", "+00:00")) + timedelta(hours=9)).strftime("%H:%M")
+        except ValueError:
+            hhmm = "?"
+        n += int(send_telegram(f"{text}\n⏱ 지연 전송({hhmm} KST 첫 전송 실패)", _retry=True))
+    if rows:
+        log.info("텔레그램 실패 알림 다시 보냄: %d건 중 %d건 성공", len(rows), n)
+    return n
 
 
 def repeat_ok(conn, ticker: str, reason: str, cap: int | None = None, now=None) -> bool:

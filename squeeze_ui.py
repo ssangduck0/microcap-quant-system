@@ -27,7 +27,7 @@ def render(fx: float) -> None:
         with st.spinner("Yahoo 에서 받는 중..."):
             shortint.refresh([r["ticker"] for r in rs[:150]], max_n=150, out=lambda *_: None)
         st.rerun()
-    chg = sq.save_ranks(rs[:100])
+    chg = sq.save_ranks(rs[:100], track_from=rs)
     ui.cards([{"t": "조회 종목", "v": f"{len(rs)}", "s": f"공매도 잔고 있는 종목 {have_si}", "accent": True},
               {"t": "공매도 비율 20%↑", "v": f"{sum(1 for r in rs if (r['si_pct'] or 0) >= 20)}"},
               {"t": "청산 소요일 5일↑", "v": f"{sum(1 for r in rs if (r['dtc'] or 0) >= 5)}"},

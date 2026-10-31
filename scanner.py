@@ -718,6 +718,10 @@ def main() -> None:
             log.info("사이클 완료: %d종목 저장", n)
         except Exception:  # noqa: BLE001
             log.exception("사이클 실패")
+        try:  # 🔔 전송 실패한 텔레그램 알림을 30분 안에 한 번 다시(2026-10-31 · 10/31 새벽 11건 유실)
+            notify.retry_failed()
+        except Exception:  # noqa: BLE001
+            pass
         if args.once:
             break
         wait = max(5, config.SCAN_INTERVAL_SEC - (time.time() - t0))
