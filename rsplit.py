@@ -59,6 +59,13 @@ RS_RATIO_PATS = [   # 순서 = 우선순위(승인받은 '범위' 1-for-5 ~ 1-fo
     re.compile(r"\b(?:one|1)[- ]for[- ]" + _NUM + r"\b(?!\s*(?:to|through|and up to|up to)\b)", re.I),
     re.compile(r"\b1:(\d{1,4})\b", re.I),
 ]
+# 2026-10-31: '추가 병합' 공시는 이번 추가분(2-for-1)이 먼저, 합계(cumulative 4-for-1)가 뒤에 나온다. MASK 10/28(10/23 발표 2:1 + 추가 2:1, 둘 다 10/30 하루에 시행 → 실제 4:1, 야후도 ×4)을
+# 1:2 로 읽어 🗓 일정·📅 병합 예정 환산가·🔍 부검 병합 배수가 절반이었음 → 합계 비율을 맨 먼저 본다. 이미 끝난 병합까지 합친 '누적'(… effected … since …)은 그날 배수가 아니라 건너뜀
+RS_CUM_PATS = [
+    re.compile(r"cumulative\s+(?:ratio\s+of\s+)?" + _NUM + r"\s*[- ]?for[- ]\s*(?:one|1)\b", re.I),                                        # cumulative 4-for-1 / 4 for 1
+    re.compile(r"cumulative\s+(?:ratio\s+of\s+)?(?:one|1)\s*[- ]?for[- ]\s*" + _NUM + r"\b(?!\s*(?:to|through|and up to|up to)\b)", re.I),   # cumulative 1-for-4
+]
+_PAST_CUM = re.compile(r"\b(?:effected|implemented|completed|since)\b", re.I)
 
 
 def _ratio_num(s: str):
@@ -78,12 +85,12 @@ def _rs_date(s: str):
     return None
 
 
-def upcoming_from_text(text: str) -> dict | None:
+def upcoming_from_text(text: str, today: date | None = None) -> dict | None:
     """공시 본문 → {"date": 시행일, "ratio": N(1:N)} 또는 None. 역분할 문구 + 시행일(효력일·split-adjusted 거래 시작일)이 있을 때만."""
     t = re.sub(r"\s+", " ", text or "")
     if not re.search(RS_KEY, t, re.I):
         return None
-    floor = date.today() - timedelta(days=7)
+    floor = (today or date.today()) - timedelta(days=7)
     d = None
     for p in RS_DATE_PATS:            # 우선순위 순서대로, 지난 날짜('이미 시행한' 병합)는 건너뜀
         for m in p.finditer(t):
@@ -96,11 +103,13 @@ def upcoming_from_text(text: str) -> dict | None:
     if not d:
         return None
     ratio = None
-    for p in RS_RATIO_PATS:
+    for i, p in enumerate(RS_CUM_PATS + RS_RATIO_PATS):
         for m in p.finditer(t):
             ctx = t[max(0, m.start() - 160):m.start()].lower()
             if "previously effected" in ctx or "previously implemented" in ctx or re.search(r"effected\s+(?:a|an|the)\s*$", ctx):
                 continue   # 예전에 이미 한 병합 비율
+            if i < len(RS_CUM_PATS) and _PAST_CUM.search(ctx):
+                continue   # 이미 끝난 병합까지 합친 누적 비율
             n = _ratio_num(m.group(1))
             if n and 2 <= n <= 5000:
                 ratio = n

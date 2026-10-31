@@ -31,11 +31,12 @@ assert rs.similar(allp, 40, -50.0, exclude=("RSX", idx[s].strftime("%Y-%m-%d")))
 with closing(db.connect()) as conn:
     assert rs.record_signal(conn, "2026-10-15", "RSX", 2.5, e) and not rs.record_signal(conn, "2026-10-15", "RSX", 2.6, e)
 # 📅 병합 예정(C단계): 본문 규칙 추출 · 기록 · 예정 표
+D0 = __import__("datetime").date(2026, 10, 26)   # 본문 속 시행일이 고정 날짜라 '오늘'도 고정(지난 날 7일 넘으면 기록 안 하는 규칙 때문에 날짜가 지나면 실패하던 것)
 T1 = "On October 20, 2026 the Board approved a 1-for-10 reverse stock split of the Company's common stock. The reverse stock split will become effective at 12:01 a.m. Eastern Time on October 30, 2026."
 T2 = "The Company announced a reverse split at a ratio of one-for-25. The common stock will begin trading on a split-adjusted basis on Monday, November 3, 2026 under the same symbol."
 T3 = "The Company effected a 15:1 reverse split in 2024."                       # 날짜 없음
 T4 = "Quarterly results were strong; effective October 30, 2026 the CFO resigns."  # 역분할 아님
-assert rs.upcoming_from_text(T1) == {"date": "2026-10-30", "ratio": 10} and rs.upcoming_from_text(T2) == {"date": "2026-11-03", "ratio": 25}, (rs.upcoming_from_text(T1), rs.upcoming_from_text(T2))
+assert rs.upcoming_from_text(T1, D0) == {"date": "2026-10-30", "ratio": 10} and rs.upcoming_from_text(T2, D0) == {"date": "2026-11-03", "ratio": 25}, (rs.upcoming_from_text(T1, D0), rs.upcoming_from_text(T2, D0))
 assert rs.upcoming_from_text(T3) is None and rs.upcoming_from_text(T4) is None and rs.upcoming_from_text("") is None
 # 실제 공시 문구(10/27 서버 진단): 범위 문구보다 확정 비율 · 효력일보다 분할 반영 거래 시작일 · 영어 숫자 · share consolidation · '매 16주를 1주로'
 P = ("the shareholders approved a reverse split at a ratio in the range of 1-for-5 to 1-for-50. The Company determined to effect a reverse stock split at a ratio of 1-for-10 "
@@ -45,19 +46,31 @@ N = ("the board approved a one-for-nine reverse stock split. The reverse stock s
 E = ("the board has determined to effect a reverse share split of the ordinary shares at a ratio of 1-for-16 (the Reverse Split), such that every 16 ordinary shares will be "
      "automatically combined and reclassified into one ordinary share. The ordinary shares will begin trading on a split-adjusted basis on the Nasdaq Capital Market on October 27, 2026.")
 M = "On October 23, 2026, the company announced a two-for-one share consolidation, with its class A ordinary shares expected to begin trading on a post-consolidation basis on October 30, 2026."
-assert rs.upcoming_from_text(P) == {"date": "2026-10-27", "ratio": 10}, rs.upcoming_from_text(P)
-assert rs.upcoming_from_text(N) == {"date": "2026-10-27", "ratio": 9}, rs.upcoming_from_text(N)
-assert rs.upcoming_from_text(E) == {"date": "2026-10-27", "ratio": 16}, rs.upcoming_from_text(E)
-assert rs.upcoming_from_text(M) == {"date": "2026-10-30", "ratio": 2}, rs.upcoming_from_text(M)
+assert rs.upcoming_from_text(P, D0) == {"date": "2026-10-27", "ratio": 10}, rs.upcoming_from_text(P, D0)
+assert rs.upcoming_from_text(N, D0) == {"date": "2026-10-27", "ratio": 9}, rs.upcoming_from_text(N, D0)
+assert rs.upcoming_from_text(E, D0) == {"date": "2026-10-27", "ratio": 16}, rs.upcoming_from_text(E, D0)
+assert rs.upcoming_from_text(M, D0) == {"date": "2026-10-30", "ratio": 2}, rs.upcoming_from_text(M, D0)
 # 2차(10/27 서버 진단): 'on or about' · 괄호 숫자 비율 · 지난 '이미 시행한' 병합은 무시 · 효력 예정 문장
 R = ("we are proposing a share consolidation of the class a ordinary shares at a ratio of ten (10)-for-one (1), such that every ten (10) class a ordinary shares will be consolidated into one. "
      "If approved by shareholders, the share consolidation is expected to be effective on or about November 13, 2026.")
 O = ("the stockholders approved an amendment to effect one or more reverse stock splits, provided that the reverse stock splits shall not, in the aggregate, exceed one-for-one hundred (1:100). "
      "Pursuant to the foregoing authorization, the company previously effected a one-for-ten (1:10) reverse stock split of its common stock, effective May 21, 2026.")
-assert rs.upcoming_from_text(R) == {"date": "2026-11-13", "ratio": 10}, rs.upcoming_from_text(R)
+assert rs.upcoming_from_text(R, D0) == {"date": "2026-11-13", "ratio": 10}, rs.upcoming_from_text(R, D0)
 assert rs.upcoming_from_text(O) is None, rs.upcoming_from_text(O)                     # 미래 시행일 없음 → 기록 안 함
 A = "RoboAI announces reverse stock split. The reverse stock split is expected to become effective on November 6, 2026 at a ratio of 1-for-25."
-assert rs.upcoming_from_text(A) == {"date": "2026-11-06", "ratio": 25}, rs.upcoming_from_text(A)
+assert rs.upcoming_from_text(A, D0) == {"date": "2026-11-06", "ratio": 25}, rs.upcoming_from_text(A, D0)
+# 추가 병합(2026-10-31 MASK 10/28): 이번 추가분(2-for-1)이 먼저 나와도 그날 실제 배수인 합계(cumulative 4-for-1)로 · 이미 끝난 병합까지 합친 누적은 건너뜀
+C1 = ("the board of directors approved a further 2-for-1 consolidation of the company's issued and unissued shares, such that every two (2) issued and unissued class a ordinary shares "
+      "be consolidated into one (1) class a ordinary share. The further share consolidation, together with the previously announced 2-for-1 share consolidation, will result in a "
+      "cumulative 4-for-1 share consolidation. The class a ordinary shares are expected to begin trading on a post-consolidation basis on October 30, 2026.")
+C2 = "Company announces further share consolidation resulting in a cumulative 4 for 1 ratio. The shares will trade on a split-adjusted basis on October 30, 2026."
+C3 = ("The board approved a 1-for-10 reverse stock split. Trading on a split-adjusted basis will begin on November 13, 2026. Together with the reverse split effected in March 2026, "
+      "this is a cumulative 1-for-250 reduction.")
+C4 = "The share consolidation at a cumulative ratio of one-for-twenty will become effective on November 2, 2026, following a further 1-for-2 share consolidation."
+assert rs.upcoming_from_text(C1, D0) == {"date": "2026-10-30", "ratio": 4}, rs.upcoming_from_text(C1, D0)
+assert rs.upcoming_from_text(C2, D0) == {"date": "2026-10-30", "ratio": 4}, rs.upcoming_from_text(C2, D0)
+assert rs.upcoming_from_text(C3, D0) == {"date": "2026-11-13", "ratio": 10}, rs.upcoming_from_text(C3, D0)
+assert rs.upcoming_from_text(C4, D0) == {"date": "2026-11-02", "ratio": 20}, rs.upcoming_from_text(C4, D0)
 import watch
 from datetime import date as _d
 with closing(db.connect()) as conn:
@@ -81,5 +94,5 @@ with closing(db.connect()) as conn:
             return R()
         def fetch_text(self, u, limit=0):
             return "cover only" if u.endswith("main.htm") else "Press release: " + N
-    assert rs.upcoming_from_text(rs.filing_text(_C(), "http://x/idx")) == {"date": "2026-10-27", "ratio": 9}
+    assert rs.upcoming_from_text(rs.filing_text(_C(), "http://x/idx"), D0) == {"date": "2026-10-27", "ratio": 9}
 print("ALL OK")
