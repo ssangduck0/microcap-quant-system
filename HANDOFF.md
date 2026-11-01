@@ -302,7 +302,7 @@
 
 ## 2. 사용자가 할 일
 - ~~토스 데이터 정책 선택~~ ✅ B안 배포 끝 → 방문객 링크로 메뉴 눈 확인만(📌 3번).
-- Vultr 콘솔 → 서버 → Backups 탭 자동 백업 켜져 있는지(R2 사본이 있어 필수는 아님).
+- ~~Vultr 자동 백업 확인~~ ✅ 11/1 사용자 화면: 'auto-backup 158.247.250.15 quant' 2026-10-26 12:02 · 128GB · Complete(목록 1개 → 주 1회 월요일로 보임 · 11/2 뒤 새 항목 생기면 확정). 서버 전체(.env 포함) 백업 + 우리 DB 백업 매일(서버 14일 · R2 21일).
 - 텔레그램 토큰 재발급 여부(예전 채팅 노출) → 재발급 시 서버 `.env` TELEGRAM_TOKEN 수정 + `systemctl restart 'quant-*'`.
 - 💵 재개할 때: 달러 매수가능 $0 이면 **$50 환전**(자동환전 없음) · 관리 모드 '계좌·달러 매수가능금액 확인(읽기만)' · 1주 왕복은 미국 정규장(한국 23:30~06:00).
 - Claude 가 밤에 배포까지 하길 원하면 `.claude/settings.local.json`(git 제외)에 `{"permissions": {"allow": ["Bash(python deploy/deploy_from_pc.py)", "Bash(python deploy/deploy_from_pc.py *)"]}}` — Claude 는 자기 설정을 못 고침. 지금은 배포·서버 DB 쓰기·대시보드 비밀번호 입력을 Claude 가 못 하므로 그 명령은 HANDOFF 에 남긴다.
