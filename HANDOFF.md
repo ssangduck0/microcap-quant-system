@@ -1,6 +1,7 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🧨 11/1 저녁 — ChartExchange 공매도 잔고 % '분모 바뀜' 정리(사용자 '다음 작업 · 진행 전 검색 · 장점만' · ⏳ 배포 대기)
+> ## 🧨 11/1 저녁 — ChartExchange 공매도 잔고 % '분모 바뀜' 정리(사용자 '다음 작업 · 진행 전 검색 · 장점만' · ✅ 11/1 19:08 배포·확인)
+> **배포 확인(19:15 · 읽기 전용)**: 파일 7개 md5 = PC(5e062bf) · 서비스 6개 19:08:08 재시작, 그 뒤 오류 0 · 주인·방문객 health 200 · 📜 배포 줄(파일 421개) · 서버 배포본 테스트 7개(si_basis·drawer·report_dialog·chartex·shortdir·squeeze2·nav) 통과(squeeze2 는 10/30 root 가 만든 `/tmp/sp_app.py` 권한 때문에 처음 실패 → quant 전용 임시 폴더로 다시 돌려 통과 · 코드 문제 아님) · 운영 DB(읽기 전용) WKHS 최근 200일 135행에서 분모 바뀜 1곳 = 05-12(68.3만 → 10.8M) · 최신 10-26 9.89% · 966,750주 → 분모 9.78M(서랍 머리 '유통 9.8M주 기준'과 같음).
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
 > | 1 | **배포(사용자)** | `python deploy/deploy_from_pc.py` — 이번 코드: chartex(implied_float · basis_jump · basis_breaks) · shortpanel_ui(si_segments · 카드 분모) · drawer(history · headline si_float) · report_dialog(머리 분모) · updates (+ test_si_basis · test_drawer 고침) |
