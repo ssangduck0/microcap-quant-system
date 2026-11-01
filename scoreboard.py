@@ -108,8 +108,14 @@ def collect(conn) -> pd.DataFrame:
             add("pump", r["date"], r["ticker"], r["price"], note=f"펌핑 {r['pump_score']:.0f} · {r['reason'] or ''}"[:120])
     except Exception:  # noqa: BLE001
         pass
-    for r in _q(conn, "SELECT date, ticker, stage, price FROM shortflow_events"):
-        add("shortflow_exit" if r["stage"].startswith("④") else "shortflow_up", r["date"], r["ticker"], r["price"], ref=r["stage"][:1], note=r["stage"])
+    import shortflow as _sf   # 2026-11-01: 단계가 이어지는 동안 매일·주말 기록이 따로 세지던 것 → 사례 시작만(주말은 금요일 날짜)
+    sf_rows = _q(conn, "SELECT date, ticker, stage, price FROM shortflow_events ORDER BY date")
+    sf_starts, sf_seen = _sf.episode_starts([(r["date"], r["ticker"], r["stage"]) for r in sf_rows]), set()
+    for r in sf_rows:
+        k = (_sf.trading_day(r["date"]), r["ticker"], r["stage"])
+        if k in sf_starts and k not in sf_seen:
+            sf_seen.add(k)
+            add("shortflow_exit" if r["stage"].startswith("④") else "shortflow_up", k[0], r["ticker"], r["price"], ref=r["stage"][:1], note=r["stage"])
     for r in _q(conn, "SELECT date, ticker, kind, price FROM flowread_events"):
         down = r["kind"].startswith(("🔻", "⚠️"))
         add("flow_down" if down else "flow_up", r["date"], r["ticker"], r["price"], ref=r["kind"][:2], note=r["kind"])
@@ -218,7 +224,15 @@ def track_stats(conn=None, max_age: float = 1800.0) -> dict[str, tuple[int, int]
     today = np.datetime64(date.today().isoformat())
 
     def run(c):
-        for s, d, st in c.execute("SELECT source, date, status FROM pred_outcomes WHERE status IN ('성공','실패')"):
+        sf = None
+        try:  # 🩳 사례 시작만(2026-11-01 · collect 와 같은 기준 — 예전 매일·주말 중복 행은 표에 남아 있어도 안 셈)
+            import shortflow as _sf
+            sf = {(d, t, s[:1]) for d, t, s in _sf.episode_starts(c.execute("SELECT date, ticker, stage FROM shortflow_events").fetchall())}
+        except Exception:  # noqa: BLE001
+            sf = None
+        for s, d, t, ref, st in c.execute("SELECT source, date, ticker, ref, status FROM pred_outcomes WHERE status IN ('성공','실패')"):
+            if sf is not None and s.startswith("shortflow") and (str(d)[:10], t, ref) not in sf:
+                continue
             hz = int((SOURCES.get(s) or (None, 1, 0, 10))[3] or 0)
             try:
                 end = np.busday_offset(np.datetime64(str(d)[:10]), hz, roll="forward")

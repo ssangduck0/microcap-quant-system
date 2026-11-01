@@ -50,5 +50,6 @@ at = AppTest.from_file(APP, default_timeout=180).run(); assert not at.exception,
 [b for b in at.button if b.key == "gu_make"][0].click().run()
 assert any(c.value.startswith("https://guest-only.trycloudflare.com/?guest=") for c in at.code)
 log = [d.value for d in at.dataframe if "기기·브라우저" in d.value.columns][0]; assert "🚫 차단(다른 기기)" in set(log["표시"]) and "⚠️ 새 기기" in set(log["표시"])
-assert any("링크가 퍼졌을 수 있어요" in e.value and "2건" in e.value for e in at.error)
+assert any("링크가 퍼졌을 수 있어요" in e.value and "차단 1건" in e.value for e in at.error)          # 2026-11-01: 차단만 빨간 경고
+assert any("새 기기 접속 1건(차단 아님)" in i.value for i in at.info)                                # 새 기기(차단 아님)는 최근 7일만 안내
 os.environ.pop("QUANT_TEST_PAGE"); print("ALL OK")

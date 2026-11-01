@@ -10,6 +10,7 @@ IBKR 대차 가능 수량 증가(빌린 주식 반환)·FINRA 공매도 비중 �
 from __future__ import annotations
 
 from contextlib import closing
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -110,12 +111,45 @@ def analyze(df: pd.DataFrame | None, params: dict | None = None, live: dict | No
 
 
 # ---------------------------------------------------------------- 신호 기록·검증
+# 사례 단위(2026-11-01 배포 확인 때 발견): 단계가 유지되는 동안 매일(주말 포함) 새로 기록·알림 → 🏆 ②③ '13건'이 사실상 INEO(8일)·INTZ(5일) 반복,
+#   독립 사례는 ②③ 2건 · ④ 3건이었음. 이제 주말은 직전 금요일 날짜로 기록(같은 날로 합쳐짐)하고, 같은 종목·단계가 직전 EPISODE_GAP_DAYS 안에
+#   있으면 '이어지는 중'(기록은 남기되 새 신호·알림·🏆 아님). 매일 기록은 남겨 두어 단계가 이어진 기간을 볼 수 있게.
+EPISODE_GAP_DAYS = 7
+
+
+def trading_day(day: str) -> str:
+    """토·일 → 직전 금요일(주말 판정은 금요일 일봉 그대로라서)."""
+    d = date.fromisoformat(str(day)[:10])
+    return (d - timedelta(days=max(0, d.weekday() - 4))).isoformat()
+
+
+def episode_starts(rows) -> set[tuple[str, str, str]]:
+    """rows: (date, ticker, stage) → 사례 시작 (date, ticker, stage) 집합. 날짜는 trading_day 로 맞추고, 같은 종목·단계의 직전 기록과
+    EPISODE_GAP_DAYS 넘게 떨어진 날만 시작(연속 기록은 하나의 사례로 이어짐)."""
+    by: dict[tuple[str, str], set] = {}
+    for d, t, s in rows:
+        by.setdefault((t, s), set()).add(date.fromisoformat(trading_day(d)))
+    out = set()
+    for (t, s), ds in by.items():
+        prev = None
+        for d in sorted(ds):
+            if prev is None or (d - prev).days > EPISODE_GAP_DAYS:
+                out.add((d.isoformat(), t, s))
+            prev = d
+    return out
+
+
 def record(conn, ticker: str, day: str, stage: str, price: float | None) -> bool:
-    """같은 날 같은 단계는 한 번만. 새로 기록되면 True(알림 보낼 때)."""
+    """날짜(주말은 금요일로)·종목·단계당 한 번 기록. 새 사례의 시작이면 True(알림 보낼 때) — 같은 종목·단계가 직전 7일 안에 있으면 False."""
     conn.execute(DDL)
+    day = trading_day(day)
     cur = conn.execute("INSERT OR IGNORE INTO shortflow_events (date, ticker, stage, price, at) VALUES (?,?,?,?,?)", (day, ticker, stage, price, db.utcnow_iso()))
     conn.commit()
-    return cur.rowcount > 0
+    if cur.rowcount <= 0:
+        return False
+    since = (date.fromisoformat(day) - timedelta(days=EPISODE_GAP_DAYS)).isoformat()
+    prev = conn.execute("SELECT 1 FROM shortflow_events WHERE ticker=? AND stage=? AND date >= ? AND date < ? LIMIT 1", (ticker, stage, since, day)).fetchone()
+    return prev is None
 
 
 DIGEST_AFTER_ET = (16, 10)   # 하루 요약을 보내는 시각(동부 · 정규장 마감 10분 뒤 = 한국 아침 5~6시)
@@ -126,18 +160,24 @@ def digest_text(conn, day: str, last_price: dict | None = None) -> str | None:
     last_price: 종목 → 지금(마감) 가격(없으면 신호 가격만)."""
     try:
         conn.execute(DDL)
+        since = (date.fromisoformat(day) - timedelta(days=EPISODE_GAP_DAYS + 1)).isoformat()
+        hist = conn.execute("SELECT date, ticker, stage FROM shortflow_events WHERE date >= ? AND date <= ?", (since, day)).fetchall()
         rows = conn.execute("SELECT ticker, stage, price FROM shortflow_events WHERE date=? ORDER BY stage, ticker", (day,)).fetchall()
     except Exception:  # noqa: BLE001
         return None
+    starts = episode_starts(hist)
     rows = [r for r in rows if r[1] in ALERT_STAGES]
-    if not rows:
+    new = [r for r in rows if (day, r[0], r[1]) in starts]          # 새 사례만(이어지는 중은 개수만)
+    if not new:
         return None
     lines = []
-    for t, stage, px in rows:
+    for t, stage, px in new:
         now = (last_price or {}).get(t)
         tail = f" → 마감 ${now:.4f} ({(now / px - 1) * 100:+.1f}%)" if now and px else ""
         lines.append(f"• {t} {stage.split(' — ')[0]} ${(px or 0):.4f}{tail}")
-    return (f"🩳 공매도 흐름 하루 요약 ({day[5:]} · 워치리스트·저금통 {len(rows)}건)\n" + "\n".join(lines)
+    cont = sorted({r[0] for r in rows} - {r[0] for r in new})
+    more = f"\n이어지는 중(새 신호 아님): {', '.join(cont)}" if cont else ""
+    return (f"🩳 공매도 흐름 하루 요약 ({day[5:]} · 워치리스트·저금통 새 신호 {len(new)}건)\n" + "\n".join(lines) + more
             + "\n(즉시 알림 대신 요약 — 관리 모드 '🩳 하루 요약'을 끄면 즉시 알림으로)")
 
 
