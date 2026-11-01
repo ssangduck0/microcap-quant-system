@@ -41,7 +41,7 @@ first = snapt.iloc[0]["티커"]; print("first row:", first, "| 공시분석 열:
 assert snapt.set_index("티커").loc["AAA", "공시분석"] != "" and snapt.set_index("티커").loc["BBB", "공시분석"] == ""
 md = [m.value for m in at.markdown]
 assert f"#### {first}" in md and any(f"🧾 {first} 공시분석" in x for x in md)                    # 아직 안 눌렀으면 첫 행
-assert any("행을 누르면" in c.value for c in at.caption)
+assert any("종목 고르기" in c.value for c in at.caption)   # 2026-11-02: 행 누르기 대신 표 아래 선택
 at.session_state["snap_table_pick"] = "AAA"; at.run(); assert not at.exception                    # 'AAA' 행을 누른 것과 같은 상태
 md = [m.value for m in at.markdown]
 assert "#### AAA" in md and any("🧾 AAA 공시분석" in x for x in md) and any(p.label == "섹션" or "§8" in str(getattr(p, "options", "")) for p in at.get("button_group"))   # 저장된 보고서 본문

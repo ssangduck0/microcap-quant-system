@@ -164,29 +164,83 @@ def _style() -> str:
         return "new"
 
 
+def _orig():
+    """예전 기본 표(install 이 바꾸기 전 st.dataframe)."""
+    return getattr(st, "_utb_orig_dataframe", None) or st.dataframe
+
+
+def _in_apptest() -> bool:
+    """Streamlit 화면 테스트(AppTest) 안이면 True — 테스트 과정만 streamlit.testing 을 불러옴(서버는 안 부름)."""
+    import sys
+    return "streamlit.testing.v1" in sys.modules
+
+
+def new_run() -> None:
+    """dashboard.py 맨 위에서 매 실행마다: 이번 실행에 쓴 표 key 기록을 비움(같은 표가 한 화면에 여러 번 그려지면 _2·_3 을 붙여 겹치지 않게)."""
+    st.session_state["_utb_used"] = {}
+
+
+def _run_token():
+    """이번 실행을 가리키는 값 — Streamlit 이 실행마다 새로 만드는 cursors 묶음(없으면 None). new_run 을 안 부르는 화면(테스트 앱)에서도 실행마다 기록을 비우게."""
+    try:
+        from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        return id(ctx.cursors) if ctx is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _unique(key: str) -> str:
+    tok = _run_token()
+    if st.session_state.get("_utb_tok") != tok:
+        st.session_state["_utb_tok"] = tok
+        st.session_state["_utb_used"] = {}
+    used = st.session_state.setdefault("_utb_used", {})
+    n = used.get(key, 0)
+    used[key] = n + 1
+    return key if n == 0 else f"{key}_{n + 1}"
+
+
+def _spark(v) -> str:
+    """작은 선 그래프(LineChartColumn 대신)."""
+    try:
+        xs = [float(x) for x in list(v) if x is not None and not _pd.isna(x)]
+    except (TypeError, ValueError):
+        return '<span class="mut">-</span>'
+    if len(xs) < 2:
+        return '<span class="mut">-</span>'
+    lo, hi = min(xs), max(xs)
+    rng = (hi - lo) or 1.0
+    pts = " ".join(f"{i * 100 / (len(xs) - 1):.1f},{28 - (x - lo) / rng * 26:.1f}" for i, x in enumerate(xs))
+    color = "#30A46C" if xs[-1] >= xs[0] else "#E5484D"
+    return f'<svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;max-width:140px;height:24px"><polyline fill="none" stroke="{color}" stroke-width="2" points="{pts}"/></svg>'
+
+
 def frame(df, key: str, column_config: dict | None = None, column_order=None, hide_index: bool | None = None, page: int = 15,
           on_open: Callable[[str], None] | None = None, ticker: str | None = None, csv: bool = True, **kw):
     """st.dataframe 자리에 그대로: 같은 인자로 안 눌리는 표. kw(width·height 등 기본 표 인자)는 예전 표로 돌아갈 때만 씀."""
     if _style() == "old":   # 관리 모드 '표 모양: old' — 예전 기본 표
-        return st.dataframe(df, column_config=column_config, column_order=column_order, hide_index=hide_index, **kw)
+        return _orig()(df, column_config=column_config, column_order=column_order, hide_index=hide_index, **kw)
     if df is None:
         return None
     if hasattr(df, "data") and not isinstance(df, _pd.DataFrame):   # pandas Styler → 원래 표
         df = df.data
     df = df if isinstance(df, _pd.DataFrame) else _pd.DataFrame(df)
+    base = key
+    key = _unique(key)
     cc = column_config or {}
     names = [c for c in (list(column_order) if column_order else list(df.columns)) if c in df.columns and not (c in cc and cc[c] is None)]
     show_idx = hide_index is False or (hide_index is None and not isinstance(df.index, _pd.RangeIndex))
     try:   # 테스트(오프라인 모드)에서만: 화면에 넘긴 칸 그대로의 표를 남겨 기존 테스트가 값으로 확인하게(운영에선 안 남김)
         import config
         if getattr(config, "OFFLINE", False):
-            st.session_state[f"_utb_{key}"] = df[names].copy()
+            st.session_state[f"_utb_{base}"] = df[names].copy()
     except Exception:  # noqa: BLE001
         pass
-    rows = []
-    for i, (idx, r) in enumerate(df.iterrows()):
-        raw = {c: r[c] for c in names}
-        rows.append({"_i": i, "_raw": raw, "_idx": idx, "_h": {c: cell_html(raw[c], cc.get(c)) for c in names}, ticker or "ticker": str(raw.get(ticker)) if ticker else None})
+    if _in_apptest():   # 화면 테스트는 예전 표 값으로 확인하는 것이 많아 같은 표를 하나 더(운영 화면엔 안 그림)
+        _orig()(df, column_config=column_config, column_order=column_order, hide_index=hide_index)
+    recs = df[names].to_dict("records") if names else [{} for _ in range(len(df))]
+    rows = [{"_i": i, "_raw": raw, "_idx": idx, ticker or "ticker": (str(raw.get(ticker)) if ticker else None)} for i, (idx, raw) in enumerate(zip(df.index, recs))]
     if len(rows) > page:   # 찾기(기본 표의 검색 대신)
         q = st.text_input("찾기", key=f"{key}_q", placeholder="표 안에서 찾기", label_visibility="collapsed")
         if q:
@@ -196,13 +250,23 @@ def frame(df, key: str, column_config: dict | None = None, column_order=None, hi
 
     def _len(c):   # 칸 너비 = 글 양에 비례(긴 글 칸이 넓게) · 주소 칸은 '열기'만 보이니 좁게
         vals = [r["_raw"][c] for r in rows[:60]]
-        if ((cc.get(c) or {}).get("type_config") or {}).get("type") == "link" or any(isinstance(v, str) and _URL.search(v) for v in vals[:5]):
+        t = ((cc.get(c) or {}).get("type_config") or {}).get("type")
+        if t == "link" or any(isinstance(v, str) and _URL.search(v) for v in vals[:5]):
             return 9.0
+        if t in ("line_chart", "bar_chart", "area_chart"):
+            return 14.0
         avg = sum(min(60, len(str(v))) for v in vals) / max(1, len(vals))
         return max(len(label(c)) * 1.2, avg, 3.0)
     lens = {c: _len(c) for c in names}
     tot = sum(lens.values()) + (8 if show_idx else 0) or 1.0
-    cols = ([Col(df.index.name or "", lambda r: esc(r["_idx"]), f"{max(6, 8 / tot * 100):.0f}%")] if show_idx else []) +         [Col(label(c), (lambda r, c=c: r["_h"][c]), f"{max(6, lens[c] / tot * 100):.0f}%") for c in names]
+
+    def _cell(r, c):   # 보이는 줄만 그때 그림(큰 표도 가볍게)
+        cfg = cc.get(c)
+        if ((cfg or {}).get("type_config") or {}).get("type") in ("line_chart", "bar_chart", "area_chart"):
+            return _spark(r["_raw"][c])
+        return cell_html(r["_raw"][c], cfg)
+    cols = ([Col(df.index.name or "", lambda r: esc(r["_idx"]), f"{max(6, 8 / tot * 100):.0f}%")] if show_idx else []) + \
+        [Col(label(c), (lambda r, c=c: _cell(r, c)), f"{max(6, lens[c] / tot * 100):.0f}%") for c in names]
     sortable = [c for c in names if _pd.api.types.is_numeric_dtype(df[c]) or _pd.api.types.is_datetime64_any_dtype(df[c])][:6]
     sorts = None
     if len(df) > 5 and sortable:
@@ -224,5 +288,27 @@ def frame(df, key: str, column_config: dict | None = None, column_order=None, hi
         return (first.cell(r) if first else "", "", rest)
     out = table(rows, cols, key, sorts=sorts, page=page, card=card, on_open=on_open, ticker=ticker or "ticker", empty="없습니다.")
     if csv and len(df):
-        st.download_button("⬇ CSV", df[[c for c in names]].to_csv(index=show_idx).encode("utf-8-sig"), file_name=f"{key}.csv", mime="text/csv", key=f"{key}_csv")
+        st.download_button("⬇ CSV", df[[c for c in names]].to_csv(index=show_idx).encode("utf-8-sig"), file_name=f"{base}.csv", mime="text/csv", key=f"{key}_csv")
     return out
+
+
+def dataframe_compat(data=None, width="stretch", height="auto", *, use_container_width=None, hide_index=None, column_order=None, column_config=None,
+                     key=None, on_select="ignore", selection_mode="multi-row", row_height=None, **kw):
+    """install 뒤의 st.dataframe: 고르기(on_select)를 쓰는 표만 예전 표, 나머지는 안 눌리는 표(key 가 없으면 부른 파일·줄로)."""
+    if on_select != "ignore" or _style() == "old":
+        return _orig()(data, width=width, height=height, use_container_width=use_container_width, hide_index=hide_index, column_order=column_order,
+                       column_config=column_config, key=key, on_select=on_select, selection_mode=selection_mode, row_height=row_height, **kw)
+    if key is None:
+        import os
+        import sys
+        f = sys._getframe(1)
+        key = f"t_{os.path.basename(f.f_code.co_filename).rsplit('.', 1)[0]}_{f.f_lineno}"
+    return frame(data, key=key, column_config=column_config, column_order=column_order, hide_index=hide_index)
+
+
+def install() -> None:
+    """dashboard.py 에서 한 번: 모든 화면의 st.dataframe 을 안 눌리는 표로(관리 모드 '📋 표 모양' old 면 예전 표). 매 실행마다 key 기록도 비움."""
+    if getattr(st, "_utb_orig_dataframe", None) is None:
+        st._utb_orig_dataframe = st.dataframe
+        st.dataframe = dataframe_compat
+    new_run()

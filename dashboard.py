@@ -101,6 +101,7 @@ try:
 except Exception:  # noqa: BLE001
     pass
 st.set_page_config(layout="wide", page_title="초소형주 퀀트 대시보드", page_icon="🚀")
+utb.install()   # 📋 2026-11-02(사용자 '옛날 표 전부 바꿔 줘'): 모든 화면의 st.dataframe → 안 눌리는 표(ui_table) · 관리 모드 '📋 표 모양' old 면 예전 표
 DISCLAIMER = "점수·참고 레벨·희석 판정은 규칙 기반 계산값이며 투자 권유가 아닙니다. 희석 상태는 SEC 공시 키워드 검출 결과로, 원문 확인이 필요합니다."
 
 
