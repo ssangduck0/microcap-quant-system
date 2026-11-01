@@ -301,9 +301,10 @@ def schedule(now: datetime | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------- 아침 작업 끝에(cases.main 이 부름)
-def morning_done(started: datetime, ok: bool = True, out=print) -> dict:
-    """아침 작업 한 줄 기록 + 점검 숫자. 경고 수는 이번 실행 동안 cases.log 에 남은 WARNING/ERROR 줄."""
-    finished = datetime.now(timezone.utc)
+def morning_done(started: datetime, ok: bool = True, out=print, finished: datetime | None = None) -> dict:
+    """아침 작업 한 줄 기록 + 점검 숫자. 경고 수는 이번 실행 동안 cases.log 에 남은 WARNING/ERROR 줄.
+    finished 는 테스트용(기본 지금) — 2026-11-01: 테스트가 고정 날짜 자료로 '지금부터 24시간'을 재서 하루 뒤 깨지던 것 고침."""
+    finished = finished or datetime.now(timezone.utc)
     try:
         import filelog
         since = started.astimezone().strftime("%Y-%m-%d %H:%M:%S")

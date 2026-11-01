@@ -66,7 +66,7 @@ assert sc["backup"]["last_note"].startswith("quant-20261031.db.gz · 2MB") and s
 
 # 아침 작업 끝 기록(cases.main 이 부름)
 logs = []
-mm = jobs.morning_done(datetime.now(timezone.utc) - timedelta(minutes=125), True, out=logs.append)
+mm = jobs.morning_done(now - timedelta(minutes=125), True, out=logs.append, finished=now)   # 고정 날짜 자료와 같은 시점(실제 '지금'이면 하루 뒤 깨짐)
 last = jobs.runs("cases", limit=1)[0]
 assert last["summary"].startswith("아침 작업 완료 · 2시간 5분 · 경고 0") and last["metrics"]["걸린 시간(분)"] == 125 and "AI 요약" in last["metrics"], last
 assert logs and logs[0].startswith("🩺 점검표 빨간 칸:") and "AI 요약 '내용 없음' %" in logs[0], logs

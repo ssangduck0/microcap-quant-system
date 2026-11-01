@@ -48,10 +48,19 @@ STRATEGIES: dict[str, dict] = {
               "tp": 5.0, "sl": 5.0, "hold": 0, "usd": 1000.0, "n": 5, "on": True},
     "master": {"name": "📐 스승 눌림목", "desc": "아침 차트 관점 점검에서 '급등 후 눌림 타점(무릎~허리 지지)' 신호가 난 종목을 직전 종가로 매수(같은 종목 10일에 한 번). 키쟈키라 단타 6단계: 반등 +10% 목표 · 지지 깨면 −7%",
                "tp": 10.0, "sl": 7.0, "hold": 5, "usd": 1000.0, "n": 3, "on": True},
+    # 2026-11-01 ⭐ 반등형 장부 2개(사용자 승인 · docs/account_backtest_2026-11-01.md): 가장 잘 검증된 ⭐ 신호가 가상매매에 없어 계좌 기록이 없었음 →
+    #   같은 신호를 두 청산 규칙으로 나란히 4~8주 비교. 2년 계좌 시험(같은 날 순서 무작위 200번): −20% 손절 배수 중앙 1.27·손실 10% vs
+    #   비상 −50% + 공시 손절 1.53·손실 2%(계좌 낙폭 중앙 −29% 대 −30%). 생존편향이 넓은 손절을 부풀리므로 실제 기록으로 확인한 뒤 손절 기준·실매매에 반영.
+    "tier": {"name": "⭐ 반등형(손절 −20%)", "desc": "⭐ 검증 순위 1·2순위(⏸ 보류 제외)를 신호 날 종가로 매수 → +30% 익절 · −20% 손절 · 40거래일 — 지금 화면 안내 규칙",
+             "tp": 30.0, "sl": 20.0, "hold": 40, "usd": 1000.0, "n": 3, "on": True},
+    "tier_d": {"name": "⭐ 반등형(장점만: 비상 −50% + 공시 손절)", "desc": "같은 신호 · +30% 익절 · 비상 손절 −50% · 보유 중 새 조달 서류(424B·S-1/S-3·8-K 3.02)·등록 효력·"
+               "상장 기준 미달 통지(8-K 3.01)가 나오거나 병합이 7일 안으로 다가오면 다음 거래일 시가에 정리 · 40거래일",
+               "tp": 30.0, "sl": 50.0, "hold": 40, "usd": 1000.0, "n": 3, "on": True},
 }
+EVENT_STRATEGIES = {"tier_d"}      # 공시 손절을 쓰는 전략
 FIELDS = ("on", "tp", "sl", "hold", "usd", "n")
 LIMITS = {"tp": (0.0, 200.0), "sl": (0.0, 90.0), "hold": (0, 60), "usd": (10.0, 100000.0), "n": (1, 20)}
-COOLDOWN_DAYS = {"pick": 30, "piggy": 5, "master": 10, "rank_stay": 5}      # 같은 전략·같은 종목을 다시 사기까지(달력일)
+COOLDOWN_DAYS = {"pick": 30, "piggy": 5, "master": 10, "rank_stay": 5, "tier": 10, "tier_d": 10}      # 같은 전략·같은 종목을 다시 사기까지(달력일)
 STAY_TOP, STAY_DAYS = 10, 2        # 🏁 순위 연속: 10위 안 · 2거래일 연속(2026-10-29)
 SESS = ("night", "pre", "reg", "post")
 SESS_KO = {"night": "데이마켓", "pre": "프리장", "reg": "정규장", "post": "애프터"}
@@ -402,6 +411,7 @@ def update(bars: dict, today: str | None = None, piggy_out: set[str] | None = No
                 ext_t = ext_all.get(r["ticker"]) or {}
                 days = sorted({d.strftime("%Y-%m-%d") for d in df.index if d.strftime("%Y-%m-%d") >= r["day"]} | {d for d in ext_t if d >= r["day"]})
                 bars_by_day = {d.strftime("%Y-%m-%d"): row for d, row in df.iterrows()}
+                evs = event_triggers(conn, r["ticker"], r["day"]) if strat in EVENT_STRATEGIES else []   # ⭐ 장점만 장부: 공시 손절
                 i = 0
                 for ds in days:
                     if ds > today_d.isoformat():
@@ -410,6 +420,13 @@ def update(bars: dict, today: str | None = None, piggy_out: set[str] | None = No
                     bar = bars_by_day.get(ds)
                     if bar is not None and ds > r["day"]:
                         i += 1
+                        ev = next((e for e in evs if (ds > e[0] if e[1] else ds >= e[0])), None)
+                        if ev is not None:   # 시가에 정리(장 시작 전에 이미 알려진 공시)
+                            op_ = bar.get("Open")
+                            _close(conn, r, ds, float(op_) if op_ is not None and pd.notna(op_) and op_ > 0 else float(bar["Close"]), f"공시 손절({ev[2]}) — 그날 시가", k)
+                            closed_now = True
+                            n += 1
+                            break
                     ext = ext_t.get(ds) if k == 1.0 else None    # 병합이 있었던 거래는 단위가 섞이는 세션 기록 대신 일봉만
                     segs = _day_segments(r, d, ext, bar)
                     pre_close = [s for s in segs if s[0] != "post"]
@@ -450,6 +467,54 @@ def update(bars: dict, today: str | None = None, piggy_out: set[str] | None = No
 
 def _table(conn, name: str) -> bool:
     return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
+EVENT_RAISE = ("424B1", "424B2", "424B3", "424B4", "424B5", "424B7", "S-1", "S-3", "F-1", "F-3")
+
+
+def event_triggers(conn, ticker: str, entry_day: str) -> list[tuple[str, bool, str]]:
+    """공시 손절 조건 [(기준 날짜, 그 날짜 '뒤'부터인가, 이유)] — 진입일 뒤 접수된 새 조달 서류·등록 효력·8-K 3.01/3.02(접수 시각을 몰라 다음 거래일부터) ·
+    병합 시행일 7일 전부터(그날부터)."""
+    out = []
+    try:
+        for f, fm, it in conn.execute("SELECT filed, form, COALESCE(items,'') FROM sec_hist WHERE ticker=? AND filed > ? ORDER BY filed", (ticker.upper(), entry_day)):
+            fm = str(fm).upper()
+            if fm.startswith(EVENT_RAISE) or fm.startswith("EFFECT") or (fm.startswith("8-K") and ("3.01" in it or "3.02" in it)):
+                why = "상장 기준 미달 통지" if (fm.startswith("8-K") and "3.01" in it) else ("사모 발행" if fm.startswith("8-K") else ("등록 효력" if fm.startswith("EFFECT") else "새 조달 서류"))
+                out.append((str(f)[:10], True, f"{why} {fm} {str(f)[:10]}"))
+                break
+    except Exception:  # noqa: BLE001 (sec_hist 없음)
+        pass
+    try:
+        r = conn.execute("SELECT date, title FROM events WHERE ticker=? AND kind='역분할 시행' AND date > ? ORDER BY date LIMIT 1", (ticker.upper(), entry_day)).fetchone()
+        if r:
+            out.append(((date.fromisoformat(r[0]) - timedelta(days=7)).isoformat(), False, f"병합 예정 {r[0]}"))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def open_tier(day: str, sig_day: str | None = None) -> dict[str, list[str]]:
+    """⭐ 반등형 장부 2개: 오늘 아침 기록된 ⭐ 1·2순위(⏸ 보류 제외)를 신호 가격(신호 날 종가)으로 — 같은 종목은 10일에 한 번. day = 진입 거래일(마지막 일봉 날짜)."""
+    import setup3
+    sig_day = sig_day or date.today().isoformat()
+    out = {"tier": [], "tier_d": []}
+    with closing(db.connect()) as conn:
+        ensure(conn)
+        try:
+            rows = [dict(r) for r in conn.execute(f"SELECT ticker, price, tier, rsi FROM s3_tier_signals WHERE date=? AND tier IN (1, 2){setup3.not_held(conn)} "
+                                                  "ORDER BY tier, COALESCE(rsi, 99)", (sig_day,))]
+        except Exception:  # noqa: BLE001 (표 없음)
+            rows = []
+        for strat in out:
+            c = cfg(strat)
+            if not c["on"]:
+                continue
+            for i, r in enumerate(rows, 1):
+                if r["price"] and open_trade(conn, strat, day, r["ticker"], float(r["price"]), rank=i, note=f"⭐ {r['tier']}순위 · RSI {r['rsi'] or 0:.0f}", c=c):
+                    out[strat].append(r["ticker"])
+        conn.commit()
+    return out
 
 
 # ---------------------------------------------------------------- 매수
@@ -772,5 +837,10 @@ def daily(out=print) -> dict:
             bought["master"] = open_master(lastday, last)
         except Exception as e:  # noqa: BLE001
             out(f"가상매매: 스승 눌림목 매수 실패({e})")
+    if st.get("tier", {}).get("on") or st.get("tier_d", {}).get("on"):
+        try:   # ⭐ 반등형 장부 2개(2026-11-01) — 아침 작업이 먼저 기록한 오늘 ⭐ 1·2순위
+            bought.update(open_tier(lastday))
+        except Exception as e:  # noqa: BLE001
+            out(f"가상매매: ⭐ 반등형 매수 실패({e})")
     out("가상매매: 청산 " + str(closed) + " · 매수 " + " / ".join(f"{STRATEGIES[k]['name']} {', '.join(v) or '-'}" for k, v in bought.items()))
     return {"closed": closed, "bought": bought}
