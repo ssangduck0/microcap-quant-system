@@ -6,6 +6,8 @@
 주총·역분할·결과 전 소송은 상승 요인으로 치지 않는다(임박도 계산에서 뺌). 상태: 유력(임박 14일↓ + 압박 5↑) · 가능(임박 45일↓ 또는 런웨이 3개월↓) · 대기.
 'baby shelf 탈출'은 약한 목표: 기한이 없고, 도달하면 회사가 오히려 대량 조달(희석)할 수 있다 → '유력'이 될 수 없고 같은 상태 안에서 강한 목표(상장 유지·워런트·시총) 뒤로.
 PICK 통과 종목은 매일 아침 🏆 성과 공표에 목표 종류별(강한 목표 / baby shelf)로 기록된다(같은 종목·목표는 30일에 한 번, 60거래일 안 목표가 도달 = 성공).
+과거 비슷한 PICK(2026-11-01 · pickrisk): baby shelf·$1 목표는 '목표 먼저 x% · −30% 먼저 y%'(목표 종류 × 60일 변동성 × 거리 2년 재생 표)를 같이 보이고,
+같은 상태 안에서는 '목표 먼저 − −30% 먼저' 가 큰 순(유력·안전 순, 기본) — 판정·탈락은 그대로(닿을 확률로 거르면 변동성 큰 종목만 남아 −30% 먼저가 늘어서).
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ def is_weak(target_name: str | None) -> bool:
     return bool(target_name) and any(k in target_name for k in WEAK_TARGETS)
 
 
-def evaluate(t: str, conn, pr: dict | None, fsa: dict | None) -> dict:
+def evaluate(t: str, conn, pr: dict | None, fsa: dict | None, risk_tab: dict | None = None) -> dict:
     snap = conn.execute("SELECT price, high_20d, dilution_status FROM daily_snapshots WHERE ticker=? ORDER BY date DESC LIMIT 1", (t,)).fetchone()
     price = (snap["price"] if snap else None) or (fsa or {}).get("price")
     cands = [(n, v) for n, v, _ in (pr or {}).get("targets") or []]
@@ -104,7 +106,12 @@ def evaluate(t: str, conn, pr: dict | None, fsa: dict | None) -> dict:
     why = reason(status, imm, score, runway, n_ev, bool(pr and pr.get("listing")), past, rn)
     if cls6 == "warn":
         why += f" · ⚠️ 주식수 {sc6['pct']:+.0f}%(분기)"
-    return {"weak": weak, "why": why, "share_cls": cls6, "share_chg": (f"{sc6['pct']:+.0f}% ({sc6['d0']}→{sc6['d1']})" if sc6 else None), "has_runway": runway is not None or bool(rn), "runway_info": rn, "has_listing": bool(pr and pr.get("listing")), "n_events": n_ev, "past": past,"ticker": t, "price": price, "target_name": tname, "target": tval, "pct": pct, "imm_days": None if imm is None else imm[0], "imm_kind": None if imm is None else imm[1],
+    try:   # 🎯 과거 비슷한 PICK(목표 먼저 · −30% 먼저) — 표시·정렬용, 판정엔 안 씀
+        import pickrisk
+        risk = pickrisk.for_row(conn, t, tname, pct, risk_tab)
+    except Exception:  # noqa: BLE001
+        risk = None
+    return {"risk": risk, "weak": weak, "why": why, "share_cls": cls6, "share_chg": (f"{sc6['pct']:+.0f}% ({sc6['d0']}→{sc6['d1']})" if sc6 else None), "has_runway": runway is not None or bool(rn), "runway_info": rn, "has_listing": bool(pr and pr.get("listing")), "n_events": n_ev, "past": past,"ticker": t, "price": price, "target_name": tname, "target": tval, "pct": pct, "imm_days": None if imm is None else imm[0], "imm_kind": None if imm is None else imm[1],
             "pressure": score, "runway": runway, "status": status, "fail": fail}
 
 
@@ -147,6 +154,11 @@ def scan() -> dict:
     with closing(db.connect()) as conn:
         fundscan.ensure_tables(conn)
         reg = set(pressure.candidates(conn)) | {r[0] for r in conn.execute("SELECT DISTINCT ticker FROM fs_deals")}
+        try:
+            import pickrisk
+            tab = pickrisk.table(conn)   # 종목마다 다시 읽지 않게 한 번만
+        except Exception:  # noqa: BLE001
+            tab = {}
         rows = []
         for t in sorted(reg):
             try:
@@ -157,7 +169,7 @@ def scan() -> dict:
                 fsa = fundscan.analyze(t, conn)
             except Exception:  # noqa: BLE001
                 fsa = None
-            rows.append(evaluate(t, conn, pr, fsa))
+            rows.append(evaluate(t, conn, pr, fsa, tab))
         try:
             acc = [r[0] for r in conn.execute("SELECT ticker FROM accum WHERE period='주간' AND date=(SELECT MAX(date) FROM accum) AND score >= 4 ORDER BY score DESC")]
         except Exception:  # noqa: BLE001
@@ -171,13 +183,24 @@ def scan() -> dict:
 ORDER = {"유력": 0, "가능": 1, "대기": 2}
 
 
+def _risk_score(r: dict) -> float | None:
+    return (r.get("risk") or {}).get("score")
+
+
 def sort(rows: list[dict], how: str) -> list[dict]:
     big = 10 ** 6
     if how == "임박 순":
         return sorted(rows, key=lambda r: (r["imm_days"] if r["imm_days"] is not None else big, -r["pressure"]))
     if how == "압박 순":
         return sorted(rows, key=lambda r: (-r["pressure"], r["imm_days"] if r["imm_days"] is not None else big))
-    return sorted(rows, key=lambda r: (ORDER[r["status"]], bool(r.get("weak")), r["imm_days"] if r["imm_days"] is not None else big, -r["pressure"]))  # 같은 상태면 강한 목표 먼저
+    if how == "유력·임박 순":   # 2026-11-01 전 기본(🧪 가상매매는 진행 중인 장부라 이 순서 그대로)
+        return sorted(rows, key=lambda r: (ORDER[r["status"]], bool(r.get("weak")), r["imm_days"] if r["imm_days"] is not None else big, -r["pressure"]))  # 같은 상태면 강한 목표 먼저
+    # 기본 '유력·안전 순'(2026-11-01 사용자 승인 · docs/pick_reach_check_2026-11-01.md): 같은 상태·같은 목표 세기 안에서 과거 비슷한 PICK 의 '목표 먼저 − −30% 먼저' 가 큰 순
+    #   (2024~25 표로 2026 사건 정렬: 위 1/3 목표 먼저 27% · −30% 먼저 38% vs 아래 1/3 8% · 56% · 60일 평균은 같음). 표가 없는 목표(워런트·시총)는 가운데 점수로 → 그다음 임박 순
+    sc = sorted(s for s in (_risk_score(r) for r in rows) if s is not None)
+    mid = sc[len(sc) // 2] if sc else 0.0
+    return sorted(rows, key=lambda r: (ORDER[r["status"]], bool(r.get("weak")), -(_risk_score(r) if _risk_score(r) is not None else mid),
+                                       r["imm_days"] if r["imm_days"] is not None else big, -r["pressure"]))
 
 
 def record(conn, s: dict | None = None, today: date | None = None) -> int:
@@ -185,13 +208,18 @@ def record(conn, s: dict | None = None, today: date | None = None) -> int:
     s = s or scan()
     today = today or date.today()
     conn.execute(LOG_DDL)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(pick_signals)")}
+    for c in ("tf_p", "sf_p"):   # 2026-11-01: 그날 '과거 비슷한 PICK' 목표 먼저·−30% 먼저(%) — 🏆 에서 구간별로 맞는지 검증
+        if c not in have:
+            conn.execute(f"ALTER TABLE pick_signals ADD COLUMN {c} REAL")
     recent = {(r[0], r[1]) for r in conn.execute("SELECT ticker, target_name FROM pick_signals WHERE date >= ?", ((today - timedelta(days=30)).isoformat(),))}
     n = 0
     for r in s["pass"]:
         if not (r["price"] and r["target"] and r["target_name"]) or (r["ticker"], r["target_name"]) in recent:
             continue
-        conn.execute("INSERT OR IGNORE INTO pick_signals VALUES (?,?,?,?,?,?,?,?)",
-                     (today.isoformat(), r["ticker"], r["target_name"], r["target"], r["price"], r["pct"], r["status"], 1 if r.get("weak") else 0))
+        rk = r.get("risk") or {}
+        conn.execute("INSERT OR IGNORE INTO pick_signals (date, ticker, target_name, target, price, pct, status, weak, tf_p, sf_p) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (today.isoformat(), r["ticker"], r["target_name"], r["target"], r["price"], r["pct"], r["status"], 1 if r.get("weak") else 0, rk.get("tf"), rk.get("sf")))
         n += 1
     conn.commit()
     return n
@@ -203,13 +231,13 @@ HIST_DDL = """CREATE TABLE IF NOT EXISTS pick_hist (date TEXT NOT NULL, ticker T
 
 
 def snapshot(conn, s: dict | None = None, today: date | None = None, force: bool = False) -> int:
-    """오늘 PICK 통과 목록을 기본 정렬(유력·임박 순) 순위로 저장. 오늘 이미 있으면 그대로(force=True 면 다시)."""
+    """오늘 PICK 통과 목록을 기본 정렬(유력·안전 순 — 2026-11-01 전엔 유력·임박 순) 순위로 저장. 오늘 이미 있으면 그대로(force=True 면 다시)."""
     today = today or date.today()
     conn.execute(HIST_DDL)
     if not force and conn.execute("SELECT 1 FROM pick_hist WHERE date=? LIMIT 1", (today.isoformat(),)).fetchone():
         return 0
     s = s or scan()
-    rows = sort(s["pass"], "유력·임박 순")
+    rows = sort(s["pass"], "유력·안전 순")
     conn.execute("DELETE FROM pick_hist WHERE date=?", (today.isoformat(),))
     conn.executemany("INSERT INTO pick_hist VALUES (?,?,?,?,?,?,?,?,?,?)",
                      [(today.isoformat(), r["ticker"], k, r["status"], 1 if r.get("weak") else 0, r.get("target_name"), r.get("pct"), r.get("imm_days"),

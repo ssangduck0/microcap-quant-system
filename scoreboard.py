@@ -30,6 +30,9 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "rsplit": ("🔁 병합 후 레이더", 1, 20.0, 10),
     "pick_strong": ("🎯 PICK 강한 목표(상장유지·워런트·시총)", 1, None, 60),
     "pick_bs": ("🎯 PICK baby shelf 목표(약한 목표)", 1, None, 60),
+    # 2026-11-01(docs/pick_reach_check_2026-11-01.md): 같은 PICK 신호를 '−30% 보다 목표가 먼저'로도 잼 — 닿기만 하면 성공인 위 두 줄은 변동성 큰 종목이 유리해 보임
+    "pick_strong_tf": ("🎯 PICK 강한 목표 · 목표 먼저(−30% 전에)", 1, None, 60),
+    "pick_bs_tf": ("🎯 PICK baby shelf · 목표 먼저(−30% 전에)", 1, None, 60),
     "setup3": ("✅ 스승님 3대 조건(돈·지지·희석 없음)", 1, 30.0, 10),
     "scr": ("📇 스크리너 카드(외부·직접 후보)", 1, 30.0, 20),   # 남이 추천하거나 직접 넣은 종목 — 추천이 맞는지 검증
     "ai_hi": ("🤖 AI PICK · 확신 높음", 1, 30.0, 20),   # Claude 판단 상위 10 · 20거래일 안 +30%
@@ -65,6 +68,7 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "chart_top": ("📐 고점 윗꼬리 캔들 → 5일 안 하락", -1, 0.0, 5),
     "chart_life": ("📐 생명선 이탈 → 5일 안 하락", -1, 0.0, 5),
 }
+STOP = {"pick_strong_tf": 30.0, "pick_bs_tf": 30.0}   # 오름 예측인데 −손절% 가 목표보다 먼저(같은 날이면 손절 먼저) 닿으면 실패
 CHART_SRC = {"pullback": "chart_pullback", "h60_200": "chart_h60", "gc520": "chart_gc", "turn3": "chart_turn", "top_candle": "chart_top", "life_break": "chart_life"}
 SCORE_MIN = 70.0
 DDL = """CREATE TABLE IF NOT EXISTS pred_outcomes (source TEXT NOT NULL, date TEXT NOT NULL, ticker TEXT NOT NULL, ref TEXT NOT NULL DEFAULT '',
@@ -127,8 +131,9 @@ def collect(conn) -> pd.DataFrame:
         tgt = (r["box_high"] / r["price"] - 1) * 100 if r["price"] and r["box_high"] else 10.0
         add("piggy", r["date"], r["ticker"], r["price"], note=f"박스 상단 ${r['box_high']:.4f}" if r["box_high"] else "", target=max(tgt, 1.0))
     for r in _q(conn, "SELECT date, ticker, target_name, target, price, pct, status, weak FROM pick_signals"):  # 목표가 도달 = 성공(목표 %는 신호마다 다름)
-        add("pick_bs" if r["weak"] else "pick_strong", r["date"], r["ticker"], r["price"], ref=r["target_name"][:12],
-            note=f"{r['target_name']} ${r['target']:.4f} · {r['status']}", target=max(r["pct"] or 1.0, 1.0))
+        for src in (("pick_bs", "pick_bs_tf") if r["weak"] else ("pick_strong", "pick_strong_tf")):
+            add(src, r["date"], r["ticker"], r["price"], ref=r["target_name"][:12],
+                note=f"{r['target_name']} ${r['target']:.4f} · {r['status']}", target=max(r["pct"] or 1.0, 1.0))
     for r in _q(conn, "SELECT filed, ticker, kind, discount_pct, note FROM toxic_deals WHERE level='악성'"):   # ⚠️ 할인 전환 → 폭락 검증
         add("toxic_drop", r["filed"], r["ticker"], note=f"{r['kind']} 할인 {r['discount_pct'] or 0:.0f}%")
     try:
@@ -182,7 +187,7 @@ def collect(conn) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def outcome(df: pd.DataFrame | None, day: str, entry: float | None, horizon: int, direction: int, target: float) -> dict:
+def outcome(df: pd.DataFrame | None, day: str, entry: float | None, horizon: int, direction: int, target: float, stop: float | None = None) -> dict:
     if df is None or df.empty:
         return {"status": "대기", "bars": 0}
     d = df.copy()
@@ -198,7 +203,18 @@ def outcome(df: pd.DataFrame | None, day: str, entry: float | None, horizon: int
     mu, md = float((a["High"].max() / entry - 1) * 100), float((a["Low"].min() / entry - 1) * 100)
     ch = float((a["Close"].iloc[-1] / entry - 1) * 100)
     done = len(a) >= horizon
-    if direction > 0:
+    if direction > 0 and stop:   # 목표 먼저(−stop% 전에): 날짜순으로 먼저 닿은 쪽 · 같은 날 둘 다면 손절 먼저(보수적)
+        up = (a["High"] >= entry * (1 + target / 100)).to_numpy()
+        dn = (a["Low"] <= entry * (1 - stop / 100)).to_numpy()
+        iu = int(up.argmax()) if up.any() else None
+        idn = int(dn.argmax()) if dn.any() else None
+        if idn is not None and (iu is None or idn <= iu):
+            st = "실패"
+        elif iu is not None:
+            st = "성공"
+        else:
+            st = "실패" if done else "대기"
+    elif direction > 0:
         st = "성공" if mu >= target else ("실패" if done else "대기")
     elif target and target > 0:   # 내림 예측에 목표 % 가 있으면: 저가가 −목표% 에 닿으면 성공(toxic_drop)
         st = "성공" if md <= -target else ("실패" if done else "대기")
@@ -328,7 +344,7 @@ def update(conn, today: date | None = None, out=print, download=None) -> dict:
             df = data.get(r["ticker"])
             entry, why = pv.fix_entry(r["ticker"], r["date"], r["entry"], df, conn)  # 병합 뒤 가격 단위 맞춤
             n_fix += bool(why)
-            o = outcome(df, r["date"], entry, r["horizon"], r["direction"], r["target"])
+            o = outcome(df, r["date"], entry, r["horizon"], r["direction"], r["target"], STOP.get(r["source"]))
             g = gone.get(r["ticker"])
             if g and o["status"] == "대기" and (g.get("detected") or "9999") <= (today - timedelta(days=pv_grace())).isoformat():
                 # 주가가 끊긴 지 7일 넘게 그대로(거래정지가 풀리지 않음) → 평가 기간을 못 채운 채 있는 데까지로 확정

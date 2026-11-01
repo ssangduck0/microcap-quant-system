@@ -1,4 +1,4 @@
-"""🎯 PICK +30% 화면 — 고정 조건 깔때기 · 유력·임박 / 임박 / 압박 순 · 칩 그리드(휴대폰 3열) · 새로고침 순서 비교 · 텍스트 복사 · 📊 PICK 변동."""
+"""🎯 PICK +30% 화면 — 고정 조건 깔때기 · 유력·안전 / 유력·임박 / 임박 / 압박 순 · 칩 그리드(휴대폰 3열 · 🎯 목표 먼저 · 📉 −30% 먼저) · 새로고침 순서 비교 · 텍스트 복사 · 📊 PICK 변동."""
 from contextlib import closing
 
 import pandas as pd
@@ -7,6 +7,7 @@ import streamlit as st
 import db
 
 import pick30
+import pickrisk
 import ui_kit as ui
 
 STC = {"유력": "#E5484D", "가능": "#F76B15", "대기": "#B58A00"}
@@ -39,19 +40,44 @@ def grid(rows: list[dict], first: dict | None = None, badges: dict | None = None
             d = first[r["ticker"]] - i
             mv = f'<span style="color:{"#E5484D" if d > 0 else "#3678F6"};font-size:.72rem;margin-left:4px">{"↑" if d > 0 else "↓"}{abs(d)}</span>'
         dd = "" if r["imm_days"] is None or r["imm_days"] > 365 else f' · D-{r["imm_days"]}'
+        rk = r.get("risk")
         cells.append(f'<div class="qk-pick"><div class="l1"><span class="n">{i}</span><b>{ui.esc(r["ticker"])}</b>{mv}</div>'
                      f'<div class="l2"><span style="color:{STC[r["status"]]};font-weight:700">{r["status"]}</span>'
                      + ('<span class="wk" title="약한 목표: baby shelf 탈출">약</span>' if r.get("weak") else "")
                      + (f' · +{pct:.0f}%{dd}' if pct is not None else f' · -{dd}')
                      + ((lambda b: f' <span title="{ui.esc("🎲 매매 전 시뮬레이션 " + __import__("presim_ui").badge_text(b))}">{__import__("presim").main_verdict(b) or b["verdict"]}</span>')(badges[r["ticker"]]) if badges and r["ticker"] in badges else "")
-                     + '</div></div>')
+                     + '</div>'
+                     + (f'<div class="l3{" hv" if rk["high_vol"] else ""}" title="{ui.esc(pickrisk.label(rk))}">{pickrisk.chip(rk)}</div>' if rk else "")
+                     + '</div>')
     return ('<style>.qk-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 12px}'
             '.qk-pick{border:1px solid rgba(128,128,128,.28);border-radius:12px;padding:8px 10px;line-height:1.35}'
             '.qk-pick .l1{font-size:1.02rem;white-space:nowrap}.qk-pick .n{opacity:.55;font-size:.8rem;margin-right:6px}'
             '.qk-pick .l2{font-size:.8rem;opacity:.9;white-space:nowrap}'
             '.qk-pick .wk{display:inline-block;margin-left:4px;padding:0 4px;border-radius:5px;font-size:.68rem;font-weight:700;background:rgba(128,128,128,.25)}'
-            '@media (max-width:768px){.qk-pick-grid{grid-template-columns:repeat(3,1fr);gap:6px}.qk-pick{padding:7px 8px}.qk-pick .l1{font-size:.95rem}.qk-pick .l2{font-size:.72rem}}</style>'
+            '.qk-pick .l3{font-size:.74rem;opacity:.75;white-space:nowrap}.qk-pick .l3.hv{color:#E5484D;opacity:.95}'
+            '@media (max-width:768px){.qk-pick-grid{grid-template-columns:repeat(3,1fr);gap:6px}.qk-pick{padding:7px 8px}.qk-pick .l1{font-size:.95rem}.qk-pick .l2,.qk-pick .l3{font-size:.72rem}}</style>'
             '<div class="qk-pick-grid">' + "".join(cells) + "</div>")
+
+
+def risk_box(rows: list[dict]) -> None:
+    """📉 과거 비슷한 PICK — 종목마다 목표 먼저 · −30% 먼저 · 60일 뒤(2026-11-01 · docs/pick_reach_check_2026-11-01.md)."""
+    rr = [r for r in rows if r.get("risk")]
+    if not rr:
+        return
+    with st.expander(f"📉 과거 비슷한 PICK 결과 — {len(rr)}종목"):
+        st.caption("PICK 목표(baby shelf 탈출가 · $1)를 지난 일봉으로 그날 정보만 써서 다시 만들고, 60거래일 안 어느 쪽이 먼저 닿았는지 센 표예요(매주 토요일 다시 계산). "
+                   "닿을 확률이 높은 종목은 대개 변동성이 커서 −30% 도 먼저 더 많이 맞아요 — 그래서 거르지 않고 양쪽을 같이 보여 주고, '안전순'은 목표 먼저 − −30% 먼저가 큰 순이에요. "
+                   "워런트·시총 목표는 과거 자료가 없어 비어 있어요.")
+        st.dataframe(pd.DataFrame([{"티커": r["ticker"], "상태": r["status"] + (" · 약" if r.get("weak") else ""), "목표": r["target_name"], "목표까지(%)": r["pct"],
+                                    "60일 변동성(%)": r["risk"]["vol"], "목표 먼저(%)": r["risk"]["tf"], "−30% 먼저(%)": r["risk"]["sf"], "60일 뒤 중앙(%)": r["risk"]["med"],
+                                    "비슷한 사례": r["risk"]["n"], "묶음": r["risk"]["group"] + (" ⚠️" if r["risk"]["high_vol"] else "")} for r in rr]),
+                     hide_index=True, width="stretch",
+                     column_config={"목표까지(%)": st.column_config.NumberColumn(format="%+.0f"), "60일 변동성(%)": st.column_config.NumberColumn(format="%.0f"),
+                                    "목표 먼저(%)": st.column_config.NumberColumn(format="%.0f"), "−30% 먼저(%)": st.column_config.NumberColumn(format="%.0f"),
+                                    "60일 뒤 중앙(%)": st.column_config.NumberColumn(format="%+.0f")})
+        b = rr[0]["risk"].get("built")
+        if b:
+            st.caption(f"표 만든 날 {b}")
 
 
 def why_box(rows: list[dict], w: dict) -> None:
@@ -188,11 +214,12 @@ def render_pick() -> None:
     ui.title("PICK +30%", "회사가 노리는 목표가가 +30%~+150% 안에 있고 하방 희석·매도 압력·다른 해결 방법이 없는 종목. 규칙 기반이며 매수 권유가 아닙니다.")
     with st.container(key="pk_ctrl"):  # 정렬 · 새로고침 · 텍스트를 한 줄에(휴대폰에서도)
         c1, c2, c3 = st.columns([3.2, 1, 1])
-        opts = ["유력·임박 순", "임박 순", "압박 순"]
+        opts = ["유력·안전 순", "유력·임박 순", "임박 순", "압박 순"]   # 2026-11-01: 기본 = 같은 상태 안 '목표 먼저 − −30% 먼저' 큰 순(pickrisk)
         if hasattr(st, "segmented_control"):
-            short = {"유력·임박 순": "유력순", "임박 순": "임박순", "압박 순": "압박순"}  # 휴대폰 한 줄에 들어가게 짧게(정렬 값은 그대로)
+            short = {"유력·안전 순": "안전순", "유력·임박 순": "유력순", "임박 순": "임박순", "압박 순": "압박순"}  # 휴대폰 한 줄에 들어가게 짧게(정렬 값은 그대로)
             how = c1.segmented_control("정렬", opts, default=opts[0], key="pk_sort", label_visibility="collapsed",
-                                       format_func=lambda o: short.get(o, o), help="유력순 = 유력·임박 순") or opts[0]
+                                       format_func=lambda o: short.get(o, o),
+                                       help="안전순 = 유력·안전 순(같은 상태 안에서 과거 비슷한 PICK 의 목표 먼저 − −30% 먼저가 큰 순) · 유력순 = 유력·임박 순(예전 기본)") or opts[0]
         else:
             how = c1.radio("정렬", opts, horizontal=True, key="pk_sort", label_visibility="collapsed")
         if c2.button("↻", key="pk_re", help="다시 계산하고 처음 연 순서와 비교(↑↓)", width="stretch"):
@@ -218,10 +245,15 @@ def render_pick() -> None:
         st.markdown(grid(rows, st.session_state[first_key], presim_ui.badges([r["ticker"] for r in rows])), unsafe_allow_html=True)
         if show_txt:
             st.code("\n".join(f"{i}. {r['ticker']} {r['status']}{'(약)' if r.get('weak') else ''} +{r['pct']:.0f}% → {r['target_name']} ${r['target']:.4f}" + ("" if r["imm_days"] is None else f" · D-{r['imm_days']} {r['imm_kind']}") + f" · {r.get('why', '')}"
+                              + (f" · 과거 비슷한 PICK 목표 먼저 {r['risk']['tf']:.0f}% · −30% 먼저 {r['risk']['sf']:.0f}%" + (" ⚠️" if r["risk"]["high_vol"] else "") if r.get("risk") else "")
                               for i, r in enumerate(rows, 1)), language=None)
+        if any(r.get("risk") for r in rows):
+            st.caption("**🎯 · 📉** = 과거 비슷한 PICK(같은 목표 종류 · 60일 변동성 · 목표까지 거리, 2년 재생) 중 60거래일 안에 **목표가 먼저** 닿은 % · **−30% 가 먼저** 닿은 %. "
+                       "**⚠️** = 변동성 50%↑(과거 절반 넘게 목표 전에 −30%). 매수 신호가 아니에요 — 어느 묶음도 60일 뒤 중앙값이 플러스가 아니었어요.")
         if any(r.get("weak") for r in rows):
             st.caption("**약** = 'baby shelf 탈출' 목표(약한 목표): 기한이 없고, 도달하면 회사가 오히려 대량 조달(희석)할 수 있어요. "
                        "'유력'이 될 수 없고, 같은 상태 안에서 상장 유지·워런트 목표 뒤에 놓여요.")
+        risk_box(rows)
         why_box(rows, s.get("why") or {})
         pick = st.selectbox("자세히", ["(선택)"] + [r["ticker"] for r in rows], key="pk_open")
         if pick != "(선택)":

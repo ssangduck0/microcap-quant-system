@@ -354,6 +354,12 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         out(f"공시 점수표: {_v.get('why')}")
     except Exception as e:  # noqa: BLE001
         log.exception("공시 점수표 실패: %s", e)
+    try:  # 🎯 PICK '과거 비슷한 사례' 표(목표 먼저 · −30% 먼저): 토요일 또는 표가 없으면 2~3년 재생으로 다시(PC 15초 · 아래 PICK 기록 전에) — docs/pick_reach_check_2026-11-01.md
+        import pickrisk
+        with closing(db.connect()) as _c:
+            pickrisk.maybe_build(_c, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("PICK 과거 사례 표 실패: %s", e)
     try:  # 🪙 런웨이 채우기: PICK 통과 → 목표가 있는 종목 → 회사 압박 후보 순으로 SEC 재무(현금·월 소모량), 하루 상한
         import config as _cfgR
         if "@" in _cfgR.SEC_USER_AGENT:

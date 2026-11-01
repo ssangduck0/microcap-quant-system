@@ -74,7 +74,7 @@ def candidates(conn, scan: dict | None = None, limit: int | None = None, ranking
             rk[r["ticker"]] = {"pos": i, "score": round(float(r.get("score") or 0), 1), "parts": {k: v for k, v in list(parts.items())[:6] if v}}
     try:
         import pick30
-        rows = pick30.sort(scan.get("pass", []), "유력·임박 순")
+        rows = pick30.sort(scan.get("pass", []), "유력·안전 순")   # 2026-11-01: PICK 화면 기본과 같게(과거 비슷한 PICK '목표 먼저 − −30% 먼저' 큰 순 → 위 25 의 −30% 먼저 평균 31 → 24%)
     except Exception:  # noqa: BLE001
         rows = scan.get("pass", [])
     out, seen = [], set()
