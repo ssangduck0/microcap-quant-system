@@ -59,8 +59,9 @@ def analyze(df: pd.DataFrame | None, after_start: datetime, now: datetime, fx: f
     good = win[(win["Volume"] > 0) & (win["High"] > win["Low"])]
     flat = int(((win["High"] <= win["Low"]) | (win["Volume"] <= 0)).sum()) + max(0, expected - len(win))
     candle_ratio = min(1.0, len(good) / expected)
-    marks = sorted({ts.floor("min") for ts in good.index})  # 거래가 있는 분들 사이의 최대 공백(분)
-    pts = [w0.astimezone(good.index.tz) if good.index.tz else w0, *marks, now.astimezone(good.index.tz) if good.index.tz else now] if len(marks) else [w0, now]
+    tzi = good.index.tz   # 2026-11-01: 내림은 UTC 로(서머타임 끝나는 날 현지 01시가 두 번이라 현지 시각 내림이 '모호한 시각' 오류)
+    marks = sorted({(ts.tz_convert("UTC") if tzi is not None else ts).floor("min") for ts in good.index})  # 거래가 있는 분들 사이의 최대 공백(분)
+    pts = [w0.astimezone(timezone.utc) if tzi is not None else w0, *marks, now.astimezone(timezone.utc) if tzi is not None else now] if len(marks) else [w0, now]
     max_gap = int(max((b - a).total_seconds() // 60 - 1 for a, b in zip(pts, pts[1:]))) if len(pts) > 1 else expected
     lb = d  # 오늘(프리마켓부터) 전체: 급등이 앞에서 났고 지금은 이동평균선까지 눌린 경우가 바로 진입 구간이라 최근 몇 시간만 보면 놓친다
     hi_ts = lb["High"].idxmax()

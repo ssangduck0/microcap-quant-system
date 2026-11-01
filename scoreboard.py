@@ -17,6 +17,8 @@ import db
 
 SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래일)
     "close": ("🎯 장마감 체크리스트(BEST·후보)", 1, 10.0, 1),
+    # 2026-11-01 스캐너 점검(docs/scanner_upgrade_2026-11-01.md): 가장 많은 알림(🎯 펌핑 점수 ≥ ALERT_MIN_PUMP_SCORE, 하루 약 10건)이 성적 기록이 없었음 → 10거래일 안 +30%
+    "pump": ("🎯 펌핑 점수 알림(≥70)", 1, 30.0, 10),
     "score": ("📊 승률 점수 상위(≥70점)", 1, 10.0, 1),
     "shortflow_up": ("🩳 공매도 흐름 ②③(진입·커버)", 1, 10.0, 5),
     "shortflow_exit": ("🩳 공매도 흐름 ④(청산)", -1, 0.0, 5),
@@ -95,6 +97,17 @@ def collect(conn) -> pd.DataFrame:
         pass
     for r in _q(conn, "SELECT date, ticker, win_score, price FROM daily_snapshots WHERE win_score >= ?", (SCORE_MIN,)):
         add("score", r["date"], r["ticker"], note=f"종합 {r['win_score']:.0f}점")
+    try:  # 🎯 펌핑 점수 알림: 스캐너가 텔레그램을 보내는 조건(점수 ≥ 기준 · 제외 아님)의 신호 — 종목·날짜당 처음 한 번, 진입 = 포착 가격
+        import config as _cfgP
+        seen_p = set()
+        for r in _q(conn, """SELECT s.date, s.ticker, s.price, s.pump_score, s.reason FROM signals s JOIN daily_snapshots d ON d.date = s.date AND d.ticker = s.ticker
+                             WHERE s.pump_score >= ? AND COALESCE(d.excluded, 0) = 0 ORDER BY s.date, s.ts""", (float(getattr(_cfgP, "ALERT_MIN_PUMP_SCORE", 70.0)),)):
+            if (r["date"], r["ticker"]) in seen_p:
+                continue
+            seen_p.add((r["date"], r["ticker"]))
+            add("pump", r["date"], r["ticker"], r["price"], note=f"펌핑 {r['pump_score']:.0f} · {r['reason'] or ''}"[:120])
+    except Exception:  # noqa: BLE001
+        pass
     for r in _q(conn, "SELECT date, ticker, stage, price FROM shortflow_events"):
         add("shortflow_exit" if r["stage"].startswith("④") else "shortflow_up", r["date"], r["ticker"], r["price"], ref=r["stage"][:1], note=r["stage"])
     for r in _q(conn, "SELECT date, ticker, kind, price FROM flowread_events"):
@@ -186,6 +199,63 @@ def outcome(df: pd.DataFrame | None, day: str, entry: float | None, horizon: int
     else:
         st = ("성공" if ch < 0 else "실패") if done else "대기"
     return {"status": st, "bars": int(len(a)), "entry": entry, "max_up": mu, "max_down": md, "close_h": ch}
+
+
+# 2026-11-01 알림마다 '지난 성적' 한 줄(docs/scanner_upgrade_2026-11-01.md): 기간(호라이즌)이 다 끝난 판정만 셈 — 성공은 닿는 순간 끝나고 실패는 기간 뒤에 끝나
+#   '끝난 것만' 세면 처음엔 성공률이 부풀기 때문(⭐ 3대 조건 '성공 100%' 착시와 같은 이유).
+TRACK_MIN = 10            # 이보다 적으면 '기록 쌓는 중'
+_TRACK = {"at": 0.0, "stats": {}}
+
+
+def track_stats(conn=None, max_age: float = 1800.0) -> dict[str, tuple[int, int]]:
+    """{출처: (기간이 끝난 판정 수, 그중 성공 수)} — 30분 캐시(스캐너가 알림마다 부름)."""
+    import time
+    if _TRACK["stats"] and time.time() - _TRACK["at"] < max_age:
+        return _TRACK["stats"]
+    import numpy as np
+    from contextlib import closing
+    out: dict[str, list[int]] = {}
+    today = np.datetime64(date.today().isoformat())
+
+    def run(c):
+        for s, d, st in c.execute("SELECT source, date, status FROM pred_outcomes WHERE status IN ('성공','실패')"):
+            hz = int((SOURCES.get(s) or (None, 1, 0, 10))[3] or 0)
+            try:
+                end = np.busday_offset(np.datetime64(str(d)[:10]), hz, roll="forward")
+            except ValueError:
+                continue
+            if end < today:   # 기간이 다 지난 판정만(오늘 끝나는 건 내일부터)
+                a = out.setdefault(s, [0, 0])
+                a[0] += 1
+                a[1] += st == "성공"
+    try:
+        if conn is not None:
+            run(conn)
+        else:
+            with closing(db.connect()) as c:
+                run(c)
+    except Exception:  # noqa: BLE001 (표 없음)
+        return _TRACK["stats"]
+    _TRACK.update(at=time.time(), stats={k: (v[0], v[1]) for k, v in out.items()})
+    return _TRACK["stats"]
+
+
+def track_line(source: str, conn=None) -> str:
+    """알림 끝에 붙이는 한 줄 — '📊 이 알림 지난 성적: 기간 끝난 n건 중 성공 x%(목표 …)'. 출처를 모르면 빈 문자열."""
+    if source not in SOURCES:
+        return ""
+    _name, direction, tgt, hz = SOURCES[source]
+    if direction < 0:
+        goal = f"{hz}거래일 안 −{tgt:g}%" if tgt else f"{hz}거래일 뒤 하락"
+    else:
+        goal = ("박스 상단·목표가" if tgt is None else f"+{tgt:g}%") + (" · 당일" if hz == 0 else f" · {hz}거래일 안")
+    try:
+        n, ok = track_stats(conn).get(source, (0, 0))
+    except Exception:  # noqa: BLE001
+        n, ok = 0, 0
+    if n < TRACK_MIN:
+        return f"📊 이 알림 지난 성적: 기록 쌓는 중({n}건 · 목표 {goal})"
+    return f"📊 이 알림 지난 성적: 기간 끝난 {n}건 중 성공 {ok / n * 100:.0f}%(목표 {goal})"
 
 
 def pv_grace() -> int:

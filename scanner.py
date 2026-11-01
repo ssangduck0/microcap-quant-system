@@ -290,7 +290,7 @@ def after_scalp_cycle(conn, tc, frames0: dict) -> None:
             if now < deadline and config.AFTER_ALERTS and conn.execute("SELECT 1 FROM after_signals WHERE date=? AND ticker=? AND at=?", (day, t, now.isoformat())).fetchone():
                 pl = r["plan"]
                 notify.send_telegram(f"🌙 {t} 애프터 진입 구간 ${r['price']:.4f}\n목표 +5% ${pl['target']:.4f} · +7% ${pl['target7']:.4f} · 손절 -5% ${pl['stop']:.4f}\n"
-                                     f"매도 마감 {kst} KST · 거래대금 {r['value_krw'] / 1e8:,.0f}억 원 · 급등 +{r['spike_pct']:.0f}% (스승님 꿀팁: 애프터 스캘핑)")
+                                     f"매도 마감 {kst} KST · 거래대금 {r['value_krw'] / 1e8:,.0f}억 원 · 급등 +{r['spike_pct']:.0f}% (스승님 꿀팁: 애프터 스캘핑)" + _track("after"))
     for sgl in today_sig + [dict(r) for r in conn.execute("SELECT ticker, at, price FROM after_signals WHERE date=? AND max_up IS NULL", (day,))]:
         oc = afterscalp.outcome(frames.get(sgl["ticker"]), datetime.fromisoformat(sgl["at"]), sgl["price"], deadline)
         afterscalp.update_outcome(conn, day, sgl["ticker"], oc)
@@ -303,6 +303,16 @@ def after_scalp_cycle(conn, tc, frames0: dict) -> None:
     except Exception as e:  # noqa: BLE001
         log.warning("가상매매 애프터 판정 실패: %s", e)
     log.info("애프터 스캘핑: %d종목 판정 · 진입 구간 %d · 매도 마감 %s KST", len(syms), n_in, kst)
+
+
+def _track(source: str) -> str:
+    """알림 끝에 붙이는 '📊 이 알림 지난 성적' 한 줄(2026-11-01 · scoreboard.track_line) — 실패하면 빈 문자열(알림은 그대로 보냄)."""
+    try:
+        import scoreboard
+        ln = scoreboard.track_line(source)
+        return ("\n" + ln) if ln else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_client=None) -> int:
@@ -445,7 +455,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
                 if not excluded and p_score >= config.ALERT_MIN_PUMP_SCORE and notify.repeat_ok(conn, ticker, reason):   # '가격 변동' 재알림은 하루 상한(관리 모드)
                     notify.send_telegram(
                         f"[{ticker}] 펌핑점수 {p_score} | 낙폭 {m['drawdown_pct']:.1f}% | "
-                        f"{scoring.STATUS_LABEL.get(status, status)} | {reason}")
+                        f"{scoring.STATUS_LABEL.get(status, status)} | {reason}" + _track("pump"))
             why = f" ({dil.get('error')})" if status == "UNKNOWN" and dil.get("error") else ""
             log.info("%s 낙폭 %.1f%% 퀀트 %.1f 펌핑 %s 희석=%s%s%s", ticker, m["drawdown_pct"], q_score,
                      "제외" if excluded else p_score, status, why,
@@ -497,7 +507,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
         try:
             pset = set(piggy.tickers())
             for msg in piggy.alerts({t: m["price"] for t, m in passing if t in pset and m.get("price")}):
-                notify.send_telegram(msg)
+                notify.send_telegram(msg + (_track("piggy") if "🟢 저점 구간" in msg.splitlines()[0] and "매수 보류" not in msg else ""))
                 log.info("저금통 알림: %s", msg.splitlines()[0])
         except Exception as e:  # noqa: BLE001
             log.warning("저금통 알림 실패: %s", e)
@@ -555,7 +565,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
             if r and r["stage"] in shortflow.ALERT_STAGES and shortflow.record(conn, t, day, r["stage"], r["price"]):
                 log.info("공매도 흐름 신호: %s %s", t, r["stage"])
                 if config.SHORTFLOW_ALERTS:
-                    notify.send_telegram(f"🩳 {t} {r['stage']}\n현재 ${r['price']:.4f} · 반복 {r['cycles']}회 · 얇은 양봉 {r['cover_run']}개 (스승님 꿀팁: 공매도 흐름)")
+                    notify.send_telegram(f"🩳 {t} {r['stage']}\n현재 ${r['price']:.4f} · 반복 {r['cycles']}회 · 얇은 양봉 {r['cover_run']}개 (스승님 꿀팁: 공매도 흐름)" + _track("shortflow_exit" if r["stage"].startswith("④") else "shortflow_up"))
     except Exception as e:  # noqa: BLE001
         log.warning("공매도 흐름 판정 실패: %s", e)
     if tc is not None and config.AFTER_SCALP_ENABLED and (db.get_meta("us_session") or {}).get("value") == "애프터마켓":
@@ -626,7 +636,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
             if flowread.record(conn, t, last["날짜"], last["판정"], float(last["종가"])):
                 log.info("분산·털기 신호: %s %s %s", t, last["날짜"], last["판정"])
                 if config.FLOWREAD_ALERTS:
-                    notify.send_telegram(f"📈 {t} {last['판정']} ({last['날짜']})\n등락 {last['등락(%)']:+.1f}% · 거래량 전일 대비 {last['전일 대비 거래량(배)']:.1f}배 (스승님 꿀팁: 분산·털기)")
+                    notify.send_telegram(f"📈 {t} {last['판정']} ({last['날짜']})\n등락 {last['등락(%)']:+.1f}% · 거래량 전일 대비 {last['전일 대비 거래량(배)']:.1f}배 (스승님 꿀팁: 분산·털기)" + _track("flow_down" if str(last["판정"]).startswith(("🔻", "⚠️")) else "flow_up"))
     except Exception as e:  # noqa: BLE001
         log.warning("분산·털기 판정 실패: %s", e)
     try:  # 🕵️ 세력·셋업(스승님 꿀팁): 워치리스트·저금통·오늘 장마감 고정 종목을 하루 한 번(사이클당 상한)
