@@ -41,6 +41,7 @@ import market
 import notify
 import scoring
 import sec
+import stage1fast
 import toss
 import tossws
 import universe
@@ -124,8 +125,48 @@ def stage1(all_tickers: list[str], priority: set[str], tc=None, manual: frozense
     """1단계: 전체 종목 일봉(싼 호출)으로 후보를 거른다. 반환: (후보 티커 순서 목록, 일봉 dict, 발행주식수 dict).
 
     시총 필터는 '거래량 급증 상위 N개'를 고르기 *전에* 적용한다 — 나중에 걸러내면 대형주가 차지한 자리만큼 초소형주가 밀려난다.
+    일봉은 🛰 stage1fast(설정 STAGE1_MODE: full=지금 방식 · shadow=지금 방식 + 빠른 모드 비교 기록 · fast=일괄 시세 + 하루 한 번 받은 지난 일봉).
     """
-    daily = market.download_daily(all_tickers, period="2mo", chunk=config.DAILY_CHUNK)
+    daily, s1 = stage1fast.daily_for(all_tickers)
+    prio, others, px, bars = _screen(daily, priority)
+
+    shares: dict[str, float] = {}
+    if tc is not None and config.MAX_MARKET_CAP_USD:
+        try:
+            shares = fetch_shares(tc, prio + [t for _, t in others])
+        except Exception as e:  # noqa: BLE001
+            log.warning("토스 종목 정보 조회 실패(1단계 시총 필터 건너뜀): %s", e)
+        n0 = len(prio) + len(others)
+        prio, others = _cap_filter(prio, others, shares, px, manual)
+        if n0 - len(prio) - len(others):
+            log.info("1단계 시총 필터(>$%sM)로 제외: %d개", f"{config.MAX_MARKET_CAP_USD / 1e6:,.0f}", n0 - len(prio) - len(others))
+
+    # 시장 전체 스트레스: 가장 최근 거래일 기준 전체 종목 중 -10% 이하로 빠진 종목의 비율 (모델 입력, 과거 사건 쪽과 같은 정의)
+    mkt = market_down_frac(bars)
+
+    others.sort(reverse=True)  # 오늘 거래량이 평소 대비 많이 늘어난 순
+    picked = prio + [t for _, t in others[:config.MAX_CANDIDATES]]
+    cmp = None
+    if s1.get("fast") is not None:
+        try:
+            cmp = stage1_compare(daily, s1.pop("fast"), priority, shares if tc is not None and config.MAX_MARKET_CAP_USD else {}, manual)
+        except Exception:  # noqa: BLE001
+            log.exception("1단계 비교 실패")
+    try:
+        stage1fast.refresh(daily, picked, s1)
+    except Exception as e:  # noqa: BLE001
+        log.warning("정밀 분석 대상 일봉 다시 받기 실패(시세로 만든 일봉 사용): %s", e)
+    s1.pop("fast", None)
+    stage1fast.record(s1, cmp)
+    log.info(stage1fast.label(s1, cmp))
+    beat("정밀 분석 중")
+    log.info("1단계: 일봉 확보 %d/%d → 필터 통과 %d → 정밀 분석 대상 %d (우선종목 %d)",
+             len(daily), len(all_tickers), len(others), len(picked), len(prio))
+    return picked, daily, shares, mkt
+
+
+def _screen(daily: dict, priority: set[str]):
+    """1단계 거르기(일봉만): 반환 (우선종목, [(거래량 배수, 종목)] 통과, 가격 dict, [(마지막 봉 날짜, 등락률)])."""
     prio, others, px, bars = [], [], {}, []
     for t, d in daily.items():
         q = market.quick_screen(d)
@@ -143,29 +184,26 @@ def stage1(all_tickers: list[str], priority: set[str], tc=None, manual: frozense
         if q["drawdown_pct"] > config.MIN_DRAWDOWN_PCT + config.STAGE1_MARGIN_PCT:
             continue
         others.append((q["vol_mult"], t))
+    return prio, others, px, bars
 
-    shares: dict[str, float] = {}
-    if tc is not None and config.MAX_MARKET_CAP_USD:
-        try:
-            shares = fetch_shares(tc, prio + [t for _, t in others])
-        except Exception as e:  # noqa: BLE001
-            log.warning("토스 종목 정보 조회 실패(1단계 시총 필터 건너뜀): %s", e)
-        small = lambda t: t not in shares or shares[t] * px[t] <= config.MAX_MARKET_CAP_USD  # noqa: E731
-        n0 = len(prio) + len(others)
-        prio = [t for t in prio if t in manual or small(t)]
-        others = [(v, t) for v, t in others if small(t)]
-        if n0 - len(prio) - len(others):
-            log.info("1단계 시총 필터(>$%sM)로 제외: %d개", f"{config.MAX_MARKET_CAP_USD / 1e6:,.0f}", n0 - len(prio) - len(others))
 
-    # 시장 전체 스트레스: 가장 최근 거래일 기준 전체 종목 중 -10% 이하로 빠진 종목의 비율 (모델 입력, 과거 사건 쪽과 같은 정의)
-    mkt = market_down_frac(bars)
+def _cap_filter(prio: list, others: list, shares: dict, px: dict, manual) -> tuple[list, list]:
+    small = lambda t: t not in shares or shares[t] * px[t] <= config.MAX_MARKET_CAP_USD  # noqa: E731
+    return [t for t in prio if t in manual or small(t)], [(v, t) for v, t in others if small(t)]
 
-    others.sort(reverse=True)  # 오늘 거래량이 평소 대비 많이 늘어난 순
-    picked = prio + [t for _, t in others[:config.MAX_CANDIDATES]]
-    beat("정밀 분석 중")
-    log.info("1단계: 일봉 확보 %d/%d → 필터 통과 %d → 정밀 분석 대상 %d (우선종목 %d)",
-             len(daily), len(all_tickers), len(others), len(picked), len(prio))
-    return picked, daily, shares, mkt
+
+def stage1_compare(full: dict, fast: dict, priority: set[str], shares: dict, manual) -> dict:
+    """🛰 지금 방식 일봉 vs 빠른 모드 일봉의 1단계 결과 비교: 통과 겹침(지금 통과 중 빠른 모드도 통과 %) · 정밀 분석 대상(우선종목 제외) 겹침 %."""
+    def run(daily):
+        prio, others, px, _ = _screen(daily, priority)
+        passed = {t for _, t in others}
+        if shares:
+            prio, others = _cap_filter(prio, others, shares, px, manual)
+        return passed, {t for _, t in sorted(others, reverse=True)[:config.MAX_CANDIDATES]}
+    pf, kf = run(full)
+    pq, kq = run(fast)
+    return {"pass_full": len(pf), "pass_fast": len(pq), "pass_overlap": round(len(pf & pq) / max(1, len(pf)) * 100, 1),
+            "pick_full": len(kf), "pick_overlap": round(len(kf & kq) / max(1, len(kf)) * 100, 1)}
 
 
 def signal_reason(prev_signal, snap_exists: bool, price: float, status: str) -> str | None:

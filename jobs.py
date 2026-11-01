@@ -135,6 +135,11 @@ def health(conn, now: datetime | None = None) -> dict:
         fx = 1400.0
     m["AI 비용(어제·원)"] = round((usd or 0) * fx)
     m["병합 일정(앞으로)"] = one("SELECT COUNT(*) FROM events WHERE kind='역분할 시행' AND date >= ?", (td,))
+    # 🛰 스캐너 1단계(2026-11-01 stage1fast): 빠른 모드로 돈 사이클 비율 · 두 방식 비교 겹침 최저(shadow 매 사이클 / fast 하루 한 번)
+    m["1단계 빠른 모드 %"] = pct(one("SELECT COUNT(*) FROM stage1_runs WHERE at >= ? AND used='fast'", (since,)),
+                              one("SELECT COUNT(*) FROM stage1_runs WHERE at >= ?", (since,)))
+    lo = one("SELECT MIN(pass_overlap) FROM stage1_runs WHERE at >= ? AND kind IS NOT NULL", (since,))
+    m["1단계 비교 겹침 %(최저)"] = round(lo) if lo is not None else None
     return m
 
 

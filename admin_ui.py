@@ -86,7 +86,7 @@ def render() -> None:
             if kind is bool:
                 vals[k] = col.toggle(desc + tag, value=bool(cur), key=f"adm_{k}")
             elif kind is str:
-                opts = getattr(config, "AI_MODELS", [cur])
+                opts = getattr(config, f"{k}_CHOICES", None) or getattr(config, "AI_MODELS", [cur])
                 vals[k] = col.selectbox(desc + tag, opts, index=opts.index(cur) if cur in opts else 0, key=f"adm_{k}")
             elif kind is int:
                 vals[k] = col.number_input(desc + tag, min_value=lo, max_value=hi, value=int(cur), step=1, key=f"adm_{k}")

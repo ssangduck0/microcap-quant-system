@@ -92,8 +92,8 @@ def render_today() -> None:
     tosslink_ui.button(t, key="af")
     st.dataframe(pd.DataFrame([{**i, "결과": "✅" if i["결과"] else "❌"} for i in d["items"]]), hide_index=True, width="stretch")
     ch = d.get("chart") or {}
-    if ch.get("t"):
-        cdf = pd.DataFrame({"종가": ch["close"], "MA50": ch["ma50"], "MA200": ch["ma200"]}, index=pd.to_datetime(ch["t"]).tz_convert(KST).strftime("%H:%M"))
+    if ch.get("t"):  # utc=True(2026-11-01): 서머타임 끝나는 날 −04:00·−05:00 시각이 섞이면 '시간대 섞임' 오류로 화면이 깨졌음
+        cdf =pd.DataFrame({"종가": ch["close"], "MA50": ch["ma50"], "MA200": ch["ma200"]}, index=pd.to_datetime(ch["t"], utc=True).tz_convert(KST).strftime("%H:%M"))
         pl = d["plan"]
         cdf["목표 +5%"], cdf["손절 -5%"] = pl["target"], pl["stop"]
         chartpop.line(cdf, key=f"after_{t}", title=f"{t} 애프터 1분봉 · 이동평균 · 목표/손절", height=300, y_title="$")
@@ -107,7 +107,7 @@ def render_signals() -> None:
     if sg.empty:
         st.info("아직 진입 신호가 없습니다. 제대로 된 급등 종목이 없는 날은 신호가 없는 게 정상입니다(스승님: 이틀에 한 번 꼴).")
         return
-    sg = sg.assign(**{"신호 시각": pd.to_datetime(sg["at"]).dt.tz_convert(KST).dt.strftime("%m-%d %H:%M"),
+    sg = sg.assign(**{"신호 시각": pd.to_datetime(sg["at"], utc=True).dt.tz_convert(KST).dt.strftime("%m-%d %H:%M"),
                       "마감 전 청산(%)": (sg["exit_price"] / sg["price"] - 1) * 100})
     known = sg[sg["first_hit"].isin(["목표 +5%", "손절 -5%"])]
     win = (known["first_hit"] == "목표 +5%").mean() * 100 if len(known) else None

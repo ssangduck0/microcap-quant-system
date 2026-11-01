@@ -88,6 +88,15 @@ ALERT_MIN_PUMP_SCORE = 70.0       # 텔레그램 알림 최소 점수
 SCAN_UNIVERSE = os.environ.get("SCAN_UNIVERSE", "nasdaq").strip().lower()
 UNIVERSE_CACHE_HOURS = 24
 DAILY_CHUNK = 100                 # 1단계 일봉 다운로드 묶음 크기
+# 🛰 1단계 빠른 모드(2026-11-01, stage1fast.py): 서버는 야후가 IP 요청량을 조절해 3,300종목 일봉 받기가 약 9분(PC 3분 · 동시 받기를 늘려도 그대로:
+#   150종목 동시 4개 30초 · 16개 26초). 일괄 시세(400종목씩 9번 · 2.7초) + 하루 한 번 받아 둔 지난 일봉으로 10/30 재현: 1단계 통과 797 vs 796(겹침 99.9%) ·
+#   정밀 분석 상위 100 중 98개 같음 · 가격 차이 중앙 0.000%. 장중·프리마켓은 아직 시험 전이라 기본은 shadow(지금 방식으로 돌리며 비교만 기록).
+STAGE1_MODE = os.environ.get("STAGE1_MODE", "shadow").strip().lower()   # full=지금 방식 · shadow=지금 방식 + 빠른 모드 비교 기록 · fast=빠른 모드
+STAGE1_MODE_CHOICES = ["shadow", "fast", "full"]
+STAGE1_SPLIT_TOL = 0.10           # 시세의 전일 종가가 저장 일봉의 어제 종가와 이만큼 넘게 다르면(병합 당일 등) 그 종목만 야후 일봉
+STAGE1_CHECK_MIN_PASS = 95.0      # 매일 점검: 1단계 통과 겹침(%)이 이보다 낮으면 텔레그램 + 다음 점검까지 지금 방식으로
+STAGE1_CHECK_MIN_PICK = 90.0      # 매일 점검: 정밀 분석 대상 겹침(%) 최소(10/30 은 98%)
+STAGE1_SETTLE_HOUR_ET = 20        # 지난 일봉을 전부 다시 받는 시각(동부시간 · 늦은 체결까지 마감값에 들어온 뒤 = 한국 오전 9~10시)
 MIN_PRICE_USD = 0.05              # 1단계 필터: 가격 범위
 MAX_PRICE_USD = 20.0
 MIN_AVG_DOLLAR_VOL = 100_000      # 1단계 필터: 20일 평균 거래대금(달러) 최소값 (거의 거래 없는 종목 제외)
@@ -167,6 +176,7 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "NEWS_TRANSLATE": (bool, None, None, "알림", "🌐 뉴스 한국어 번역(Haiku · AI 월 예산 안에서)"),
     "SEC_DIGEST": (bool, None, None, "알림", "📝 공시 한국어 요약·병합 일정·13D/13G 추출(Haiku · AI 월 예산 안에서)"),
     "FORENSIC_AI": (bool, None, None, "알림", "🧾 서버 자동 공시분석(덕구 포렌식 · 아침 갱신 때)"),
+    "STAGE1_MODE": (str, None, None, "기능", "🛰 스캐너 1단계: shadow=지금 방식 + 빠른 모드 비교 기록 · fast=빠른 모드(일괄 시세 · 주기 약 12분→5분) · full=지금 방식만"),
     "FORENSIC_PER_RUN": (int, 1, 10, "숫자", "🧾 서버 공시분석: 하루에 분석할 종목 수(종목당 약 100~200원)"),
     "FUNDSCAN_AI_PER_DAY": (int, 0, 50, "숫자", "💰 펀드스캔: 규칙으로 행사가를 못 읽은 공시를 Haiku 로 다시 읽는 하루 상한(건당 약 2~5원)"),
     "AI_MONTHLY_BUDGET_KRW": (float, 1000.0, 200000.0, "숫자", "🤖 AI 월 예산(원) — 넘으면 실행하지 않음"),

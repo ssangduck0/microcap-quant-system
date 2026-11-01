@@ -66,6 +66,35 @@ def download_intraday(tickers: list[str]) -> dict[str, pd.DataFrame]:
     return _download(tickers, period="1d", interval="1m", prepost=True)
 
 
+QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+QUOTE_FIELDS = ("symbol,regularMarketPrice,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,"
+                "regularMarketPreviousClose,regularMarketTime")
+QUOTE_CHUNK = 400
+
+
+def bulk_quotes(tickers: list[str], chunk: int = QUOTE_CHUNK, get=None) -> dict[str, dict]:
+    """야후 일괄 시세(2026-11-01 · 🛰 1단계 빠른 모드): 한 요청에 400종목의 현재가·오늘 거래량·당일 고가/저가/시가·전일 종가·시각.
+    yfinance 의 쿠키·crumb 처리(YfData)를 그대로 씀 · 서버 3,400종목 2.7초(요청 9번). 공식 문서가 없는 주소라 실패하면 빈 dict(호출 쪽이 지금 방식으로 되돌림).
+    get: 테스트용 가짜 — params dict → 응답 JSON."""
+    out: dict[str, dict] = {}
+    if get is None:
+        if config.OFFLINE:
+            return out
+        from yfinance.data import YfData
+        yd = YfData()
+        get = lambda params: yd.get(QUOTE_URL, params=params, timeout=30).json()  # noqa: E731
+    for i in range(0, len(tickers), chunk):
+        part = tickers[i:i + chunk]
+        try:
+            js = get({"symbols": ",".join(part), "fields": QUOTE_FIELDS, "formatted": "false"}) or {}
+            for x in (js.get("quoteResponse") or {}).get("result") or []:
+                if x.get("symbol") and x.get("regularMarketPrice") is not None:
+                    out[x["symbol"]] = x
+        except Exception as e:  # noqa: BLE001
+            log.warning("야후 일괄 시세 실패 (%s ...): %s", part[:3], e)
+    return out
+
+
 def fetch_splits(ticker: str) -> list[dict]:
     out = []
     if config.OFFLINE:
