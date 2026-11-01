@@ -104,22 +104,28 @@ def regsho_label(n) -> str:
     return "" if not n else f"📛 {int(n)}일째"
 
 
-def render_upcoming() -> None:
-    """📅 병합 예정 — 🗓 일정의 '역분할 시행'(앞으로) + 세력·셋업 분석에서 병합 안건이 잡힌 종목."""
+def _num(v):
+    try:
+        return None if v is None or pd.isna(v) else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def upcoming_rows(conn) -> list[dict]:
+    """병합 예정 줄: 🗓 '역분할 시행'(앞으로 · 7일 안이면 🔁 재이탈 확률) + 세력·셋업 분석의 병합 안건. 비율을 모르면 None(예전 표는 nan 으로 찍혔음)."""
     import json
+    from datetime import date
+    import rsrisk
     rows = []
     try:
-        from contextlib import closing
-        import db
-        import rsrisk
-        with closing(db.connect()) as conn:
-            up = rs.upcoming(conn)   # C단계 2026-10-27: 시행일·비율·환산가·병합 후 주식 수(래빗스탁 RS Scanner 예정 목록처럼)
-            _tab = rsrisk.table(conn)
-            tails = {t: rsrisk.upcoming_tail(rsrisk.upcoming(conn, t, tab=_tab)) for t in set(up["티커"])} if not up.empty else {}   # 🔁 7일 안이면 재이탈 확률
+        up = rs.upcoming(conn)   # C단계 2026-10-27: 시행일·비율·환산가·병합 후 주식 수(래빗스탁 RS Scanner 예정 목록처럼)
+        tab = rsrisk.table(conn)
+        today = date.today()
         for e in up.to_dict("records"):
-            rows.append({"티커": e["티커"], "근거": "역분할 시행일", "날짜": e["시행일"], "내용": f"{e['D-day']} · 비율 {e['비율'] or '미확인'}"
-                         + ("" if e["병합 환산가($)"] is None else f" · 환산가 ${e['병합 환산가($)']:.2f}(현재가×비율, 예측 아님)")
-                         + ("" if e["병합 후 주식 수(만주)"] is None else f" · 병합 후 약 {e['병합 후 주식 수(만주)']:,.0f}만주") + tails.get(e["티커"], ""), "원문": e["근거"]})
+            ratio = e["비율"] if isinstance(e["비율"], str) and e["비율"] else None
+            rows.append({"ticker": e["티커"], "kind": "시행", "date": e["시행일"], "d": (date.fromisoformat(e["시행일"]) - today).days, "ratio": ratio,
+                         "exp": _num(e["병합 환산가($)"]), "sh": _num(e["병합 후 주식 수(만주)"]), "risk": rsrisk.upcoming(conn, e["티커"], tab=tab),
+                         "src": e["근거"] or "", "text": None})
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -128,14 +134,85 @@ def render_upcoming() -> None:
             d = json.loads(r.data)
             for sgl in d.get("signals") or []:
                 if sgl["신호"].startswith("병합(역분할) 안건") and sgl["결과"]:
-                    rows.append({"티커": r.ticker, "근거": "병합 안건(주총 서류)", "날짜": d.get("analyzed"), "내용": d.get("verdict"), "원문": sgl.get("근거")})
+                    rows.append({"ticker": r.ticker, "kind": "안건", "date": d.get("analyzed"), "d": None, "ratio": None, "exp": None, "sh": None, "risk": None,
+                                 "src": sgl.get("근거") or "", "text": d.get("verdict")})
     except Exception:  # noqa: BLE001
         pass
+    seen, out = set(), []
+    for r in rows:
+        if (r["ticker"], r["kind"]) not in seen:
+            seen.add((r["ticker"], r["kind"]))
+            out.append(r)
+    return out
+
+
+def _up_cells():
+    """병합 예정 표 칸(ui_table) — 자료 글자는 모두 감싸서."""
+    import rsrisk
+    import ui_kit as ui
+    import ui_table as utb
+
+    import tosslink
+    cmap = tosslink.codes()   # 줄마다 다시 읽지 않게 한 번만
+
+    def tk(r):
+        u = tosslink.url(r["ticker"], cmap)
+        return f'<span class="tk">{utb.esc(r["ticker"])}</span>' + (f' <a href="{utb.esc(u)}" target="_blank" title="토스에서 열기">↗</a>' if u else "")
+
+    def when(r):
+        if r["kind"] == "안건":
+            return ui.chip("안건(주총 서류)", "gray") + f'<br><span class="mut">{utb.esc((r["date"] or "")[:10])}</span>'
+        d = r["d"]
+        return ui.chip("오늘" if d == 0 else f"D-{d}", "red" if d <= 2 else "orange" if d <= 7 else "gray") + f'<br><span class="mut">{utb.esc(r["date"][5:].replace("-", "/"))}</span>'
+
+    def ratio(r):
+        return '<span class="mut">-</span>' if r["kind"] == "안건" else (utb.esc(r["ratio"]) if r["ratio"] else '<span class="mut">미확인</span>')
+
+    def after(r):
+        if r["kind"] == "안건":
+            return utb.esc(r["text"] or "")
+        if r["exp"] is None:
+            return '<span class="mut">비율을 몰라 계산 안 함</span>'
+        return f"예상 ${r['exp']:.2f}" + (f" · 약 {r['sh']:,.0f}만주" if r["sh"] else "")
+
+    def risk(r):
+        k = r.get("risk")
+        if k and k.get("prob") is not None:
+            return ui.chip(f"{k['prob']:.0f}%", "red" if k["prob"] >= rsrisk.RED else "gray")
+        if r["kind"] == "시행" and r["d"] is not None and r["d"] <= 7:
+            return '<span class="mut">자료 부족</span>'
+        return '<span class="mut">7일 안만 계산</span>' if r["kind"] == "시행" else '<span class="mut">-</span>'
+
+    def src(r):   # 근거 글은 '6-K 2026-10-29 https://…' 꼴 → 주소는 링크로 숨기고 '6-K 10/29 열기' 만
+        import re
+        s = r["src"] or ""
+        m = re.search(r"https?://\S+", s)
+        if not m:
+            return utb.esc(s[:40]) if s else '<span class="mut">-</span>'
+        lab = re.sub(r"(\d{4})-(\d{2})-(\d{2})", lambda x: f"{x.group(2)}/{x.group(3)}", s[:m.start()].strip())[:24]
+        return (f'<span class="mut">{utb.esc(lab)}</span> ' if lab else "") + f'<a href="{utb.esc(m.group(0))}" target="_blank">열기</a>'
+    cols = [utb.Col("티커", tk, "12%"), utb.Col("시행일", when, "13%"), utb.Col("비율", ratio, "9%"), utb.Col("병합 뒤", after),
+            utb.Col("6개월 안 $1 아래", risk, "17%"), utb.Col("원문", src, "13%")]
+    card = lambda r: (tk(r), when(r).replace("<br>", " "), " · ".join(x for x in (ratio(r), after(r), risk(r)) if x))  # noqa: E731
+    return cols, card
+
+
+def render_upcoming() -> None:
+    """📅 병합 예정 — 🗓 일정의 '역분할 시행'(앞으로) + 세력·셋업 분석에서 병합 안건이 잡힌 종목.
+    2026-11-01(사용자 '표가 불편 · 안 눌리게'): 안 눌리는 표(ui_table) — 칸 클릭·가로 스크롤 없이 칸을 나누고 색 칩 · 휴대폰은 카드 · 비율 모름 = '미확인'(예전엔 nan)."""
+    import report_dialog
+    import ui_table as utb
+    with closing(db.connect()) as conn:
+        rows = upcoming_rows(conn)
     with st.expander(f"📅 병합 예정 — 공시 기준 {len(rows)}건", expanded=bool(rows)):
         if not rows:
             st.caption("아직 없습니다. ⭐ 워치리스트의 '공시에서 후보 찾기'(일정)나 🕵️ 세력·셋업 분석을 돌리면 병합 안건·시행일이 잡힙니다.")
             return
-        df = pd.DataFrame(rows).drop_duplicates(subset=["티커", "근거"])
-        df.insert(1, "토스", tosslink_ui.links(df["티커"]))
-        st.dataframe(df, hide_index=True, width="stretch", column_config={"토스": tosslink_ui.COLUMN, "원문": st.column_config.LinkColumn(display_text="열기")})
-        st.caption("병합 직후는 유통 주식이 줄어 급등·급락이 모두 커집니다. 병합 뒤에는 아래 레이더에서 과거 사례와 비교하세요.")
+        cols, card = _up_cells()
+        big = 10 ** 6
+        utb.table(rows, cols, "rs_up", page=15, card=card, on_open=report_dialog.open_report,
+                  sorts={"시행일 가까운 순": lambda r: (r["kind"] != "시행", r["d"] if r["d"] is not None else big, r["ticker"]),
+                         "재이탈 위험 높은 순": lambda r: (-((r.get("risk") or {}).get("prob") or -1), r["d"] if r["d"] is not None else big),
+                         "티커 순": lambda r: r["ticker"]})
+        st.caption("병합 직후는 유통 주식이 줄어 급등·급락이 모두 커집니다. '6개월 안 \\$1 아래' 는 병합 7일 안 종목만(병합 뒤 예상가 · 지금 변동성) — "
+                   "나스닥: 병합 1년 안 다시 \\$1 아래면 유예 없이 상장폐지 결정. 병합 뒤에는 아래 레이더에서 과거 사례와 비교하세요.")   # $ 두 개면 수식으로 바뀜 → \\$
