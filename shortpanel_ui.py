@@ -32,6 +32,35 @@ def _area(df: pd.DataFrame, x: str, y: str, color: str, title: str, fmt: str = "
     chartpop.show(ch, key=f"sp_{y}", title=title, data=df)
 
 
+def _sh(n) -> str:
+    """주식 수 짧게(만·백만)."""
+    n = float(n or 0)
+    return f"{n / 1e6:,.1f}M" if n >= 1e6 else f"{n / 1e4:,.1f}만" if n >= 1e4 else f"{n:,.0f}"
+
+
+def si_segments(sis: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """ChartExchange 잔고 % 일별 → (차트용 표, 안내 문구). 유통주식 기준이 바뀐 보고일(chartex.basis_breaks)에서 선을 끊어
+    구간마다 다른 선으로(2026-11-01 점검: WKHS 54% → 3.8% 처럼 분모가 바뀐 것을 잔고가 줄어든 것처럼 보였음)."""
+    import chartex
+    s = sis.sort_values("date")
+    # 이월된 날까지 같이 비교(바뀌기 전 보고일이 180일 창 밖이어도 창 안의 이월 값과 비교) — 값이 같은 날끼리는 비율 1이라 안 걸림
+    br = chartex.basis_breaks(s[["date", "si_pct", "short_shares"]].to_dict("records")) if "short_shares" in s else {}
+    col = "유통 대비 공매도 잔고(%)"
+    if not br:
+        return s.set_index("date")[["si_pct"]].rename(columns={"si_pct": col}), ""
+    seg = s["date"].map(lambda d: sum(1 for b in br if d >= b))
+    names = {0: f"{col} · 기준 1"} | {i + 1: f"기준 {i + 2}({b[5:]}~)" for i, b in enumerate(sorted(br))}
+    wide = pd.DataFrame({"date": s["date"], "seg": seg.map(names), "v": s["si_pct"]}).pivot_table(index="date", columns="seg", values="v", aggfunc="last")
+    wide = wide[[names[k] for k in sorted(names) if names[k] in wide.columns]]
+    sh = s.set_index("date")["short_shares"]
+    parts = []
+    for b, (fa, fb) in sorted(br.items()):
+        before = sh[sh.index < b]
+        parts.append(f"{b[5:]}(유통 {_sh(fa)} → {_sh(fb)}주 · 잔고 주식 {_sh(before.iloc[-1]) if len(before) else '-'} → {_sh(sh.get(b))}주)")
+    return wide, (" · ⚠️ 유통주식 기준이 바뀐 날(증자·병합·ChartExchange 자료 갱신)에서 선을 끊었어요: " + ", ".join(parts)
+                  + " — 앞뒤 % 는 바로 비교하지 말고 잔고 주식 수를 보세요.")
+
+
 def render(t: str) -> None:
     t = t.upper()
     r = next((x for x in sq.rows() if x["ticker"] == t), None)
@@ -78,16 +107,22 @@ def render(t: str) -> None:
                       {"t": "60일 최대 FTD", "v": f"{(M['fails'] or 0):,.0f}주", "s": f"{M['settle_date']} · 60일 합계 {ftd['total']:,.0f}주"},
                       {"t": "FTD 금액 합(60일)", "v": f"${ftd['notional'] / 1e3:,.0f}K", "s": "SEC 월 2회 공개, 약 2주 늦음"}])
         if not sis.empty:
-            chartpop.line(sis.set_index("date")[["si_pct"]].rename(columns={"si_pct": "유통 대비 공매도 잔고(%)"}), key=f"cx_si_{t}", title=f"{t} 공매도 잔고 일별 추이(ChartExchange)", height=170, zero=True, fmt=".1f",
-                          note="보고일 사이는 직전 보고값을 이월한 일별 시계열(ChartExchange). 점이 찍힌 날이 실제 보고일.")
+            cs, note = si_segments(sis)
+            chartpop.line(cs, key=f"cx_si_{t}", title=f"{t} 공매도 잔고 일별 추이(ChartExchange)", height=170, zero=True, fmt=".1f",
+                          note="보고일 사이는 직전 보고값을 이월한 일별 시계열(ChartExchange). 점이 찍힌 날이 실제 보고일." + note)
+            if note:   # 안내는 팝업에만 나오므로 작은 그래프 아래에도
+                st.caption(note.removeprefix(" · "))
         if not svx.empty:
             st.dataframe(svx.rename(columns={"date": "날짜", "total": "전체 거래량", "short_total": "숏볼륨(장외+거래소)", "finra_short": "장외 공매도", "finra_exempt": "장외 면제", "exch_short": "거래소 공매도", "short_pct": "숏볼륨 비중(%)"}),
                          hide_index=True, width="stretch", column_config={c: st.column_config.NumberColumn(format="%,.0f") for c in ("전체 거래량", "숏볼륨(장외+거래소)", "장외 공매도", "장외 면제", "거래소 공매도")} | {"숏볼륨 비중(%)": st.column_config.NumberColumn(format="%.1f")})
             st.caption("숏볼륨(장외+거래소) = 래빗스탁 '숏볼륨'과 같은 집계. 위의 'FINRA 장외' 카드는 장외(TRF)만이라 더 작게 보여요.")
     except Exception:  # noqa: BLE001
         pass
+    fl = None   # 2026-11-01: 같은 잔고라도 분모(유통주식)가 출처마다 달라(WKHS ChartExchange 9.9% · 우리 22.5%) 분모를 같이 표시
+    if r["si_pct"] and not si.empty and si.iloc[-1]["shares_short"] and abs(float(si.iloc[-1]["si_pct"] or 0) - float(r["si_pct"])) < 0.05:
+        fl = float(si.iloc[-1]["shares_short"]) / (float(r["si_pct"]) / 100)
     ui.cards([{"t": "공매도 비율", "v": "-" if r["si_pct"] is None else f"{r['si_pct']:.2f}%", "s": _level(r["si_pct"], [30, 20, 10], ["매우 높음(≥30%)", "높음", "보통", "낮음"])
-               + ("" if not r.get("si_date") else f" · {r['si_date']} 기준")},
+               + ("" if not r.get("si_date") else f" · {r['si_date']} 기준") + (f" · 유통 {_sh(fl)}주 기준(우리 추정)" if fl else "")},
               {"t": "청산 소요일", "v": "-" if r["dtc"] is None else f"{r['dtc']:.2f}일", "s": _level(r["dtc"], [10, 5, 2], ["극단적 · 청산 어려움", "높음", "보통", "낮음"])},
               {"t": "대차 수수료", "v": "-" if r["fee"] is None else f"{r['fee']:.2f}%", "s": _level(r["fee"], [100, 30, 10], ["빌리기 극히 어려움", "높음", "보통", "낮음"])},
               {"t": "대차 가용주식", "v": "0K" if htb else ("-" if r["avail"] is None else f"{r['avail'] / 1e3:,.0f}K"), "s": "HTB — 빌릴 주식 없음" if htb else "IBKR"},

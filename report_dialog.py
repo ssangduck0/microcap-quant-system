@@ -87,7 +87,9 @@ def _head(t: str, b: dict, hd: dict, ms: list, why: str) -> None:
 
 def _grid(hd: dict) -> str:
     stale = hd.get("ib_asof") and str(hd["ib_asof"])[:10].replace(".", "-") < (date.today() - timedelta(days=4)).isoformat()
-    cells = [("공식 공매도 잔고", "-" if hd.get("si") is None else f"{hd['si']:.1f}%", f"{hd['si_date'] or ''} 결제 기준"),
+    import drawer
+    cells = [("공식 공매도 잔고", "-" if hd.get("si") is None else f"{hd['si']:.1f}%",   # 2026-11-01: 분모(유통주식)는 출처마다 달라 같이 표시
+              f"{hd['si_date'] or ''} 결제 기준" + (f" · 유통 {drawer._sh(hd['si_float'])}주 기준" if hd.get("si_float") else "")),
              ("청산 소요일", "-" if hd.get("dtc") is None else f"{hd['dtc']:.1f}일", "공식"),
              ("대차 수수료(IBKR)", "-" if hd.get("fee") is None else f"{hd['fee']:,.0f}%", ("목록에서 빠짐 · " + str(hd["ib_asof"])[:10]) if stale else f"빌릴 주식 {hd['avail'] or 0:,.0f}"),
              ("유통주식", "-" if not hd.get("float") else (f"{hd['float'] / 1e6:,.2f}M주"), "적을수록 크게 움직임"),

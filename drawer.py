@@ -41,6 +41,12 @@ def _md(d: str) -> str:
     return f"{int(d[5:7])}/{int(d[8:10])}" if d and len(d) >= 10 else (d or "")
 
 
+def _sh(n) -> str:
+    """주식 수 짧게(만·백만)."""
+    n = float(n or 0)
+    return f"{n / 1e6:,.1f}M" if n >= 1e6 else f"{n / 1e4:,.1f}만" if n >= 1e4 else f"{n:,.0f}"
+
+
 def supply_status(conn, t: str) -> list[dict]:
     """[{name, state, color, detail}] — color: red 확인됨(위험) · orange 주의 · green 1년 공시에 없음 · gray 모름."""
     t = t.upper()
@@ -224,10 +230,17 @@ def history(conn, t: str, days: int = 60, n: int = 14) -> list[dict]:
             prev = cur
     except Exception:  # noqa: BLE001
         pass
-    si = _q(conn, "SELECT date, si_pct FROM cx_short_interest WHERE ticker=? AND reported=1 AND date >= ? ORDER BY date", t, (date.today() - timedelta(days=days + 20)).isoformat())
+    si = _q(conn, "SELECT date, si_pct, short_shares FROM cx_short_interest WHERE ticker=? AND reported=1 AND date >= ? ORDER BY date", t, (date.today() - timedelta(days=days + 20)).isoformat())
+    import chartex
     for a, b in zip(si, si[1:]):
         if a["si_pct"] is not None and b["si_pct"] is not None and abs(b["si_pct"] - a["si_pct"]) >= max(2.0, a["si_pct"] * 0.2):
-            ev.append({"date": b["date"], "text": f"공식 잔고 {a['si_pct']:.1f}% → {b['si_pct']:.1f}%(결제일 기준)", "kind": "si"})
+            sh = f"잔고 주식 {_sh(a.get('short_shares'))} → {_sh(b.get('short_shares'))}주" if a.get("short_shares") and b.get("short_shares") else ""
+            j = chartex.basis_jump(a, b)   # 2026-11-01 점검: 분모(유통주식)가 바뀐 것을 잔고 급변처럼 보이던 것(최근 200일 이력의 12%)
+            if j:
+                ev.append({"date": b["date"], "text": f"유통주식 기준 바뀜({_sh(j[0])} → {_sh(j[1])}주 · 증자·병합·자료 갱신) — 잔고 % {a['si_pct']:.1f} → {b['si_pct']:.1f} 는 비교 불가 · {sh}",
+                           "kind": "si_basis"})
+            else:
+                ev.append({"date": b["date"], "text": f"공식 잔고 {a['si_pct']:.1f}% → {b['si_pct']:.1f}%(결제일 기준" + (f" · {sh})" if sh else ")"), "kind": "si"})
     bs = bars(conn, t, days + 20)
     for i in range(20, len(bs)):
         p, x = bs[i - 1]["close"], bs[i]
@@ -261,8 +274,10 @@ def headline(conn, t: str) -> dict:
     b = bars(conn, t, 30)
     px = b[-1]["close"] if b else snap.get("price")
     chg = (b[-1]["close"] / b[-2]["close"] - 1) * 100 if len(b) >= 2 and b[-2]["close"] else snap.get("day_change_pct")
-    si = (_q(conn, "SELECT date, si_pct, dtc FROM cx_short_interest WHERE ticker=? AND reported=1 ORDER BY date DESC LIMIT 1", t) or
-          _q(conn, "SELECT si_date AS date, si_pct, dtc FROM short_interest WHERE ticker=? ORDER BY date DESC LIMIT 1", t) or [{}])[0]
+    si = (_q(conn, "SELECT date, si_pct, dtc, short_shares FROM cx_short_interest WHERE ticker=? AND reported=1 ORDER BY date DESC LIMIT 1", t) or
+          _q(conn, "SELECT si_date AS date, si_pct, dtc, shares_short AS short_shares FROM short_interest WHERE ticker=? ORDER BY date DESC LIMIT 1", t) or [{}])[0]
+    import chartex   # 2026-11-01 점검: 같은 잔고(WKHS 966,750주)가 출처마다 9.9%·22.5% — 분모(유통주식) 정의가 달라서 → 분모를 같이 보여 줌
+    si_float = chartex.implied_float(si.get("si_pct"), si.get("short_shares"))
     ib = (_q(conn, "SELECT fee, available, as_of FROM ibkr_borrow WHERE symbol=?", t) or [{}])[0]
     sho = None
     try:
@@ -279,5 +294,5 @@ def headline(conn, t: str) -> dict:
     except Exception:  # noqa: BLE001
         rs_soon = None
     return {"rs_soon": rs_soon, "price": px, "chg": chg, "asof": b[-1]["date"] if b else snap.get("date"), "float": snap.get("float_shares"), "dil": snap.get("dilution_status"),
-            "si": si.get("si_pct"), "si_date": si.get("date"), "dtc": si.get("dtc"), "fee": ib.get("fee"), "avail": ib.get("available"), "ib_asof": ib.get("as_of"),
+            "si": si.get("si_pct"), "si_date": si.get("date"), "si_float": si_float, "si_shares": si.get("short_shares"), "dtc": si.get("dtc"), "fee": ib.get("fee"), "avail": ib.get("available"), "ib_asof": ib.get("as_of"),
             "sho": sho, "n_sig": n_sig, "hi30": hi, "listing": bool(lst)}

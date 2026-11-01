@@ -30,8 +30,8 @@ with closing(db.connect()) as conn:
         conn.execute("INSERT OR REPLACE INTO regsho_files (date, status) VALUES (?, 'ok')", (d.isoformat(),))
     for d in wd[-5:] + wd[5:10]:                                     # 앞 5일 등재 → 해제 → 마지막 5일 다시 등재
         conn.execute("INSERT OR IGNORE INTO regsho_list (date, symbol, name) VALUES (?, 'CLX', 'x')", (d.isoformat(),))
-    for d, p in ((D(47), 3.0), (D(32), 45.5), (D(17), 32.7)):
-        conn.execute("INSERT INTO cx_short_interest (ticker, date, si_pct, short_shares, dtc, change_shares, change_pct, reported) VALUES ('CLX',?,?,1e5,3.3,1,1,1)", (d, p))
+    for d, p, sh in ((D(47), 3.0, 3e4), (D(32), 45.5, 4.55e5), (D(17), 32.7, 3.27e5), (D(5), 3.0, 3.3e5)):   # 마지막: 잔고 주식은 그대로인데 % 만 ÷11(유통주식 기준 바뀜)
+        conn.execute("INSERT INTO cx_short_interest (ticker, date, si_pct, short_shares, dtc, change_shares, change_pct, reported) VALUES ('CLX',?,?,?,3.3,1,1,1)", (d, p, sh))
     conn.execute("INSERT INTO ibkr_borrow (symbol,fee,rebate,available,avail_capped,as_of) VALUES ('CLX',808,0,5000,0,?)", ((T - timedelta(days=9)).strftime("%Y.%m.%d 02:37:07"),))
     fil = [("8-K", D(16), "1.01,2.03,9.01"), ("8-K", D(19), "3.01,9.01"), ("S-1/A", D(58), ""), ("S-1", D(83), ""), ("DEF 14C", D(65), ""), ("10-Q", D(79), "")]
     for i, (fm, d, it) in enumerate(fil):
@@ -79,12 +79,13 @@ with closing(db.connect()) as conn:
 
     hs = drawer.history(conn, "CLX")
     tx = " | ".join(h["text"] for h in hs)
-    assert "Reg SHO 등재" in tx and "Reg SHO 해제" in tx and "공식 잔고 3.0% → 45.5%" in tx and "공식 잔고 45.5% → 32.7%" in tx, tx
+    assert "Reg SHO 등재" in tx and "Reg SHO 해제" in tx and "공식 잔고 3.0% → 45.5%(결제일 기준 · 잔고 주식 3.0만 → 45.5만주)" in tx and "공식 잔고 45.5% → 32.7%" in tx, tx
+    assert "유통주식 기준 바뀜(1.0M → 11.0M주" in tx and "잔고 % 32.7 → 3.0 는 비교 불가 · 잔고 주식 32.7만 → 33.0만주" in tx and "공식 잔고 32.7% → 3.0%" not in tx, tx   # 2026-11-01
     assert "8-K 상장 기준 미달 통지" in tx and "8-K 부채 · 중요 계약" in tx and "S-1/A 조달 서류" in tx and "-32%" in tx and "거래량 평소의" in tx
     assert [h["date"] for h in hs] == sorted((h["date"] for h in hs), reverse=True)
 
     hd = drawer.headline(conn, "CLX")
-    assert hd["price"] == 3.4 and round(hd["chg"]) == -32 and hd["si"] == 32.7 and hd["sho"] == 5 and hd["n_sig"] == 2 and hd["listing"] and hd["fee"] == 808
+    assert hd["price"] == 3.4 and round(hd["chg"]) == -32 and hd["si"] == 3.0 and round(hd["si_float"]) == 11_000_000 and hd["sho"] == 5 and hd["n_sig"] == 2 and hd["listing"] and hd["fee"] == 808
     assert drawer.edgar_url("clx", "S-1/A").endswith("CIK=CLX&type=S-1&dateb=&owner=include&count=40")
 
 # 리포트 대화상자: 서랍 표시자 · 탭 순서 · 새 탭 내용

@@ -355,6 +355,35 @@ def ftd_summary(conn, t: str, days: int = 60) -> dict | None:
     return {"last": last, "max": mx, "n": len(rows), "total": sum(r["fails"] or 0 for r in rows), "notional": sum(r["notional"] or 0 for r in rows)}
 
 
+# 🔎 '유통주식 기준' 바뀜(2026-11-01 대시보드 점검): ChartExchange 잔고 주식 수는 병합까지 맞춰 매끄러운데, '유통 대비 %' 의 분모(유통주식)는
+#   보고 사이에 크게 바뀔 때가 있음(증자·병합·ChartExchange 자료 갱신 — 2026-05-15 에 몰림). 보고 99,711쌍 중 1,547쌍(1.6%)이 1.8배↑ 바뀜,
+#   최근 200일 서랍 '공식 잔고 변화' 이력 3,780건 중 459건(12%)이 이 때문(예: WKHS 54.3% → 3.8% 인데 잔고 주식은 37.0만 → 38.9만).
+#   Fintel 처럼 '그날 유통주식 기준'은 그대로 쓰되, 기준이 바뀐 날은 % 를 앞뒤로 잇거나 비교하지 않고 주식 수를 같이 보여 줌.
+BASIS_JUMP = 1.8
+
+
+def implied_float(si_pct, shares) -> float | None:
+    """잔고 주식 ÷ 잔고 % = 그 보고가 쓴 유통주식(분모)."""
+    try:
+        return float(shares) / (float(si_pct) / 100) if si_pct and shares and float(si_pct) > 0 and float(shares) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def basis_jump(a: dict, b: dict) -> tuple[float, float] | None:
+    """보고 a → b 사이 유통주식 기준이 BASIS_JUMP 배 넘게 바뀌었으면 (전 분모, 후 분모), 아니면 None."""
+    fa, fb = implied_float(a.get("si_pct"), a.get("short_shares")), implied_float(b.get("si_pct"), b.get("short_shares"))
+    if not fa or not fb:
+        return None
+    return (fa, fb) if fb / fa >= BASIS_JUMP or fa / fb >= BASIS_JUMP else None
+
+
+def basis_breaks(rows) -> dict[str, tuple[float, float]]:
+    """보고 행(날짜순, date·si_pct·short_shares) → {기준이 바뀐 보고 날짜: (전 분모, 후 분모)}."""
+    rows = [dict(r) for r in rows]
+    return {b["date"]: j for a, b in zip(rows, rows[1:]) if (j := basis_jump(a, b))}
+
+
 def si_series(conn, t: str, days: int = 180) -> pd.DataFrame:
     return db.read_df("SELECT date, si_pct, short_shares, dtc, reported FROM cx_short_interest WHERE ticker=? AND date >= date('now', ?) ORDER BY date", (t.upper(), f"-{days} day"))
 
