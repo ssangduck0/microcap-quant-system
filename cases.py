@@ -354,6 +354,12 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         out(f"공시 점수표: {_v.get('why')}")
     except Exception as e:  # noqa: BLE001
         log.exception("공시 점수표 실패: %s", e)
+    try:  # 🔊 시각 맞춘 거래량 곡선·문턱: 없거나 28일 지났으면 소형주 표본 5분봉(60일)으로 다시(1~2분 · docs/rvol_check_2026-11-01.md)
+        import todvol
+        with closing(db.connect()) as _c:
+            todvol.maybe_build(_c, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("시각 맞춘 거래량 표 실패: %s", e)
     try:  # 🎯 PICK '과거 비슷한 사례' 표(목표 먼저 · −30% 먼저): 토요일 또는 표가 없으면 2~3년 재생으로 다시(PC 15초 · 아래 PICK 기록 전에) — docs/pick_reach_check_2026-11-01.md
         import pickrisk
         with closing(db.connect()) as _c:

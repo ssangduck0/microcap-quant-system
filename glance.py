@@ -78,6 +78,15 @@ def build(t: str, df=None, guest: bool | None = None) -> dict:
         ok.append(f"거래량 급증 · {acc['top_day']} ×{acc['top_vr']:.1f}({acc['top_chg']:+.1f}%) · {acc['level']} 합계 {acc['score']:g}" + (" · 뉴스·공시 없음" if not acc.get("news") else ""))
     elif s.get("volume_mult") and s["volume_mult"] >= 3:
         ok.append(f"거래량 급증 · 평소의 {s['volume_mult']:.1f}배")
+    if not guest:   # 🔊 시각 맞춘 거래량(2026-11-01 · todvol): 최근 30분 스캔에서 문턱을 넘었을 때만(장 마감 뒤엔 사라짐)
+        try:
+            import todvol
+            with closing(db.connect()) as _c:
+                tv = todvol.latest(_c, t)
+            if tv:
+                ok.append(todvol.line(tv, tv["vm"]) + f" · {tv['at']:%H:%M} ET 스캔")
+        except Exception:  # noqa: BLE001
+            pass
     yahoo = "야후" in (sh_tag or "")  # 주식 수가 SEC 표지가 아니라 야후 유통주식 → 병합·발행 직후 크게 틀릴 수 있어 신호로 세지 않음
     if to and to["pct"] >= 30 and not yahoo:
         ok.append(f"회전율 {to['pct']:.0f}% — " + ("하루 거래량이 주식 전체를 넘음(극단적 손바뀜)" if to["pct"] >= 100 else "손바뀜 활발"))

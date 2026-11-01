@@ -31,6 +31,7 @@ import tosslink
 import flowread
 import pumpsetup
 import shortflow
+import todvol
 import papertrade
 import forensic
 import intel
@@ -487,6 +488,13 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
             eg = ", ".join(f"{t} ${c / 1e6:,.0f}M" for t, c in sorted(cut, key=lambda x: -x[1])[:5])
             log.info("시총 필터(>$%sM)로 제외: %d개 (예: %s)", f"{config.MAX_MARKET_CAP_USD / 1e6:,.0f}", len(cut), eg)
 
+    try:   # 🔊 시각 맞춘 거래량(2026-11-01 · todvol): 표시 한 줄 + 시험 기록만, 점수·알림 판정은 그대로
+        todvol.ensure(conn)
+        tod_tab = todvol.table(conn)
+    except Exception:  # noqa: BLE001
+        tod_tab = {}
+    tod_now = datetime.now(timezone.utc)
+    tod_day = tod_now.astimezone(todvol.ET).date().isoformat()
     for ticker, m in passing:
         try:
             dil = dilution_for(conn, client, ticker, budget)
@@ -521,6 +529,15 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
             })
             saved += 1
             saved_tickers.append(ticker)
+            tv = None
+            if tod_tab and m["trade_date"] == tod_day:
+                try:
+                    tv = todvol.assess(m["volume_mult"], tod_now, tod_tab)
+                    if tv and todvol.record(conn, ticker, m["trade_date"], tod_now, m["price"], m["volume_mult"], tv, p_score, p_detail, excluded):
+                        log.info("🧪 시각 보정으로만 펌핑 70점(시험 기록 · 알림 안 감): %s 지금 %s점 · 거래량 %.1f배 → %g배↑ 판정", ticker, p_score, m["volume_mult"] or 0, tv["tier"])
+                except Exception:  # noqa: BLE001
+                    log.exception("%s 시각 맞춘 거래량 실패", ticker)
+                    tv = None
 
             reason = signal_reason(prev_sig, existing is not None, m["price"], status)
             if reason:
@@ -530,7 +547,7 @@ def run_cycle(conn, client: sec.SecClient, tc=None, collector=None, fintel_clien
                 if not excluded and p_score >= config.ALERT_MIN_PUMP_SCORE and notify.repeat_ok(conn, ticker, reason):   # '가격 변동' 재알림은 하루 상한(관리 모드)
                     notify.send_telegram(
                         f"[{ticker}] 펌핑점수 {p_score} | 낙폭 {m['drawdown_pct']:.1f}% | "
-                        f"{scoring.STATUS_LABEL.get(status, status)} | {reason}" + _rs(conn, ticker) + _track("pump"))
+                        f"{scoring.STATUS_LABEL.get(status, status)} | {reason}" + ("\n" + todvol.line(tv, m["volume_mult"]) if tv else "") + _rs(conn, ticker) + _track("pump"))
             why = f" ({dil.get('error')})" if status == "UNKNOWN" and dil.get("error") else ""
             log.info("%s 낙폭 %.1f%% 퀀트 %.1f 펌핑 %s 희석=%s%s%s", ticker, m["drawdown_pct"], q_score,
                      "제외" if excluded else p_score, status, why,

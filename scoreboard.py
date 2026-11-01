@@ -19,6 +19,8 @@ SOURCES = {  # 키: (이름, 방향 +1 오름/-1 내림, 목표 %, 기간 거래
     "close": ("🎯 장마감 체크리스트(BEST·후보)", 1, 10.0, 1),
     # 2026-11-01 스캐너 점검(docs/scanner_upgrade_2026-11-01.md): 가장 많은 알림(🎯 펌핑 점수 ≥ ALERT_MIN_PUMP_SCORE, 하루 약 10건)이 성적 기록이 없었음 → 10거래일 안 +30%
     "pump": ("🎯 펌핑 점수 알림(≥70)", 1, 30.0, 10),
+    # 2026-11-01(docs/rvol_check_2026-11-01.md): 거래량 칸만 시각 맞춘 판정(todvol)으로 매기면 70점이 되는 종목(지금 방식은 70점 미만 · 알림 안 감) — 위 줄과 같은 목표로 비교
+    "pump_tod": ("🧪 펌핑 70점 · 시각 보정으로만(알림 안 감)", 1, 30.0, 10),
     "score": ("📊 승률 점수 상위(≥70점)", 1, 10.0, 1),
     "shortflow_up": ("🩳 공매도 흐름 ②③(진입·커버)", 1, 10.0, 5),
     "shortflow_exit": ("🩳 공매도 흐름 ④(청산)", -1, 0.0, 5),
@@ -112,6 +114,8 @@ def collect(conn) -> pd.DataFrame:
             add("pump", r["date"], r["ticker"], r["price"], note=f"펌핑 {r['pump_score']:.0f} · {r['reason'] or ''}"[:120])
     except Exception:  # noqa: BLE001
         pass
+    for r in _q(conn, "SELECT date, ticker, price, score, alt_score, tier, vm FROM tod_shadow"):   # 🧪 시각 보정으로만 70점(종목·날짜당 첫 번째로 이미 기록됨)
+        add("pump_tod", r["date"], r["ticker"], r["price"], note=f"보정 {r['alt_score']:.0f}점(지금 {r['score']:.0f}점) · 거래량 {r['vm'] or 0:.1f}배 → {r['tier']:g}배↑ 판정")
     import shortflow as _sf   # 2026-11-01: 단계가 이어지는 동안 매일·주말 기록이 따로 세지던 것 → 사례 시작만(주말은 금요일 날짜)
     sf_rows = _q(conn, "SELECT date, ticker, stage, price FROM shortflow_events ORDER BY date")
     sf_starts, sf_seen = _sf.episode_starts([(r["date"], r["ticker"], r["stage"]) for r in sf_rows]), set()

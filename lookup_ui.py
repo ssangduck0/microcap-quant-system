@@ -46,6 +46,14 @@ def render() -> None:
         m[2].metric("거래량 배수", "-" if pd.isna(r["volume_mult"]) else f"{r['volume_mult']:.1f}배")
         m[3].metric("승률 점수", "-" if pd.isna(r.get("win_score")) else f"{r['win_score']:.0f}")
         m[4].metric("희석", r["dilution_status"] or "-")
+        import access
+        if not access.is_guest():   # 🔊 시각 맞춘 거래량(todvol): 최근 30분 스캔에서 문턱을 넘었을 때만
+            import todvol
+            from contextlib import closing
+            with closing(db.connect()) as _c:
+                tv = todvol.latest(_c, t)
+            if tv:
+                st.caption(todvol.line(tv, tv["vm"]) + f" · {tv['at']:%H:%M} ET 스캔 — 거래량 배수는 아직 하루치가 덜 쌓인 값이에요")
     else:
         st.caption("스캐너가 아직 이 종목을 기록하지 않았습니다. ⭐ 워치리스트에 넣으면 스캐너가 항상 분석합니다.")
     px = watch_ui.prices((t,)).get(t)
