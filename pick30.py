@@ -106,6 +106,13 @@ def evaluate(t: str, conn, pr: dict | None, fsa: dict | None, risk_tab: dict | N
     why = reason(status, imm, score, runway, n_ev, bool(pr and pr.get("listing")), past, rn)
     if cls6 == "warn":
         why += f" · ⚠️ 주식수 {sc6['pct']:+.0f}%(분기)"
+    try:   # 🔁 병합 1년 안(rsrisk · 2026-11-01): 6개월 안 다시 $1 아래 확률 — 이유에만(판정 그대로 · 재이탈은 유예 없이 상폐 결정)
+        import rsrisk
+        _rr = rsrisk.short(rsrisk.current(conn, t))
+        if _rr:
+            why += f" · {_rr}"
+    except Exception:  # noqa: BLE001
+        pass
     try:   # 🎯 과거 비슷한 PICK(목표 먼저 · −30% 먼저) — 표시·정렬용, 판정엔 안 씀
         import pickrisk
         risk = pickrisk.for_row(conn, t, tname, pct, risk_tab)

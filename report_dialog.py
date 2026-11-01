@@ -66,6 +66,15 @@ def _head(t: str, b: dict, hd: dict, ms: list, why: str) -> None:
     if hd.get("rs_soon"):   # 2026-11-01: 병합 시행 7일 안 — 저금통 자동 담기·가상/실매매 진입에서 빠짐(rsplit.soon 주석)
         rs = hd["rs_soon"]
         chips += ui.chip(f"🚫 병합 예정 {rs['date'][5:].replace('-', '/')} (D-{rs['d']}) · 매수 보류", "red", tip=f"{rs['title']} — 2년 자료상 병합 7일 전 매수 10일 기대값 −4~−9%, 한 달 안 −20%↓ 76~87%")
+    import rsrisk
+    up = hd.get("rs_up")
+    if up and up.get("prob") is not None:   # 🔁 병합 뒤 예상가(지금가 × 비율)로 '6개월 안 다시 $1 아래' — 병합 1년 안 재이탈은 유예 없이 상폐 결정
+        chips += ui.chip(f"🔁 병합 뒤 예상 ${up['exp_price']:.2f} · 6개월 안 $1 아래 약 {up['prob']:.0f}%", "red" if up["prob"] >= rsrisk.RED else "orange",
+                         tip=f"1:{up['ratio']} · 변동성 {(up['vol'] or 0) * 100:.0f}%" + (f" · 상습 병합(직전 3년 {up['serial']}번)" if up.get("serial") else "") + f" — {rsrisk.RULE}")
+    cr = rsrisk.chip(hd.get("rs_risk"))
+    if cr:
+        rr = hd["rs_risk"]
+        chips += ui.chip(cr[0], cr[1], tip=f"병합 {rr['rs_date']} · 근거 — {rsrisk.reason_line(rr)} · {rr['until']}까지 {rsrisk.RULE}")
     if hd.get("sho"):
         chips += ui.chip(f"Reg SHO {hd['sho']}일째", "red")
     if hd.get("dil"):

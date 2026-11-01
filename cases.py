@@ -354,6 +354,12 @@ def update(conn, active: list[str], delisted: list[str], days: int = 60, years: 
         out(f"공시 점수표: {_v.get('why')}")
     except Exception as e:  # noqa: BLE001
         log.exception("공시 점수표 실패: %s", e)
+    try:  # 🔁 병합 체크포인트 표(6개월 안 다시 $1 아래 · 거리÷변동성 × 상습 병합): 토요일 또는 표가 없으면 다시(1초 · docs/rs_rebreach_check_2026-11-01.md)
+        import rsrisk
+        with closing(db.connect()) as _c:
+            rsrisk.maybe_build(_c, out=out)
+    except Exception as e:  # noqa: BLE001
+        log.exception("병합 체크포인트 표 실패: %s", e)
     try:  # 🔊 시각 맞춘 거래량 곡선·문턱: 없거나 28일 지났으면 소형주 표본 5분봉(60일)으로 다시(1~2분 · docs/rvol_check_2026-11-01.md)
         import todvol
         with closing(db.connect()) as _c:

@@ -65,14 +65,24 @@ def render() -> None:
             sho = regsho.streaks(conn)
     except Exception:  # noqa: BLE001
         sho = {}
+    try:   # 🔁 병합 체크포인트(2026-11-01 · rsrisk): 지금가 · 변동성 · 상습 병합 → 6개월 안 다시 $1 아래(병합 1년 안이면 유예 없이 상폐 결정)
+        import rsrisk
+        with closing(db.connect()) as conn:
+            _tab = rsrisk.table(conn)
+            rk = {t: rsrisk.current(conn, t, tab=_tab) for t in rd["ticker"]}
+    except Exception:  # noqa: BLE001
+        rk = {}
     tb = pd.DataFrame({"티커": rd["ticker"], "토스": tosslink_ui.links(rd["ticker"]), "병합일": rd["split_date"],
                        "비율": rd["ratio"].map(lambda r: f"{round(1 / r):g}:1" if r else ""), "병합 후 거래일": rd["k"], "병합 후 등락(%)": rd["dd"],
+                       "6개월 안 $1 아래(%)": rd["ticker"].map(lambda x: None if not rk.get(x) else (100.0 if rk[x]["below"] else rk[x]["prob"])),
                        "현재가(원)": rd["price"] * fx, "유사 사례": rd["n"], f"성공률(10일 내 +{target}%)": rd["success"],
                        "예상 반등 출발가(원)": rd["start_price"] * fx, "예상 장중 고가(원)": rd["exp_high"] * fx, "고가 상위 25%(원)": rd["exp_high_q75"] * fx,
                        "반등 소요(일)": rd["days_med"], "희석": rd["ticker"].map(lambda x: dil.get(x, "미확인")), "Reg SHO": rd["ticker"].map(lambda x: regsho_label(sho.get(x)))})
     cfg = {"토스": tosslink_ui.COLUMN, **{k: st.column_config.NumberColumn(format="%,.0f") for k in ("현재가(원)", "예상 반등 출발가(원)", "예상 장중 고가(원)", "고가 상위 25%(원)")},
            "병합 후 등락(%)": st.column_config.NumberColumn(format="%+.0f"), f"성공률(10일 내 +{target}%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
-           "반등 소요(일)": st.column_config.NumberColumn(format="%.0f", help="유사 사례에서 10거래일 안 최고가가 나온 날(중앙값)")}
+           "반등 소요(일)": st.column_config.NumberColumn(format="%.0f", help="유사 사례에서 10거래일 안 최고가가 나온 날(중앙값)"),
+           "6개월 안 $1 아래(%)": st.column_config.NumberColumn(format="%.0f", help="지금가 · 60일 변동성 · 상습 병합(직전 3년)으로 본 과거 비율(100 = 이미 $1 아래). "
+                                                               "나스닥: 병합 1년 안 다시 $1 아래면 180일 유예 없이 상장폐지 결정(2025-01-30~)")}
     t = picker.clickable(tb.reset_index(drop=True), list(rd["ticker"]), "rs_table", hide_index=True, width="stretch", column_config=cfg)
     if not t:
         return
@@ -101,12 +111,15 @@ def render_upcoming() -> None:
     try:
         from contextlib import closing
         import db
+        import rsrisk
         with closing(db.connect()) as conn:
             up = rs.upcoming(conn)   # C단계 2026-10-27: 시행일·비율·환산가·병합 후 주식 수(래빗스탁 RS Scanner 예정 목록처럼)
+            _tab = rsrisk.table(conn)
+            tails = {t: rsrisk.upcoming_tail(rsrisk.upcoming(conn, t, tab=_tab)) for t in set(up["티커"])} if not up.empty else {}   # 🔁 7일 안이면 재이탈 확률
         for e in up.to_dict("records"):
             rows.append({"티커": e["티커"], "근거": "역분할 시행일", "날짜": e["시행일"], "내용": f"{e['D-day']} · 비율 {e['비율'] or '미확인'}"
                          + ("" if e["병합 환산가($)"] is None else f" · 환산가 ${e['병합 환산가($)']:.2f}(현재가×비율, 예측 아님)")
-                         + ("" if e["병합 후 주식 수(만주)"] is None else f" · 병합 후 약 {e['병합 후 주식 수(만주)']:,.0f}만주"), "원문": e["근거"]})
+                         + ("" if e["병합 후 주식 수(만주)"] is None else f" · 병합 후 약 {e['병합 후 주식 수(만주)']:,.0f}만주") + tails.get(e["티커"], ""), "원문": e["근거"]})
     except Exception:  # noqa: BLE001
         pass
     try:

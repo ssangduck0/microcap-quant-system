@@ -226,7 +226,13 @@ def flag_line(conn, ticker: str, today: date | None = None) -> str:
     m = re.search(r"1:\d+", s.get("title") or "")
     when = "오늘 시행" if s["d"] <= 0 else f"D-{s['d']}"
     detail = s["date"][5:] + (f" · {m.group(0)}" if m else "")
-    return f"🚫 병합 예정 {when}({detail}) — 2년 자료 병합 직전 10일 평균 −4~−9% · 매수 보류"
+    tail = ""
+    try:   # 🔁 병합 체크포인트(2026-11-01): 병합 뒤 예상가로 '6개월 안 다시 $1 아래' 확률(병합 1년 안 재이탈은 유예 없이 상폐 결정)
+        import rsrisk
+        tail = rsrisk.upcoming_tail(rsrisk.upcoming(conn, ticker, today=today))
+    except Exception:  # noqa: BLE001
+        pass
+    return f"🚫 병합 예정 {when}({detail}) — 2년 자료 병합 직전 10일 평균 −4~−9% · 매수 보류" + tail
 
 
 def upcoming(conn) -> pd.DataFrame:
