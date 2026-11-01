@@ -1,9 +1,9 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🛰 11/1 오후 2 — 스캐너 점검 → 1번: 알림마다 지난 성적 · 🎯 펌핑 알림 🏆 기록(사용자 '1번부터 진행' · **배포 필요**)
+> ## 🛰 11/1 오후 2 — 스캐너 점검 → 1번: 알림마다 지난 성적 · 🎯 펌핑 알림 🏆 기록(사용자 '1번부터 진행' · ✅ 11/1 14:40 배포·확인)
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
-> | 1 | 배포(사용자) | `python deploy/deploy_from_pc.py` — 이번 코드: scoreboard(pump 출처·track_stats/track_line) · scanner(_track) · chartview · afterscalp(UTC 내림) · updates (+ test_alert_track) |
+> | 1 | ~~배포~~ ✅ **11/1 14:40 · Claude 확인 끝(읽기 전용)**: 파일 7개 md5 = PC(fc307e8) · 서비스 6개 14:40:16~17 재시작, 그 뒤 오류 0 · health 200 · 캐시 데우기 성공 · 📜 배포 줄(파일 416개) · 서버 배포본 테스트 8개(alert_track·scoreboard·afterscalp·afterscalp_ui·chartview·scanner_beat·cases·nav) 통과 · 운영 DB: 펌핑 소급 대상 384건 · 실제 문구 '기간 끝난 107건 중 성공 38%'(애프터)·'13건 8%'(공매도 흐름)·'20건 50%'(털기) · 스캐너는 재시작 뒤 1단계 진행 중(정상) | 이번 코드: scoreboard(pump 출처·track_stats/track_line) · scanner(_track) · chartview · afterscalp(UTC 내림) · updates (+ test_alert_track) |
 > | 2 | 배포 뒤 | 텔레그램 알림 끝 '📊 이 알림 지난 성적 …' 한 줄 · 화 07:30 뒤 🏆 에 '🎯 펌핑 점수 알림(≥70)' 384건 소급 → 그 뒤 펌핑 알림 줄에 숫자 |
 > | 3 | 다음 후보(승인 필요) | `docs/scanner_upgrade_2026-11-01.md` 2번(1단계 속도: 야후 동시 받기 — PC 시험 먼저) · 3번(NYSE American) · 5번(병합 예정 표시) · 4번(약한 알림 정리) |
 >
