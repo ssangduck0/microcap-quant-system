@@ -2,6 +2,7 @@
 
 > ## 🎯 11/1 밤 — 김곰 E 'PICK 도달 범위' → '과거 비슷한 PICK'(목표 먼저 · −30% 먼저) + 안전순(사용자 '다음 순서로' → '재생부터' → '더 좋은 방법은?' → '정렬 포함 진행' · ✅ 11/1 20:48 배포·확인)
 > **배포 확인(20:55 · 읽기 전용)**: 파일 8개 md5 = PC(3443021) · 서비스 6개 20:48:55 재시작, 그 뒤 오류 0 · 주인·방문객 health 200 · 📜 배포 줄(파일 424개) · 서버 배포본 테스트 9개(pickrisk·pick30·pick_why·pickchg·aipick·scoreboard·papertrade·cases·nav) 통과 · 운영 DB 읽기 전용 재생 33.8초 · 최대 메모리 885MB(서버 여유 2.9GB · 2코어) · 5,162건(PC 사본과 같음) · 표 `pick_risk` 는 아직 없음(화 07:30 첫 생성 또는 아래 2번 명령) → 그 전까지 PICK 칩 셋째 줄 비어 있음 = 정상.
+> **✅ 20:58 사용자가 서버에서 표 만듦**(ssh 한 줄 — PC PowerShell 은 `&&` 를 몰라 처음엔 실패, ssh 로 감싸 성공) → 24칸 · 5,162건 · 21:00 화면 캐시 갱신: PICK 59종목 중 56개 칩 표시 · ⚠️ 13개 · 위: BRID·GEOS 🎯14·📉15 · 맨 아래 ⚠️ STAK·AIFU·LVLU·VIOT·WYHG 🎯11·📉54. 화 07:30 아침 작업은 표가 있으니 토요일까지 다시 안 만듦.
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
 > | 1 | **배포(사용자)** | `python deploy/deploy_from_pc.py` — 이번 코드: pickrisk(새) · pick30(risk · 유력·안전 순 · tf_p/sf_p 기록 · 변동 순위 안전순) · pick30_ui(칩 🎯·📉 · ⚠️ · 📉 표 · 안전순 기본) · aipick(후보 안전순) · scoreboard(pick_*_tf · outcome stop) · cases(토요일·표 없으면 다시) · updates (+ test_pickrisk) |
