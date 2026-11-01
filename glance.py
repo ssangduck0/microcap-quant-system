@@ -128,7 +128,8 @@ def render(t: str) -> None:
     import watch_ui
     df = watch_ui.prices((t.upper(),)).get(t.upper())
     g = build(t, df)
-    rows = [("가격" if g.get("price_label", "현재가") == "현재가" else g["price_label"], "-" if not g["price"] else f"${g['price']:.4f}"), ("시가총액(추정)", "-" if not g["mcap"] else f"약 ${g['mcap'] / 1e6:,.1f}M"),
+    # 2026-11-01 점검: 스캐너 현재가는 시간외 마지막 체결이라 서랍 머리의 '정규장 종가'와 달라 보였음(WKHS 10/30 종가 $2.95 · 시간외 $2.65) → 이름표에 표시
+    rows = [("현재가(시간외 포함)" if g.get("price_label", "현재가") == "현재가" else g["price_label"], "-" if not g["price"] else f"${g['price']:.4f}"), ("시가총액(추정)", "-" if not g["mcap"] else f"약 ${g['mcap'] / 1e6:,.1f}M"),
             ("주식 수(추정)", "-" if not g["shares"] else f"약 {g['shares'] / 1e6:,.2f}M주"), ("회전율", "-" if not g["turnover"] else f"{g['turnover']['pct']:.0f}%"),
             ("업종 · 테마", (g["sector"] or "-") + ("" if not g["themes"] else " · " + ", ".join(g["themes"][:3])))]
     st.markdown(ui.kv(rows), unsafe_allow_html=True)

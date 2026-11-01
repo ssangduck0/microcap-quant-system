@@ -20,7 +20,9 @@ import streamlit as st
 
 
 def _slug(key: str) -> str:
-    s = re.sub(r"\W+", "_", key)
+    # 2026-11-01 점검: \W 는 한글을 글자로 봐서 'sp_가용주식' 이 그대로 Vega 선택 이름(cpsel_…)이 됨 → 브라우저 'Unrecognized signal name' 오류로
+    #   그래프 클릭 팝업이 안 열렸음 → 영문·숫자·_ 만 남기고, 바뀌면 해시
+    s = re.sub(r"[^0-9A-Za-z_]+", "_", key)
     if s != key or not s or s[0].isdigit():
         s = "k" + hashlib.md5(key.encode("utf-8")).hexdigest()[:10]
     return s

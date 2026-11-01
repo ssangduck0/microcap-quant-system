@@ -119,6 +119,12 @@ def check(conn, frames: dict, pct: float = 10.0, send=None, now: datetime | None
         msg = (f"🌙 시간외 급등 {t} +{up:.1f}% ({SESSION_NAME[sess]})\n"
                f"직전 정규장 종가 ${pc:.4g} → 이번 세션 고점 ${hi:.4g} · 지금 ${last:.4g}({(last / pc - 1) * 100:+.1f}%)\n"
                f"대상 이유: {why}\n⚠️ 시간외는 거래가 얇아 그 가격에 다 팔리지 않을 수 있어요.")
+        try:  # 2026-11-01: 병합 7일 안이면 '🚫 병합 예정' 한 줄
+            import rsplit
+            rs = rsplit.flag_line(conn, t)
+            msg += ("\n" + rs) if rs else ""
+        except Exception:  # noqa: BLE001
+            pass
         if send(msg):
             sent[key] = day.isoformat()
             done.append(t)

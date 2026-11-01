@@ -692,6 +692,12 @@ def live_check(conn, daily: dict, m5: dict, tickers: list[str], h60: dict | None
             if cur.rowcount and getattr(config, "CHART_ALERTS", True):
                 kind = "경고" if s["dir"] < 0 else "참고"
                 msg = f"{s['name']} — {t} ${a['px']:.4f}\n{s.get('note') or ''}\n{a['verdict']} (스승 관점 {kind} · 매수·매도 권유 아님)"
+                try:   # 2026-11-01: 병합 7일 안이면 '🚫 병합 예정' 한 줄
+                    import rsplit
+                    rs = rsplit.flag_line(conn, t)
+                    msg += ("\n" + rs) if rs else ""
+                except Exception:  # noqa: BLE001
+                    pass
                 try:   # 2026-11-01: 이 알림 종류의 지난 성적 한 줄(🏆 · 기간 끝난 판정만)
                     import scoreboard
                     ln = scoreboard.track_line(scoreboard.CHART_SRC.get(s["code"], ""))

@@ -13,6 +13,7 @@ assert xt == "T" and not single and len(long) == 10 and set(long["계열"]) == {
 long2, xt2, single2 = cp._long(pd.Series([3, 1, 2], index=["c", "a", "b"], name="점수"))
 assert xt2 == "O" and single2 and list(long2["x"]) == ["c", "a", "b"]          # 순서 유지(정렬 안 함)
 assert cp._slug("pt_cum_rank") == "pt_cum_rank" and cp._slug("sp_공매도 거래량").startswith("k") and cp._slug("1abc").startswith("k")
+assert cp._slug("sp_가용주식").startswith("k") and cp._slug("sp_가용주식").isascii()   # 한글만 있는 키도 영문 이름으로(Vega 선택 이름 오류, 2026-11-01)
 tb = cp._table(pd.Series([1.0, 2.0], index=idx[:2], name="v")); assert list(tb.columns) == ["index", "v"] and len(tb) == 2
 assert cp._table(pd.DataFrame()) is None and cp._table(None) is None
 

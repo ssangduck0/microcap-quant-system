@@ -248,9 +248,15 @@ def render_guests() -> None:
     st.dataframe(pd.DataFrame({"시간": when, "링크 이름": v["name"], "기기·브라우저": v["device"], "IP": v["ip"], "국가": v["country"],
                                "경고 동의": (agreed.fillna("—") if agreed is not None else "—"), "표시": flag}),
                  hide_index=True, width="stretch")
-    n_bad = int(((v["blocked"] == 1) | (v["new_device"] == 1)).sum())  # 한 접속에 두 표시가 겹쳐도 1건
-    if n_bad:
-        st.error(f"다른 기기 접속 시도·새 기기 {n_bad}건 — 링크가 퍼졌을 수 있어요. 해당 링크를 취소하고 새로 보내세요.")
+    # 2026-11-01 점검: 예전엔 '새 기기'까지 기간 없이 모두 빨간 경고(12건 전부 국내·이름 붙인 링크의 카카오톡/엣지 재접속)라 늘 켜져 있었음
+    #   → 차단(다른 기기로 막힘)만 빨간 경고, 새 기기는 최근 7일만 안내
+    recent = pd.to_datetime(v["at"], utc=True) >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)
+    n_block = int((v["blocked"] == 1).sum())
+    n_new = int(((v["new_device"] == 1) & (v["blocked"] != 1) & recent).sum())
+    if n_block:
+        st.error(f"다른 기기 접속 차단 {n_block}건 — 링크가 퍼졌을 수 있어요. 해당 링크를 취소하고 새로 보내세요.")
+    if n_new:
+        st.info(f"최근 7일 새 기기 접속 {n_new}건(차단 아님) — 같은 사람이 다른 앱·브라우저로 연 경우가 많아요. 모르는 이름·나라면 링크를 취소하세요.")
 
 
 

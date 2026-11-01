@@ -118,6 +118,29 @@ def record(conn, ticker: str, day: str, stage: str, price: float | None) -> bool
     return cur.rowcount > 0
 
 
+DIGEST_AFTER_ET = (16, 10)   # 하루 요약을 보내는 시각(동부 · 정규장 마감 10분 뒤 = 한국 아침 5~6시)
+
+
+def digest_text(conn, day: str, last_price: dict | None = None) -> str | None:
+    """🩳 하루 요약(2026-11-01): day(미국 거래일)에 기록된 ②③④ 단계를 한 메시지로 — 없으면 None.
+    last_price: 종목 → 지금(마감) 가격(없으면 신호 가격만)."""
+    try:
+        conn.execute(DDL)
+        rows = conn.execute("SELECT ticker, stage, price FROM shortflow_events WHERE date=? ORDER BY stage, ticker", (day,)).fetchall()
+    except Exception:  # noqa: BLE001
+        return None
+    rows = [r for r in rows if r[1] in ALERT_STAGES]
+    if not rows:
+        return None
+    lines = []
+    for t, stage, px in rows:
+        now = (last_price or {}).get(t)
+        tail = f" → 마감 ${now:.4f} ({(now / px - 1) * 100:+.1f}%)" if now and px else ""
+        lines.append(f"• {t} {stage.split(' — ')[0]} ${(px or 0):.4f}{tail}")
+    return (f"🩳 공매도 흐름 하루 요약 ({day[5:]} · 워치리스트·저금통 {len(rows)}건)\n" + "\n".join(lines)
+            + "\n(즉시 알림 대신 요약 — 관리 모드 '🩳 하루 요약'을 끄면 즉시 알림으로)")
+
+
 def events() -> pd.DataFrame:
     with closing(db.connect()) as c:
         c.execute(DDL)

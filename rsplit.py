@@ -216,6 +216,19 @@ def soon(conn, ticker: str, days: int = SOON_DAYS, today: date | None = None) ->
     return {"date": r[0], "title": r[1] or "역분할 시행", "d": (date.fromisoformat(r[0]) - today).days}
 
 
+def flag_line(conn, ticker: str, today: date | None = None) -> str:
+    """알림 끝에 붙이는 '🚫 병합 예정' 한 줄(2026-11-01 · 스캐너 업그레이드 5번) — 병합 7일 안이면, 아니면 빈 문자열.
+    근거: 2년 자료 병합 7일 안 10일 평균 −3.9~−8.8% · −20%↓ 76~87%(408건) → 🐷·가상매매·실매매는 이미 매수 보류, 알림은 표시만.
+    나스닥 규칙(2025-01-30~): 병합은 시행 10일 전 거래소 통지 · 2영업일 전 공개 → 7일 창이면 대부분 공시 뒤에 잡힘."""
+    s = soon(conn, ticker, today=today)
+    if not s:
+        return ""
+    m = re.search(r"1:\d+", s.get("title") or "")
+    when = "오늘 시행" if s["d"] <= 0 else f"D-{s['d']}"
+    detail = s["date"][5:] + (f" · {m.group(0)}" if m else "")
+    return f"🚫 병합 예정 {when}({detail}) — 2년 자료 병합 직전 10일 평균 −4~−9% · 매수 보류"
+
+
 def upcoming(conn) -> pd.DataFrame:
     """병합 예정 표: 티커 · 시행일 · D-day · 비율 · 현재가 · 병합 환산가(현재가×비율, 예측 아님) · 병합 후 주식 수 · 근거."""
     try:

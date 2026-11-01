@@ -119,6 +119,9 @@ AFTER_ALERTS = os.environ.get("AFTER_ALERTS", "1") != "0"                  # 애
 FLOWREAD_ALERTS = os.environ.get("FLOWREAD_ALERTS", "1") != "0"      # 📈 분산·털기(스승님 꿀팁) 신호 텔레그램 알림
 SETUP_MAX_PER_CYCLE = int(os.environ.get("SETUP_MAX_PER_CYCLE", "5"))   # 🕵️ 세력·셋업: 사이클당 새로 분석할 종목 수(종목당 하루 한 번)
 SHORTFLOW_ALERTS = os.environ.get("SHORTFLOW_ALERTS", "1") != "0"    # 🩳 공매도 흐름(스승님 꿀팁) ②③④ 단계 텔레그램 알림
+# 🩳 하루 요약(2026-11-01 · 스캐너 업그레이드 5번): 즉시 알림 대신 미국 장 마감 뒤 한 번. 🏆 ②③(5거래일 안 +10%) 기간 끝난 13건 중 성공 1건(8%) ·
+#   같은 날짜 가격 0.05~20 전 종목 기준선 28.0%(4,827/17,227) · ④ 0/3 → '바로 행동할 알림'이 아니라서 요약으로(기록·🏆 검증은 그대로, 성적이 기준선을 넘으면 되돌릴 것)
+SHORTFLOW_DIGEST = os.environ.get("SHORTFLOW_DIGEST", "1") != "0"
 PRESSURE_REPORTS_PER_DAY = int(os.environ.get("PRESSURE_REPORTS_PER_DAY", "25"))   # 🧭 매일 아침 압박 후보 종목 리포트 생성 상한
 ACCUM_DAILY = os.environ.get("ACCUM_DAILY", "1") != "0"              # 🧲 매일 아침 매집 의심 분석
 RSPLIT_DAILY = os.environ.get("RSPLIT_DAILY", "1") != "0"            # 🔁 매일 아침 최근 1년 분할 기록 갱신(병합 후 레이더)
@@ -169,6 +172,7 @@ def require_sec_user_agent() -> str:
 # ---------------------------------------------------------------- ⚙️ 관리 모드: 대시보드에서 바꾼 설정(DB)이 .env·기본값보다 우선
 SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "SHORTFLOW_ALERTS": (bool, None, None, "알림", "🩳 공매도 흐름 신호 텔레그램"),
+    "SHORTFLOW_DIGEST": (bool, None, None, "알림", "🩳 공매도 흐름: 즉시 대신 하루 요약 1번(미국 장 마감 뒤) — 지난 성적 8% < 아무 종목 28%"),
     "FLOWREAD_ALERTS": (bool, None, None, "알림", "📈 분산·털기 신호 텔레그램"),
     "PIGGY_ALERTS": (bool, None, None, "알림", "🐷 저금통 저점·고점·이탈 텔레그램"),
     "EXT_ALERTS": (bool, None, None, "알림", "🌙 관심 종목 시간외 급등 텔레그램"),
