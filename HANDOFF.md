@@ -1,9 +1,9 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🧪 11/1 오후 — 계좌 단위 백테스트 → 더 좋은 방법 → ⭐ 반등형 가상 장부 2개(사용자 '장부 2개 만들기' · **배포 필요**)
+> ## 🧪 11/1 오후 — 계좌 단위 백테스트 → 더 좋은 방법 → ⭐ 반등형 가상 장부 2개(사용자 '장부 2개 만들기' · ✅ 11/1 13:55 배포·확인)
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
-> | 1 | 배포(사용자) | `python deploy/deploy_from_pc.py` — 이번 코드: papertrade(전략 2개·공시 손절·open_tier) · papertrade_ui · updates (+ test_tier_books · test_papertrade 고침) |
+> | 1 | ~~배포~~ ✅ **11/1 13:55 · Claude 확인 끝(읽기 전용)**: 파일 8개 md5 = PC(ddae846) · 서비스 6개 13:55:18~19 재시작, 그 뒤 오류 0 · health 200 · 캐시 데우기 성공 · 📜 배포 줄(파일 414개) · 서버 배포본 테스트 7개(tier_books·papertrade·papertrade_ui·jobs·broker·cases·nav) 통과 · 운영 설정: 전략 10개, tier(on · +30/−20/40일) · tier_d(on · +30/−50/40일) · 실매매 전략은 'piggy' 그대로(⭐ 장부는 가상만) | 이번 코드: papertrade(전략 2개·공시 손절·open_tier) · papertrade_ui · updates (+ test_tier_books · test_papertrade 고침) |
 > | 2 | 화 07:30 뒤 | `cases.log` `가상매매: … / ⭐ 반등형(손절 −20%) … / ⭐ 반등형(장점만…) …`(🟡·🔴 장세 · ⭐ 1·2순위가 있을 때만 매수 — 지금 🟡) · 🧪 가상매매 화면에 두 장부 |
 > | 3 | 12월 중순~ | 두 장부 비교(성공률·평균·최악 거래) → ⭐ 손절 기준(TIER_STOP −20)·실매매 반영 여부 결정 |
 >
