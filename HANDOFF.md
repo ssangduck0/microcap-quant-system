@@ -1,6 +1,7 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🩳 11/1 오후 5 — 공매도 흐름 기록을 사례 단위로(사용자 '네, 고쳐줘' · ⏳ 배포 대기)
+> ## 🩳 11/1 오후 5 — 공매도 흐름 기록을 사례 단위로(사용자 '네, 고쳐줘' · ✅ 11/1 17:31 배포·확인)
+> **배포 확인(17:32 · 읽기 전용)**: 파일 6개 md5 = PC(0068863) · 서비스 6개 17:31:23 재시작, 그 뒤 오류 0 · 주인·방문객 health 200 · 📜 배포 줄(파일 420개) · 서버 배포본 테스트 8개(rs_alert_digest·guest2·shortflow·shortflow_ui·scoreboard·alert_track·score_ui·nav) 통과 · 운영 DB: 34행 → 사례 시작 7건 · 🏆 기간 끝난 사례 ②③ 0/2 · ④ 0/3 · 알림 끝 줄 '기록 쌓는 중(2건 · 목표 +10% · 5거래일 안)' / '(3건 · 5거래일 뒤 하락)' · 다른 출처 그대로(애프터 41/107 · 털기 10/20 · 점수 71/234) · 재시작 뒤 첫 사이클(17:44 완료, 일요일)에 새 기록 0(전엔 일요일마다 INEO·FAMI 가 11/1 날짜로 새로 쌓임 → 이제 금요일로 합쳐져 무시) · 34행 그대로.
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
 > | 1 | **배포(사용자)** | `python deploy/deploy_from_pc.py` — 이번 코드: shortflow(trading_day · episode_starts · record · digest_text) · scoreboard(collect · track_stats) · config·updates 문구 정정 (+ test_rs_alert_digest 사례·🏆 부분) |
