@@ -1,9 +1,11 @@
 # 인수인계 노트 (2026-11-01 새벽 갱신 · Claude Code)
 
-> ## 🚫 11/1 오후 4 — 스캐너 4·5번 + 대시보드 전체 점검(사용자 '작업으로 바로 · 진행 전 검색 · 장점만' · 3번 NYSE American 보류 · ⏳ 배포 대기)
+> ## 🚫 11/1 오후 4 — 스캐너 4·5번 + 대시보드 전체 점검(사용자 '작업으로 바로 · 진행 전 검색 · 장점만' · 3번 NYSE American 보류 · ✅ 11/1 16:45 배포·확인)
+> **배포 확인(16:47 · 읽기 전용)**: 파일 11개 md5 = PC(4344bc6) · 서비스 6개 16:45:30~31 재시작, 그 뒤 오류 0 · 주인·방문객 health 200 · 📜 배포 줄(파일 420개) · 서버 배포본 테스트 10개 통과 · 운영 DB: 병합 표시 VCIG D-1(1:18) · UFG D-2(1:10) · NEXR·TOPS D-5 · ONCO D-5(비율 미확인) · 설정 덮어쓰기 없음(STAGE1_MODE=shadow · SHORTFLOW_DIGEST=켬) · shadow 두 번째 비교(16:38)도 100%.
+> **⚠️ 확인 중 발견(승인 대기)**: `shortflow_events` 34건 중 주말 날짜 10건 · 같은 종목이 같은 단계에 있는 동안 **매일(주말 포함) 새로 기록·알림**(INEO 10/16~11/1 17일 · INTZ 5일 · FAMI 6일 · GPUS 4일) → 🏆 '②③ 13건 중 1건(8%)'은 사실상 INEO·INTZ 반복, **독립 사례 ②③ 2건(첫날 기준 0건 성공) · ④ 3건(0건)** → 5번 근거 '8% < 28%'는 표본이 작아 과장(정정). 하루 요약으로 바꾼 것은 '같은 종목 매일 반복 알림'을 줄이는 효과로는 유효. 고칠 안: 기록 날짜 = 마지막 일봉 거래일(주말 중복 없앰) · 같은 종목·단계가 직전 5거래일 안에 있으면 새 기록 안 함(사례 단위) · 🏆 shortflow 는 연속 구간 첫날만 셈 · 설정·문서 문구 정정.
 > | 순서 | 할 일 | 명령·확인 |
 > |---|---|---|
-> | 1 | **배포(사용자)** | `python deploy/deploy_from_pc.py` — 이번 코드: rsplit(flag_line) · scanner(_rs · shortflow_digest) · chartview · extalert · shortflow(digest_text) · config(SHORTFLOW_DIGEST) · chartpop(_slug) · glance(이름표) · admin_ui(방문객 경고) · updates (+ test_rs_alert_digest · test_chartpop 한 줄) · 전체 테스트 5묶음 통과 |
+> | 1 | ~~배포~~ ✅ 16:45 | 이번 코드: | 이번 코드: rsplit(flag_line) · scanner(_rs · shortflow_digest) · chartview · extalert · shortflow(digest_text) · config(SHORTFLOW_DIGEST) · chartpop(_slug) · glance(이름표) · admin_ui(방문객 경고) · updates (+ test_rs_alert_digest · test_chartpop 한 줄) · 전체 테스트 5묶음 통과 |
 > | 2 | 배포 뒤(Claude 확인) | 병합 7일 안 종목 알림 끝 '🚫 병합 예정 D-n(MM-DD · 1:N)' · 🩳 은 즉시 알림 없이 미국 평일 16:10 ET(한국 06:10) 뒤 '🩳 공매도 흐름 하루 요약' 1번(그날 기록 있을 때만) · 관리 모드 '알림'에 '🩳 하루 요약' 스위치 |
 > | 3 | 앞 작업(2번) 이어서 | 스캐너 shadow 첫 비교 **16:26 통과 1,286 vs 1,286 겹침 100% · 대상 100%**(주말이라 값이 멈춘 상태) → 월·화 장중 기록 보고 fast 결정 |
 >
