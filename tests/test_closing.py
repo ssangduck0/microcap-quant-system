@@ -66,7 +66,7 @@ at.slider(key="cl_ws").set_value(0).run(); at.selectbox(key="cl_sort").set_value
 assert at.selectbox(key="cl_pick").value == "HIGH"
 w = [x.value for x in at.warning if "미충족" in x.value]; print("warning:", w)
 assert w and "HIGH" in w[0] and "미충족 1개" in w[0] and "희석 상태 확인됨" in w[0]
-det = [d.value for d in at.dataframe if "항목(기준)" in d.value.columns][0]
+det = at.session_state["_utb_close_items"]   # 2026-11-02: 체크리스트는 안 눌리는 표(ui_table) — 화면에 넘긴 칸 그대로
 print(det.to_string(index=False))
 assert list(det["항목(기준)"]) == NAMES and list(det["결과"]).count("❌ 미충족") == 1 and det.iloc[0]["결과"] == "✅ 충족"
 assert det.iloc[0]["현재 값"] == "-40.0% (20일 고점 대비)" and det.iloc[2]["현재 값"] == "3.00배 (20일 평균 대비)" and det.iloc[1]["현재 값"] == "8.00백만 주"
@@ -74,7 +74,7 @@ assert det.iloc[0]["현재 값"] == "-40.0% (20일 고점 대비)" and det.iloc[
 at.selectbox(key="cl_pick").set_value("MID").run()
 w = [x.value for x in at.warning if "미충족" in x.value]; print("MID:", w)
 assert w and "MID" in w[0] and "미충족 3개" in w[0] and "ATM 미검출" in w[0] and "CB 미검출" in w[0] and "희석 상태 확인됨" in w[0]
-det = [d.value for d in at.dataframe if "항목(기준)" in d.value.columns][0]
+det = at.session_state["_utb_close_items"]
 assert det.iloc[1]["현재 값"] == "50.00백만 주" and det.iloc[1]["결과"] == "✅ 충족"      # 표시된 값과 저장된 판정은 스캐너가 같은 시점에 만든 것(테스트 데이터는 판정만 임의 지정)
 at.selectbox(key="cl_pick").set_value("NOSC").run()
 assert any("모두 충족" in x.value for x in at.success) and not [x for x in at.warning if "미충족" in x.value]

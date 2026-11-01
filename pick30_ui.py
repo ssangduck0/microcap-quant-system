@@ -3,6 +3,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import db
 
@@ -90,9 +91,9 @@ def why_box(rows: list[dict], w: dict) -> None:
                    "'임박 자료 없음'·'런웨이 미확인'이 많으면 자료 수집 문제, '45일 넘게 남음'이 많으면 정상적으로 기다리는 중이에요.")
         st.markdown("".join(ui.chip(f"{k} {v}", "red" if k in ("임박 자료 없음", "런웨이 미확인") and v else "gray")
                             for k, v in w.items() if k != "대기"), unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame([{"티커": r["ticker"], "목표": (r["target_name"] or "-") + (" (약)" if r.get("weak") else ""), "이유": r.get("why", ""), "런웨이(개월)": r["runway"], "가장 가까운 일": r["imm_kind"] or "-",
+        utb.frame(pd.DataFrame([{"티커": r["ticker"], "목표": (r["target_name"] or "-") + (" (약)" if r.get("weak") else ""), "이유": r.get("why", ""), "런웨이(개월)": r["runway"], "가장 가까운 일": r["imm_kind"] or "-",
                                     "D-": r["imm_days"], "압박": r["pressure"]} for r in wait]),
-                     hide_index=True, width="stretch", column_config={"런웨이(개월)": st.column_config.NumberColumn(format="%.1f")})
+                     hide_index=True, width="stretch", column_config={"런웨이(개월)": st.column_config.NumberColumn(format="%.1f")}, key="pk_why")
 
 
 def render() -> None:

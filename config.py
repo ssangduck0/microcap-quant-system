@@ -93,6 +93,9 @@ DAILY_CHUNK = 100                 # 1단계 일봉 다운로드 묶음 크기
 #   정밀 분석 상위 100 중 98개 같음 · 가격 차이 중앙 0.000%. 장중·프리마켓은 아직 시험 전이라 기본은 shadow(지금 방식으로 돌리며 비교만 기록).
 STAGE1_MODE = os.environ.get("STAGE1_MODE", "shadow").strip().lower()   # full=지금 방식 · shadow=지금 방식 + 빠른 모드 비교 기록 · fast=빠른 모드
 STAGE1_MODE_CHOICES = ["shadow", "fast", "full"]
+# 📋 표 모양(2026-11-02 · ui_table.frame): new = 글이 긴 목록을 안 눌리는 표로(줄바꿈 · 색 칩 · 휴대폰 카드 · 찾기 · CSV) · old = 예전 기본 데이터 표(배포 없이 비교·되돌리기)
+TABLE_STYLE = os.environ.get("TABLE_STYLE", "new").strip().lower()
+TABLE_STYLE_CHOICES = ["new", "old"]
 STAGE1_SPLIT_TOL = 0.10           # 시세의 전일 종가가 저장 일봉의 어제 종가와 이만큼 넘게 다르면(병합 당일 등) 그 종목만 야후 일봉
 STAGE1_CHECK_MIN_PASS = 95.0      # 매일 점검: 1단계 통과 겹침(%)이 이보다 낮으면 텔레그램 + 다음 점검까지 지금 방식으로
 STAGE1_CHECK_MIN_PICK = 90.0      # 매일 점검: 정밀 분석 대상 겹침(%) 최소(10/30 은 98%)
@@ -182,6 +185,7 @@ SETTINGS = {  # 이름: (종류, 최소, 최대, 묶음, 설명)
     "NEWS_TRANSLATE": (bool, None, None, "알림", "🌐 뉴스 한국어 번역(Haiku · AI 월 예산 안에서)"),
     "SEC_DIGEST": (bool, None, None, "알림", "📝 공시 한국어 요약·병합 일정·13D/13G 추출(Haiku · AI 월 예산 안에서)"),
     "FORENSIC_AI": (bool, None, None, "알림", "🧾 서버 자동 공시분석(덕구 포렌식 · 아침 갱신 때)"),
+    "TABLE_STYLE": (str, None, None, "기능", "📋 표 모양: new=안 눌리는 표(글이 긴 목록 · 줄바꿈 · 휴대폰은 카드 · 찾기 · CSV) · old=예전 기본 표"),
     "STAGE1_MODE": (str, None, None, "기능", "🛰 스캐너 1단계: shadow=지금 방식 + 빠른 모드 비교 기록 · fast=빠른 모드(일괄 시세 · 주기 약 12분→5분) · full=지금 방식만"),
     "FORENSIC_PER_RUN": (int, 1, 10, "숫자", "🧾 서버 공시분석: 하루에 분석할 종목 수(종목당 약 100~200원)"),
     "FUNDSCAN_AI_PER_DAY": (int, 0, 50, "숫자", "💰 펀드스캔: 규칙으로 행사가를 못 읽은 공시를 Haiku 로 다시 읽는 하루 상한(건당 약 2~5원)"),

@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import chartpop
 
@@ -378,8 +379,8 @@ def render_profit(t: str, r: dict, df1y, price, budget) -> None:
     with closing(db.connect()) as conn:
         q = piggy.quality(t, conn, df1y, _dilution().get(t))
         cb = piggy.close_bounce(conn, t)
-    st.dataframe(pd.DataFrame([{"기준": x["기준"], "결과": _q_label(x), "값": x["값"]} for x in q]),
-                 hide_index=True, width="stretch")
+    utb.frame(pd.DataFrame([{"기준": x["기준"], "결과": _q_label(x), "값": x["값"]} for x in q]),
+                 hide_index=True, width="stretch", key=f"pg_quality_{t}")
     if any(x["결과"] is None and x["기준"].startswith("②") for x in q):
         st.caption("② 펀더멘탈은 종목 리포트의 런웨이로 봅니다. 🗂 종목 리포트 탭에서 이 종목 리포트를 만들어 주세요.")
     zones = piggy.launch_zones(df1y)

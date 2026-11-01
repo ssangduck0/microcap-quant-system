@@ -4,6 +4,7 @@ from contextlib import closing
 import altair as alt
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import chartpop
 
@@ -150,8 +151,8 @@ def _vault(df: pd.DataFrame | None = None) -> None:
         st.caption(f"보관 {sm['tickers']:,}종목 · {sm['rows']:,}줄 ({sm['first'] or '-'} ~ {sm['last'] or '-'}) · 오늘 대상 {sm['watch']:,}종목 · 끊김 {sm['gone']:,}종목. "
                    "yfinance·토스 모두 상장폐지 종목의 과거 주가를 주지 않아서, 우리가 신호를 낸 종목만 미리 보관해요(매일 아침).")
         if gone:
-            st.dataframe(pd.DataFrame([{"티커": t, "마지막 거래일": g["last_date"], "마지막 종가($)": g["last_close"], "알아챈 날": g["detected"], "이유": g["reason"]}
+            utb.frame(pd.DataFrame([{"티커": t, "마지막 거래일": g["last_date"], "마지막 종가($)": g["last_close"], "알아챈 날": g["detected"], "이유": g["reason"]}
                                        for t, g in sorted(gone.items(), key=lambda kv: kv[1]["detected"] or "", reverse=True)]),
-                         hide_index=True, width="stretch", column_config={"마지막 종가($)": st.column_config.NumberColumn(format="%.4f")})
+                         hide_index=True, width="stretch", column_config={"마지막 종가($)": st.column_config.NumberColumn(format="%.4f")}, key="sb_gone")
         if adj:
             st.caption("병합으로 예전 보관 가격을 맞춘 기록: " + " · ".join(f"{t} ×{f:.3g}({str(a)[:10]}, {n}줄)" for t, a, f, n in adj))

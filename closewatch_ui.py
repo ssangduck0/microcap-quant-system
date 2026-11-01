@@ -4,6 +4,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import closewatch as cw
 import db
@@ -288,7 +289,7 @@ def render_today() -> None:
     (st.warning if bad else st.success)(msg + (f"  \n미충족: " + " / ".join(bad) if bad else ""))
     det = pd.DataFrame([{"그룹": {"pattern": "수급 패턴", "money": "돈 유입", "dilution": "희석 안전", "bonus": "베스트 가산", "info": "참고"}.get(i["group"], i["group"]), "항목(기준)": i["name"],
                          "현재 값": i["value"], "결과": {"pass": "✅ 충족", "fail": "❌ 미충족", "unknown": "➖ 확인 불가", "na": "· 해당 없음"}[i["status"]]} for i in ev["items"]])
-    st.dataframe(det, hide_index=True, width="stretch")
+    utb.frame(det, hide_index=True, width="stretch", key="cw_detail")
 
     fin = m.get("financing")
     if fin:
@@ -305,8 +306,8 @@ def render_today() -> None:
         st.markdown("**최근 워런트 관련 공시(SEC)**: " + " · ".join(f"[{x['date']} {x['form']}]({x['url']})" for x in wf[:5]) + "  \n키워드 판정이라 신규 발행인지 기존 워런트 언급인지 원문으로 확인하세요.")
     if m.get("halts"):
         st.markdown("**오늘 거래정지 이력(나스닥 피드)** — 상한/하한은 정지 직전 가격과 변동성 밴드 가격을 비교한 추정입니다.")
-        st.dataframe(pd.DataFrame([{"정지 시각(ET)": x["time"], "사유": x["reason"], "방향": x["dir"] or "-", "밴드 가격": x["threshold"], "직전 가격": x["price_before"],
-                                   "재개(ET)": x["resume"] or "정지 중"} for x in m["halts"]]), hide_index=True, width="stretch")
+        utb.frame(pd.DataFrame([{"정지 시각(ET)": x["time"], "사유": x["reason"], "방향": x["dir"] or "-", "밴드 가격": x["threshold"], "직전 가격": x["price_before"],
+                                   "재개(ET)": x["resume"] or "정지 중"} for x in m["halts"]]), hide_index=True, width="stretch", key="cw_halts")
     if m.get("short") is not None or m.get("short_note"):
         st.caption("공매도 거래량은 FINRA 장외(TRF) 거래 기준이라 **당일치는 장 마감 뒤에** 나옵니다(마감 전에는 직전 거래일까지). 대차 수수료·가능 수량은 장중에도 갱신됩니다. "
                    "공매도가 많다는 것이 반등 신호인지 추가 하락 신호인지는 검증된 바 없어 등급에는 반영하지 않았습니다.")

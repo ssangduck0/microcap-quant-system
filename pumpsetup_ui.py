@@ -4,6 +4,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import config
 import db
@@ -81,7 +82,7 @@ def render_panel(ticker: str, df: pd.DataFrame | None = None, key: str = "ps") -
     getattr(st, VERDICT_BOX.get(data["verdict"], "info"))(f"**{data['verdict']}** · 펌핑 셋업 신호 +{data['plus']} · 피할 신호 −{data['minus']}")
     rows = [{"구분": s["구분"], "신호": s["신호"], "결과": "➖" if s["결과"] is None else ("✅" if s["결과"] else "❌"), "값": s.get("값") or "", "근거": s.get("근거")}
             for s in data["signals"]]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={"근거": st.column_config.LinkColumn("원문", display_text="열기")})
+    utb.frame(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={"근거": st.column_config.LinkColumn("원문", display_text="열기")}, key=f"{key}_signals_{ticker}")
     tip_cards()
 
 

@@ -36,7 +36,7 @@ assert piggy.PROFIT_TIP_TITLE in notes_ui.list_titles()
 lst = [d.value for d in at.dataframe if "손익비 기준" in d.value.columns][0]; row = lst.set_index("티커").loc["RMSG"]; print(row[["손익비 기준", "발사대", "시드 대비(%)"]].to_dict())
 assert row["손익비 기준"] == "4/7 ❌✅✅✅✅➖➖" and row["발사대"].startswith("🎯") and abs(row["시드 대비(%)"] - 15.0) < 1e-9   # ① 1년 내내 $1 미만(180일 넘음) = 위험, ②~⑤ 통과 · ⑥⑦ 은 이력 없어 ➖(2026-10-27 기준 7개)
 assert any("시드의 10%를 넘는 종목: RMSG" in w.value for w in at.warning)
-q = [d.value for d in at.dataframe if "기준" in d.value.columns and "값" in d.value.columns][0].set_index("기준")
+q = at.session_state["_utb_pg_quality_RMSG"].set_index("기준")   # 2026-11-02: 손익비 기준 표는 안 눌리는 표(ui_table) — 화면에 넘긴 칸 그대로
 assert q.loc["① 상폐 위험 없음", "결과"] == "❌ 미달" and q.loc["② 펀더멘탈 단단(런웨이 12개월 이상)", "결과"] == "✅ 통과" and q.loc["④ 시장가 희석 없음(ATM·ELOC·전환사채 아님)", "결과"] == "✅ 통과"
 zones = [d.value for d in at.dataframe if "자리($)" in d.value.columns][0]; assert len(zones) >= 1 and zones["횟수"].sum() >= 3
 assert {m.label: m.value for m in at.metric}["다음날 갭 상승 비율"] == "67%"

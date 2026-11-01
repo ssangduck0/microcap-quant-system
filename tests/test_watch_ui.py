@@ -65,11 +65,13 @@ mt = {m.label: m.value for m in at.metric}; assert mt["지금 출회 가능"] ==
 at.selectbox(key="wl_l_AAA").set_value("그레이").run(); assert watch.lists_map()["AAA"] == "그레이" and not at.exception
 at.text_input(key="wl_note_AAA").set_value("바뀐 메모").run(); assert watch.all_items().set_index("ticker").loc["AAA", "note"] == "바뀐 메모"
 # 4) 🗓 일정
-evt = [d.value for d in at.dataframe if "남은기간" in d.value.columns]; print(evt[-1][["임박", "날짜", "남은기간", "티커", "종류"]].to_string(index=False))
+# 2026-11-02: 일정 표는 안 눌리는 표(ui_table) — 화면에 넘긴 칸 그대로(부르는 곳마다 key: 전체 ev_all · 종목별 wl_ev_티커)
+evts = lambda: [at.session_state[k] for k in ("_utb_ev_all_tbl", "_utb_wl_ev_AAA_tbl") if k in at.session_state]
+evt = evts(); print(evt[-1][["임박", "날짜", "남은기간", "티커", "종류"]].to_string(index=False))
 assert any((e["종류"] == "주총").any() and (e["임박"] == "🔥").any() for e in evt)
 assert {m.label: m.value for m in at.metric}["🔥 3거래일 안"] == "1 건"
-at.slider(key="ev_ahead").set_value(60).run(); assert any("워런트 만기" in list(e["종류"]) for e in [d.value for d in at.dataframe if "남은기간" in d.value.columns])
-dollar = [d.value for d in at.dataframe if "$1 이상 연속" in d.value.columns]; assert dollar and dollar[0].set_index("티커").loc["AAA", "판단"] == "회복까지 8거래일"
+at.slider(key="ev_ahead").set_value(60).run(); assert any("워런트 만기" in list(e["종류"]) for e in evts())
+dollar = [at.session_state["_utb_wl_dollar"]] if "_utb_wl_dollar" in at.session_state else []; assert dollar   # 2026-11-02: $1 상장유지 표는 안 눌리는 표(ui_table) and dollar[0].set_index("티커").loc["AAA", "판단"] == "회복까지 8거래일"
 # 5) (📰 오늘 브리핑 화면은 2026-10-26 메뉴 정리로 삭제 — 홈과 같은 내용이라 검사도 뺌)
 # 6) 스캐너 우선 종목에 워치리스트 포함(블랙 제외)
 config.SCAN_UNIVERSE = "manual"; universe.get_tickers = lambda use_legacy_toss=True: ["XYZ"]

@@ -3,6 +3,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import db
 import intel
@@ -77,7 +78,7 @@ def render_panel(ticker: str, df: pd.DataFrame | None, key: str = "sf") -> None:
         return
     box = STAGE_BOX.get(r["stage"], "caption")
     getattr(st, box)(f"지금 단계: **{r['stage']}**")
-    st.dataframe(pd.DataFrame([{**i, "결과": "✅" if i["결과"] else "❌"} for i in r["items"]]), hide_index=True, width="stretch")
+    utb.frame(pd.DataFrame([{**i, "결과": "✅" if i["결과"] else "❌"} for i in r["items"]]), hide_index=True, width="stretch", key=f"{key}_items_{ticker}")
     for h in r["hints"]:
         st.caption("보조 신호: " + h)
     tip_card()

@@ -5,6 +5,7 @@ from contextlib import closing
 import altair as alt
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import chartpop
 import chartview as cv
@@ -104,7 +105,7 @@ def section(t: str, df: pd.DataFrame | None, key: str = "cv", intraday: bool = T
     tb = checklist_table(a)
     good, bad = int((tb["상태"] == "✅").sum()), int((tb["상태"] == "❌").sum())
     st.caption(f"체크리스트 ✅ {good} · ❌ {bad} · 키쟈키라 = 급등주 눌림목 단타 관점 · ANO = 추세·다이버전스·캔들 관점 (참고용, 매수·매도 권유 아님)")
-    st.dataframe(tb, hide_index=True, width="stretch", column_config={"내용": st.column_config.TextColumn(width="large")})
+    utb.frame(tb, hide_index=True, width="stretch", column_config={"내용": st.column_config.TextColumn(width="large")}, key=f"{key}_check_{t}")
     m60, m5 = a.get("ma_60"), a.get("ma_5")
     bits = []
     if m60:
@@ -135,4 +136,4 @@ def recent_table(days: int = 7, key: str = "cv_recent") -> None:
         st.caption(f"최근 {days}일 기록된 📐 신호가 없어요(아침 작업·스캐너가 후보군을 점검해 기록해요).")
         return
     show = df.rename(columns={"date": "날짜", "ticker": "티커", "name": "신호", "price": "가격($)", "note": "내용"})[["날짜", "티커", "신호", "가격($)", "내용"]]
-    st.dataframe(show, hide_index=True, width="stretch", column_config={"가격($)": st.column_config.NumberColumn(format="%.4f"), "내용": st.column_config.TextColumn(width="large")})
+    utb.frame(show, hide_index=True, width="stretch", column_config={"가격($)": st.column_config.NumberColumn(format="%.4f"), "내용": st.column_config.TextColumn(width="large")}, key="cv_recent")

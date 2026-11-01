@@ -49,9 +49,10 @@ from streamlit.testing.v1 import AppTest
 APP = os.path.join(os.environ["QS_ROOT"], "dashboard.py")
 os.environ["QUANT_TEST_PAGE"] = "chart"
 at = AppTest.from_file(APP, default_timeout=240).run(); assert not at.exception, [e.value for e in at.exception]
-dfs = [d.value for d in at.dataframe]
-assert any("항목" in d.columns and "상태" in d.columns for d in dfs), [list(d.columns) for d in dfs]          # 체크리스트 표
-assert any("신호" in d.columns and (d["티커"] == "AAA").any() for d in dfs), [list(d.columns) for d in dfs]   # 최근 신호 표
+# 2026-11-02: 체크리스트·최근 신호 표는 안 눌리는 표(ui_table) — 칸 이름·값이 HTML 표에 그대로 있는지
+tbs = [m.value for m in at.markdown if '<div class="qk-st"><table>' in m.value]
+assert any(">항목</th>" in t and ">상태</th>" in t for t in tbs), [t[:300] for t in tbs]                      # 체크리스트 표
+assert any(">신호</th>" in t and ">AAA<" in t for t in tbs), [t[:300] for t in tbs]                            # 최근 신호 표
 caps = "\n".join(x.value for x in at.caption)
 assert "📐 기준봉" in caps and "체크리스트 ✅" in caps and "60분봉" in caps, caps
 html = "\n".join(m.value for m in at.markdown); assert "📐 급등 후 눌림 타점" in html and "60분봉 200선 돌파 지지" in html

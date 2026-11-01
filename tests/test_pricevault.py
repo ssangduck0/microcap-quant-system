@@ -185,6 +185,6 @@ at = AppTest.from_file(__import__("os").path.join(__import__("os").environ["QS_R
 assert not at.exception, [e.value for e in at.exception]
 assert "🗄 주가 보관소 · 주가가 끊긴 종목" in [e.label for e in at.expander]
 cap = " ".join(c.value for c in at.caption)
-assert "보관 " in cap and "SPL ×10" in cap and any("마지막 거래일" in d.value.columns for d in at.dataframe), cap[:600]
+assert "보관 " in cap and "SPL ×10" in cap and any(">마지막 거래일</th>" in m.value for m in at.markdown), cap[:600]   # 2026-11-02: 사라진 종목 표는 안 눌리는 표(ui_table)
 os.environ.pop("QUANT_TEST_PAGE", None)
 print("ALL OK")

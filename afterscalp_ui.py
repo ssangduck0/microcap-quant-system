@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import chartpop
 
@@ -90,7 +91,7 @@ def render_today() -> None:
     d = next(x[2] for x in rows if x[0] == t)
     st.markdown(f"#### 🌙 {t} — {d['stage']}")
     tosslink_ui.button(t, key="af")
-    st.dataframe(pd.DataFrame([{**i, "결과": "✅" if i["결과"] else "❌"} for i in d["items"]]), hide_index=True, width="stretch")
+    utb.frame(pd.DataFrame([{**i, "결과": "✅" if i["결과"] else "❌"} for i in d["items"]]), hide_index=True, width="stretch", key="af_items")
     ch = d.get("chart") or {}
     if ch.get("t"):  # utc=True(2026-11-01): 서머타임 끝나는 날 −04:00·−05:00 시각이 섞이면 '시간대 섞임' 오류로 화면이 깨졌음
         cdf =pd.DataFrame({"종가": ch["close"], "MA50": ch["ma50"], "MA200": ch["ma200"]}, index=pd.to_datetime(ch["t"], utc=True).tz_convert(KST).strftime("%H:%M"))

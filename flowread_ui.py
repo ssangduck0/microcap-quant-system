@@ -3,6 +3,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import db
 import flowread as fr
@@ -51,8 +52,8 @@ def render_panel(ticker: str, df: pd.DataFrame | None, key: str = "fr") -> None:
                  "아래 리스크를 철저히 확인하세요. · " + dm["text"])
     else:
         st.caption("다크풀: " + dm["text"] + (" — 판정에 필요한 값이 부족합니다" if dm["status"] is None else " — 덤핑·매집 의심 조건 아님"))
-    st.dataframe(pd.DataFrame([{"확인 항목": x["항목"], "결과": "➖ 확인 불가" if x["문제"] is None else ("❌ 문제" if x["문제"] else "✅ 없음"), "값": x["값"]} for x in rc]),
-                 hide_index=True, width="stretch")
+    utb.frame(pd.DataFrame([{"확인 항목": x["항목"], "결과": "➖ 확인 불가" if x["문제"] is None else ("❌ 문제" if x["문제"] else "✅ 없음"), "값": x["값"]} for x in rc]),
+                 hide_index=True, width="stretch", key=f"{key}_check_{ticker}")
     tip_card()
 
 

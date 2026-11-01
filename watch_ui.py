@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import config
 import db
@@ -120,7 +121,7 @@ def _removed_box() -> None:
         tb = pd.DataFrame([{"티커": r["ticker"], "뺀 날": str(r["removed_at"])[:10], "리스트": r["list"], "뺀 때 가격($)": r["price"], "지금($)": npx.get(r["ticker"]),
                             "뺀 뒤(%)": None if not r["price"] or not npx.get(r["ticker"]) else round((npx[r["ticker"]] / r["price"] - 1) * 100, 1),
                             "메모": r["note"] or ""} for r in rm.to_dict("records")])
-        st.dataframe(ui.tidy(tb), hide_index=True, width="stretch")
+        utb.frame(ui.tidy(tb), hide_index=True, width="stretch", key="wl_removed")
         a, b = st.columns([2, 1])
         pick = a.selectbox("되돌릴 종목", ["(선택)"] + list(rm["ticker"]), key="wl_restore_pick", label_visibility="collapsed")
         if b.button("↩ 되돌리기", key="wl_restore", disabled=pick == "(선택)", width="stretch") and pick != "(선택)":
@@ -307,8 +308,8 @@ def _events_table(df: pd.DataFrame, key: str) -> None:
     today = _today_et()
     v = df.assign(남은기간=[_dday(d, today) for d in df["date"]],
                   임박=["🔥" if (date.fromisoformat(d) >= today and watch.trading_days_between(today, date.fromisoformat(d)) <= 3) else "" for d in df["date"]])
-    st.dataframe(v[["임박", "date", "남은기간", "ticker", "kind", "title", "origin", "source"]].rename(columns={"date": "날짜", "ticker": "티커", "kind": "종류", "title": "내용", "origin": "구분"}),
-                 hide_index=True, width="stretch", column_config={"source": st.column_config.LinkColumn("원문", display_text="열기")})
+    utb.frame(v[["임박", "date", "남은기간", "ticker", "kind", "title", "origin", "source"]].rename(columns={"date": "날짜", "ticker": "티커", "kind": "종류", "title": "내용", "origin": "구분"}),
+                 hide_index=True, width="stretch", column_config={"source": st.column_config.LinkColumn("원문", display_text="열기")}, key=f"{key}_tbl")
     with st.expander("일정 삭제"):
         opts = {f"{r.date} {r.ticker} {r.kind} — {r.title[:40]}": r.id for r in df.itertuples()}
         pick = st.selectbox("삭제할 일정", list(opts), key=f"{key}_delpick")
@@ -372,7 +373,7 @@ def render_events() -> None:
                 f"미달 통지 대상(30거래일 이상)" if (s.get("below") or 0) >= 30 else f"$1 미만 {s.get('below')}거래일째")
             rows.append({"티커": t, "현재가($)": s["price"], "$1 이상 연속": s.get("above"), "$1 미만 연속": s.get("below"), "판단": note})
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={"현재가($)": st.column_config.NumberColumn(format="%.4f")})
+        utb.frame(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={"현재가($)": st.column_config.NumberColumn(format="%.4f")}, key="wl_dollar")
         st.caption("나스닥 최저호가 요건: 종가 $1 미만 30거래일 연속이면 미달 통지, 이후 종가 $1 이상 10거래일 연속이면 회복. 휴장일은 Yahoo 일봉 기준으로 셉니다.")
     else:
         st.caption("가격이 $2 미만인 워치리스트 종목이 없습니다.")

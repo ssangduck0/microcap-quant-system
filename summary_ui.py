@@ -6,6 +6,7 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import access
 import chartpop
@@ -73,7 +74,7 @@ def rule_cards(ck: dict, key: str = "rc") -> None:
     if pr.get("rows"):
         df = pd.DataFrame([{"날짜": r["date"], "사유": r["why"], "직전 종가($)": r["prev"], "고가($)": r["high"], "장중 %": r["hi_pct"], "종가 %": r["close_pct"],
                             "상승분 반납 %": None if r["fade"] is None else min(r["fade"], 2) * 100} for r in pr["rows"]])
-        st.dataframe(ui.tidy(df), hide_index=True, width="stretch", height=min(300, 38 + 35 * len(df)))
+        utb.frame(ui.tidy(df), hide_index=True, width="stretch", height=min(300, 38 + 35 * len(df)), key=f"{key}_pump_rows")
 
 
 def render(t: str, c: dict, df=None) -> None:
@@ -165,8 +166,8 @@ def render(t: str, c: dict, df=None) -> None:
         st.markdown("**📅 물량 달력** — 락업 해제 · 등록 효력 · 전환/행사 가능일")
         oc = [x for x in (s.get("overhang_calendar") or []) if isinstance(x, dict)]
         if oc:
-            st.dataframe(ui.tidy(pd.DataFrame([{"날짜": x.get("date") or "-", "D-day": _dday(x.get("date")), "무엇": x.get("what") or "", "주식(M)": _num(x.get("shares_m")), "메모": x.get("note") or ""} for x in oc])),
-                         hide_index=True, width="stretch", height=min(300, 38 + 35 * len(oc)))
+            utb.frame(ui.tidy(pd.DataFrame([{"날짜": x.get("date") or "-", "D-day": _dday(x.get("date")), "무엇": x.get("what") or "", "주식(M)": _num(x.get("shares_m")), "메모": x.get("note") or ""} for x in oc])),
+                         hide_index=True, width="stretch", height=min(300, 38 + 35 * len(oc)), key=f"sm_overhang_{t}")
         else:
             st.caption("예정된 물량 일정 없음(또는 미확인)")
         nd = s.get("next_deadline") or {}

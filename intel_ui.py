@@ -3,6 +3,7 @@ from contextlib import closing
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import config
 import db
@@ -117,8 +118,8 @@ def render_ticker(ticker: str, day: str | None = None, key: str = "intel") -> No
             st.caption("오늘 거래정지 없음" + (f" · 출처 {h.get('src')}" if h.get("src") else ""))
         else:
             st.metric("하킷 / 상킷", f"{h.get('halt_down', 0)} / {h.get('halt_up', 0)}", "🔴 지금 정지 중" if h.get("halt_active") else None, delta_color="off")
-            st.dataframe(pd.DataFrame([{"정지(ET)": x.get("time", ""), "사유": x.get("reason", x.get("code", "")), "방향": x.get("dir") or "-", "재개": x.get("resume") or ("호가만 재개" if x.get("quote_resumed") else "정지 중"),
-                                        "밴드 가격": x.get("threshold")} for x in h["halts"]]), hide_index=True, width="stretch")
+            utb.frame(pd.DataFrame([{"정지(ET)": x.get("time", ""), "사유": x.get("reason", x.get("code", "")), "방향": x.get("dir") or "-", "재개": x.get("resume") or ("호가만 재개" if x.get("quote_resumed") else "정지 중"),
+                                        "밴드 가격": x.get("threshold")} for x in h["halts"]]), hide_index=True, width="stretch", key=f"{key}_halts_{ticker}")
     st.markdown("**SEC 공시 (키워드 판정 — 원문을 꼭 확인하세요)**" + (f" · 확인 {_kst(data.get('sec_at'))} KST" if data.get("sec_at") else ""))
     s = data.get("sec")
     if s is None:

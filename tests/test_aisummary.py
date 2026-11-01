@@ -55,5 +55,7 @@ at = AppTest.from_file(__import__("os").path.join(__import__("os").environ["QS_R
 at.session_state["lookup_ticker"] = "NIVF"; at.run(); assert not at.exception, [e.value for e in at.exception]
 html = "\n".join(m.value for m in at.markdown); assert "일치율 70%" in html and "압박은 크지만 ATM 이 열려 있음" in html and "해소하려는 문제" in html
 assert any("어긋난 항목" in e.value and "ATM·ELOC" in e.value for e in at.error)
-tbl = [d.value for d in at.dataframe if "덕구 스캔(공시 원문)" in d.value.columns][0]; assert list(tbl["판정"]) == ["✅ 일치", "⚠️ 다름"] and "우리 시스템 데이터" in tbl.columns
+# 2026-11-02: 교차검증 표는 안 눌리는 표(ui_table) — 칸 이름·판정이 HTML 표에 그대로 있는지
+tb = [m.value for m in at.markdown if ">덕구 스캔(공시 원문)</th>" in m.value][0]
+assert ">우리 시스템 데이터</th>" in tb and tb.index("✅ 일치") < tb.index("⚠️ 다름") and "qk-green" in tb, tb[:600]
 os.environ.pop("QUANT_TEST_PAGE"); print("ALL OK")

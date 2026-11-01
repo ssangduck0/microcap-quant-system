@@ -59,11 +59,11 @@ at.slider(key="cw_decay").set_value(50).run()
 at.session_state["cw_table_pick"] = "CANDB"; at.run()
 w = [x.value for x in at.warning if "CANDB" in x.value]; print(w)
 assert w and "미충족" in w[0] and "체결강도 상승" in w[0] and "최근 30분 80% / 그 전 60분 100%" in w[0]
-det = [d.value for d in at.dataframe if "항목(기준)" in d.value.columns and "그룹" in d.value.columns][0]
+det = at.session_state["_utb_cw_detail"]   # 2026-11-02: 상세 체크리스트는 안 눌리는 표(ui_table) — 화면에 넘긴 칸 그대로
 assert list(det["그룹"].unique()) == ["수급 패턴", "돈 유입", "희석 안전", "베스트 가산", "참고"] and any("Fintel 미연동" in v for v in det["현재 값"])
 at.session_state["cw_table_pick"] = "BESTA"; at.run()
 assert any("sec.gov/x" in x.value and "사모(PIPE)" in x.value for x in at.markdown) and any("호가" in x.value for x in at.markdown)           # 자금조달 근거 링크 + 호가 차트
-assert any("FINRA·IBKR" in str(d.value.values) for d in at.dataframe)
+assert "FINRA·IBKR" in str(at.session_state["_utb_cw_detail"].values)
 # 참고용 오래된 보드는 접힌 expander 안에서 계속 동작
 assert not at.exception and any("퀀트 스냅샷 기준 후보 보드" in e.label for e in at.expander)
 # 새 항목: 표 열과 상세 패널
@@ -74,10 +74,10 @@ assert (bb["워런트 없음"], bb["하킷"], bb["공매도 압력"]) == ("✅",
 assert t[t["티커"] == "NOSEC"].iloc[0]["워런트 없음"] == "➖" and t[t["티커"] == "NOSEC"].iloc[0]["하킷"] == "➖"
 at.checkbox(key="cw_hide").set_value(True).run()
 at.session_state["cw_table_pick"] = "BESTA"; at.run()
-det = [d.value for d in at.dataframe if "항목(기준)" in d.value.columns][0]
+det = at.session_state["_utb_cw_detail"]
 vals = dict(zip(det["항목(기준)"].str[:6], det["현재 값"])); print(list(det["항목(기준)"]))
 assert any("하한(하킷) 1회" in v for v in det["현재 값"]) and any("대차 수수료 45.5%" in v for v in det["현재 값"]) and any("토스 웹소켓" in v for v in det["현재 값"])
-hd = [d.value for d in at.dataframe if "정지 시각(ET)" in d.value.columns]
+hd = [at.session_state["_utb_cw_halts"]] if "_utb_cw_halts" in at.session_state else []
 assert hd and hd[0].iloc[0]["방향"] == "하한" and hd[0].iloc[0]["재개(ET)"] == "10:20:30" and hd[0].iloc[0]["밴드 가격"] == 7.5       # 정지 이력 표
 assert any("FINRA" in c.value for c in at.caption) and not at.exception
 at.session_state["cw_table_pick"] = "CANDB"; at.run()

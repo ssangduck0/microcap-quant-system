@@ -51,8 +51,9 @@ print(dict(zip(wl["티커"], wl["분산·털기"])), dict(zip(pg["티커"], pg["
 assert dict(zip(wl["티커"], wl["분산·털기"]))["DISTX"] == "🔻 분산 — 내릴 쪽" and dict(zip(pg["티커"], pg["분산·털기"]))["SHAKEX"] == "🔺 털기 — 다음날 상승 마감 확인 필요"
 md = [m.value for m in at.markdown]; assert any("📈 DISTX 더 오를까 더 내릴까" in x for x in md) and any("📈 SHAKEX 더 오를까 더 내릴까" in x for x in md)
 assert any("최근 판정: **🔻 분산" in e.value for e in at.error)
-risk = [d.value for d in at.dataframe if "확인 항목" in d.value.columns]
-dx = [r for r in risk if (r["값"] == "ATM").any()]; assert dx and dx[0].set_index("확인 항목").loc["희석 리스크: ATM·ELOC·전환사채", "결과"] == "❌ 문제"
+# 2026-11-02: 확인 항목 표는 안 눌리는 표(ui_table) — '희석 리스크' 줄이 값 ATM · 결과 '❌ 문제'(빨간 칩)로 그려졌는지
+rows = [r for m in at.markdown if ">확인 항목</th>" in m.value for r in m.value.split("<tr>")]
+dx = [r for r in rows if "희석 리스크: ATM·ELOC·전환사채" in r and ">ATM<" in r]; assert dx and "❌ 문제" in dx[0] and "qk-red" in dx[0], rows[:3]
 sec_tbl = [d.value for d in at.dataframe if "판정" in d.value.columns and "5일 뒤 종가(%)" in d.value.columns][0]; assert sec_tbl.iloc[0]["티커"] == "DISTX"
 assert any("📈 분산·털기" in x.label for x in at.tabs)
 at.slider(key="fr_spike").set_value(8.0).run(); assert not at.exception

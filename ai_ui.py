@@ -3,6 +3,7 @@ import os
 
 import pandas as pd
 import streamlit as st
+import ui_table as utb
 
 import aisummary as ai
 import ui_kit as ui
@@ -77,8 +78,8 @@ def render_check(ticker: str, key: str = "ai", show_button: bool = True) -> None
                                "#30A46C" if (rate or 0) >= 80 else "#F76B15" if (rate or 0) >= 60 else "#E5484D", "일치율(시점 차이·한쪽만 제외)"), unsafe_allow_html=True)
         items = chk.get("항목") or []
         if items:
-            st.dataframe(pd.DataFrame([{"항목": x.get("이름"), "판정": ICON.get(x.get("판정"), x.get("판정")), "우리 시스템 데이터": x.get("A"),
-                                        "덕구 스캔(공시 원문)": x.get("B"), "메모": x.get("메모")} for x in items]), hide_index=True, width="stretch")
+            utb.frame(pd.DataFrame([{"항목": x.get("이름"), "판정": ICON.get(x.get("판정"), x.get("판정")), "우리 시스템 데이터": x.get("A"),
+                                        "덕구 스캔(공시 원문)": x.get("B"), "메모": x.get("메모")} for x in items]), hide_index=True, width="stretch", key=f"{key}_cross_{ticker}")
         bad = ai.conflicts(chk)
         if bad:
             st.error("⚠️ 어긋난 항목 — 원문 확인 필요: " + ", ".join(x.get("이름", "") for x in bad))

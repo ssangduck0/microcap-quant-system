@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import ui_table as utb
 
 import analytics
 import cases_ui
@@ -899,7 +900,7 @@ def _snapshot_board():
             st.warning(f"**{r['ticker']}** 미충족 {len(failed)}개: " + " / ".join(failed))
         else:
             st.success(f"**{r['ticker']}** 체크리스트 {len(items)}개 모두 충족")
-        st.dataframe(items, hide_index=True, width="stretch")
+        utb.frame(items, hide_index=True, width="stretch", key="close_items")
         st.caption("점수·참고가는 규칙 기반 계산값이며 투자 권유가 아닙니다. 종목 상세·근거 공시는 📊 퀀트 스냅샷 탭, 선택한 후보의 이후 결과는 📒 발견 종목 추적 탭에서 확인하세요.")
     if not cut.empty:
         with st.expander(f"제외된 종목 {len(cut)}개 보기 (ATM 정황 — 키워드 검출이라 잔여 한도는 원문 확인 필요)"):
@@ -1073,11 +1074,11 @@ def _render_report() -> None:
             tbl = pd.DataFrame({"날짜": ev["date"], "형태": ev["tags"].map(lambda t: ", ".join(report.TAG_KO.get(x, x) for x in t)),
                                 "서류": ev["form"], "직전 20일(%)": ev["pre20_pct"], "거래량 배수": ev["vol_mult"],
                                 "5일 후(%)": ev["after5_pct"], "원문": ev["url"]})
-            st.dataframe(tbl, hide_index=True, width="stretch", column_config={
+            utb.frame(tbl, hide_index=True, width="stretch", column_config={
                 "원문": st.column_config.LinkColumn(display_text="열기"),
                 "직전 20일(%)": st.column_config.NumberColumn(format="%.1f", help="공시 전날 종가 / 20거래일 전 종가"),
                 "거래량 배수": st.column_config.NumberColumn(format="%.1f", help="공시 직전 5일 최대 거래량 / 그 앞 20일 평균"),
-                "5일 후(%)": st.column_config.NumberColumn(format="%.1f", help="공시일+5거래일 종가 / 공시 전날 종가")})
+                "5일 후(%)": st.column_config.NumberColumn(format="%.1f", help="공시일+5거래일 종가 / 공시 전날 종가")}, key="co_filing_react")
             st.caption("공시 본문 키워드로 자동 분류한 결과라 형태가 애매하면 원문 링크로 확인하세요. 워런트·전환사채의 구체적 수량은 제공하지 않습니다.")
             if fin["summary"].get("errors"):
                 st.warning(f"공시 {fin['summary']['errors']}건은 본문 확인에 실패해 빠져 있습니다.")
@@ -1141,8 +1142,8 @@ def _render_report() -> None:
             tdf = pd.DataFrame(tl)
             if "url" not in tdf:
                 tdf["url"] = None
-            st.dataframe(tdf.rename(columns={"date": "날짜", "type": "구분", "text": "내용", "url": "원문"}),
-                         hide_index=True, width="stretch", column_config={"원문": st.column_config.LinkColumn(display_text="열기")})
+            utb.frame(tdf.rename(columns={"date": "날짜", "type": "구분", "text": "내용", "url": "원문"}),
+                         hide_index=True, width="stretch", column_config={"원문": st.column_config.LinkColumn(display_text="열기")}, key="co_timeline")
         else:
             st.caption("표시할 이벤트가 없습니다.")
 
